@@ -63,10 +63,9 @@ services:
       # OPENBACKUP_S3_ACCESS_KEY: ...
       # OPENBACKUP_S3_SECRET_KEY: ...
 
-    # The image declares its own healthcheck; this only shortens the startup grace
-    # period so `docker compose up --wait` returns quickly.
-    healthcheck:
-      start_period: 5s
+    # The image already declares a healthcheck (it probes /api/v1/health using the
+    # binary itself, since the image has no shell), so `docker compose up --wait`
+    # waits for the server to actually serve.
 
     # A backup server is not a place for surprises: cap what the container can do.
     security_opt:

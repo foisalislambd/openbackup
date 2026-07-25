@@ -28,14 +28,24 @@ func Handler() http.Handler {
 	if err != nil {
 		return nil
 	}
-	if _, err := fs.Stat(sub, "index.html"); err != nil {
-		return nil
-	}
-	return &spaHandler{fs: sub, files: http.FileServer(http.FS(sub))}
+	return HandlerFor(sub)
 }
 
-// spaHandler serves static assets and falls back to index.html for client-side
-// routes, so a deep link such as /devices/dev_123 survives a page refresh.
+// HandlerFor serves a dashboard export from any filesystem, and returns nil when
+// the filesystem holds no dashboard. Taking an fs.FS keeps the routing rules
+// testable without a built dashboard in the tree.
+func HandlerFor(fsys fs.FS) http.Handler {
+	if _, err := fs.Stat(fsys, "index.html"); err != nil {
+		return nil
+	}
+	return &spaHandler{fs: fsys, files: http.FileServer(http.FS(fsys))}
+}
+
+// spaHandler serves the exported dashboard.
+//
+// The export is one HTML file per route rather than a single shell, so a request
+// for /devices must find devices.html. That is what makes a bookmark or a refresh
+// land on the right page instead of on the overview.
 type spaHandler struct {
 	fs    fs.FS
 	files http.Handler
@@ -47,34 +57,39 @@ func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		name = "index.html"
 	}
 
-	if info, err := fs.Stat(h.fs, name); err == nil && !info.IsDir() {
-		// Hashed build assets are immutable; everything else must revalidate so
-		// a deployed update is picked up on the next load.
-		if strings.HasPrefix(name, "_next/static/") {
+	// Candidates in the order a static host would try them: the exact file, the
+	// route's HTML file, then a directory index.
+	for _, candidate := range []string{name, name + ".html", path.Join(name, "index.html")} {
+		info, err := fs.Stat(h.fs, candidate)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		// Hashed build assets are immutable; everything else must revalidate so a
+		// deployed update is picked up on the next load.
+		if strings.HasPrefix(candidate, "_next/static/") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {
 			w.Header().Set("Cache-Control", "no-cache")
 		}
-		h.files.ServeHTTP(w, r)
+		req := r
+		if candidate != name {
+			req = r.Clone(r.Context())
+			req.URL.Path = "/" + candidate
+		}
+		h.files.ServeHTTP(w, req)
 		return
 	}
 
-	// Static export writes /devices as devices.html; try that before falling
-	// back to the SPA shell.
-	if _, err := fs.Stat(h.fs, name+".html"); err == nil {
-		r2 := r.Clone(r.Context())
-		r2.URL.Path = "/" + name + ".html"
-		w.Header().Set("Cache-Control", "no-cache")
-		h.files.ServeHTTP(w, r2)
-		return
-	}
-
-	index, err := fs.ReadFile(h.fs, "index.html")
+	// Nothing matched. Serve the exported not-found page with a 404 status:
+	// answering 200 with the overview page would tell a browser, a crawler and a
+	// monitoring check alike that a mistyped URL was fine.
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	page, err := fs.ReadFile(h.fs, "404.html")
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	_, _ = w.Write(index)
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = w.Write(page)
 }

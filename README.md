@@ -143,7 +143,7 @@ openbackup doctor                             # diagnose problems
 
 ## Building from source
 
-Needs Go 1.25+ and Node 22+.
+Needs Go 1.26+ and Node 22+.
 
 ```bash
 make            # build the dashboard, embed it, build the binaries
