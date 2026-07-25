@@ -3,15 +3,16 @@
 /**
  * Shell holds the navigation and the authentication gate.
  *
- * Because the dashboard is a static export, there is no server-side redirect to
- * a login page: the first thing the app does is ask the server whether it needs
- * setting up, whether the visitor is signed in, and only then renders anything.
+ * Because the dashboard is a static export there is no server-side redirect to a
+ * login page: the first thing the app does is ask the server whether it needs
+ * setting up, whether the visitor is signed in, and only then render anything.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { api, ApiError, type Bootstrap } from '@/lib/api'
+import { api, type Bootstrap } from '@/lib/api'
+import { message, useLoader } from '@/lib/use-loader'
 import { Button, ErrorNote, Field, inputClass, Spinner } from './ui'
 
 const navigation = [
@@ -23,21 +24,8 @@ const navigation = [
 ]
 
 export function Shell({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<Bootstrap | null>(null)
-  const [error, setError] = useState<string>()
   const pathname = usePathname()
-
-  const load = useCallback(async () => {
-    try {
-      setState(await api.bootstrap())
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Cannot reach the server')
-    }
-  }, [])
-
-  useEffect(() => {
-    void load()
-  }, [load])
+  const { data: state, error, loading, reload } = useLoader<Bootstrap>(() => api.bootstrap())
 
   if (error) {
     return (
@@ -46,7 +34,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </main>
     )
   }
-  if (!state) {
+  if (loading || !state) {
     return (
       <main className="mx-auto max-w-md p-6">
         <Spinner label="Starting" />
@@ -54,10 +42,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
     )
   }
   if (state.needs_setup) {
-    return <FirstRun onDone={load} />
+    return <FirstRun onDone={reload} />
   }
   if (!state.authenticated) {
-    return <SignIn onDone={load} />
+    return <SignIn onDone={reload} />
   }
 
   return (
@@ -87,13 +75,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </Link>
             )
           })}
-          <SignOutButton onDone={load} />
+          <SignOutButton onDone={reload} />
         </nav>
       </header>
       <main className="flex-1">{children}</main>
-      <footer className="pb-2 text-xs text-[var(--color-ink-muted)]">
-        OpenBackup — your data, your server.
-      </footer>
+      <footer className="pb-2 text-xs text-[var(--color-ink-muted)]">OpenBackup — your data, your server.</footer>
     </div>
   )
 }
@@ -119,10 +105,11 @@ function SignOutButton({ onDone }: { onDone: () => void }) {
   return (
     <Button
       variant="ghost"
-      onClick={async () => {
-        await api.logout()
-        router.push('/')
-        onDone()
+      onClick={() => {
+        void api.logout().then(() => {
+          router.push('/')
+          onDone()
+        })
       }}
     >
       Sign out
@@ -141,18 +128,17 @@ function FirstRun({ onDone }: { onDone: () => void }) {
     <main className="mx-auto grid min-h-screen max-w-md place-items-center p-6">
       <form
         className="w-full space-y-4"
-        onSubmit={async (event) => {
+        onSubmit={(event) => {
           event.preventDefault()
           setBusy(true)
           setError(undefined)
-          try {
-            await api.setup(email, password)
-            onDone()
-          } catch (err) {
-            setError(err instanceof ApiError ? err.message : 'Could not create the account')
-          } finally {
-            setBusy(false)
-          }
+          api.setup(email, password).then(
+            () => onDone(),
+            (err: unknown) => {
+              setError(message(err, 'Could not create the account'))
+              setBusy(false)
+            },
+          )
         }}
       >
         <div className="flex items-center gap-3">
@@ -202,18 +188,17 @@ function SignIn({ onDone }: { onDone: () => void }) {
     <main className="mx-auto grid min-h-screen max-w-md place-items-center p-6">
       <form
         className="w-full space-y-4"
-        onSubmit={async (event) => {
+        onSubmit={(event) => {
           event.preventDefault()
           setBusy(true)
           setError(undefined)
-          try {
-            await api.login(email, password)
-            onDone()
-          } catch (err) {
-            setError(err instanceof ApiError ? err.message : 'Could not sign in')
-          } finally {
-            setBusy(false)
-          }
+          api.login(email, password).then(
+            () => onDone(),
+            (err: unknown) => {
+              setError(message(err, 'Could not sign in'))
+              setBusy(false)
+            },
+          )
         }}
       >
         <div className="flex items-center gap-3">

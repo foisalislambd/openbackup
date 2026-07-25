@@ -7,31 +7,18 @@
  * explanation of the ignore rules in practice rather than in theory.
  */
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { api, type ActivityEvent } from '@/lib/api'
 import { absolute, relative } from '@/lib/format'
+import { useLoader } from '@/lib/use-loader'
 import { Badge, Card, Empty, ErrorNote, Spinner } from '@/components/ui'
 
 export default function ActivityPage() {
-  const [events, setEvents] = useState<ActivityEvent[]>()
-  const [error, setError] = useState<string>()
+  const { data: events, error, loading } = useLoader<ActivityEvent[]>(() => api.events(200), { pollMs: 20000 })
   const [filter, setFilter] = useState<'all' | 'problems'>('all')
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        setEvents(await api.events(200))
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not load the activity log')
-      }
-    }
-    void load()
-    const timer = setInterval(load, 20000)
-    return () => clearInterval(timer)
-  }, [])
-
   if (error) return <ErrorNote>{error}</ErrorNote>
-  if (!events) return <Spinner />
+  if (loading || !events) return <Spinner />
 
   const shown = filter === 'all' ? events : events.filter((e) => e.level === 'warn' || e.level === 'error')
 

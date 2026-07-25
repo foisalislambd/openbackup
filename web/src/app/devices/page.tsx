@@ -1,96 +1,75 @@
 'use client'
 
 /**
- * Devices is where a machine is added, and where the connection code is shown.
- * The code is displayed exactly once, next to the command to paste it into, so
- * connecting a computer is a copy and a paste rather than a documentation hunt.
+ * Devices is where a machine is added, and where the connection code appears.
+ * The code is shown next to the exact command it goes into, so connecting a
+ * computer is a copy and a paste rather than a documentation hunt.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { api, type Device } from '@/lib/api'
 import { bytes, count, platformLabel, relative } from '@/lib/format'
-import { Badge, Button, Card, Empty, ErrorNote, Field, inputClass, Spinner } from '@/components/ui'
+import { useAction, useLoader } from '@/lib/use-loader'
+import { Badge, Button, Card, Empty, ErrorNote, inputClass, Spinner } from '@/components/ui'
 import { HealthBadge } from '../page'
 
 export default function DevicesPage() {
-  const [devices, setDevices] = useState<Device[]>()
-  const [error, setError] = useState<string>()
-  const [invite, setInvite] = useState<{ code: string; server_url: string; expires_at: string }>()
-  const [busy, setBusy] = useState(false)
-
-  const load = useCallback(async () => {
-    try {
-      setDevices(await api.devices())
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load devices')
-    }
-  }, [])
-
-  useEffect(() => {
-    void load()
-    const timer = setInterval(load, 15000)
-    return () => clearInterval(timer)
-  }, [load])
-
-  const addDevice = async () => {
-    setBusy(true)
-    setError(undefined)
-    try {
-      setInvite(await api.createJoinToken(''))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create a code')
-    } finally {
-      setBusy(false)
-    }
-  }
+  const { data: devices, error, loading, reload } = useLoader<Device[]>(() => api.devices(), { pollMs: 15000 })
+  const invite = useAction()
+  const [code, setCode] = useState<{ code: string; server_url: string; expires_at: string }>()
 
   return (
     <div className="space-y-6">
       {error && <ErrorNote>{error}</ErrorNote>}
+      {invite.error && <ErrorNote>{invite.error}</ErrorNote>}
 
       <Card
         title="Add a device"
         action={
-          <Button variant="primary" onClick={addDevice} disabled={busy}>
-            {busy ? 'Creating…' : 'Create connection code'}
+          <Button
+            variant="primary"
+            disabled={invite.busy === 'create'}
+            onClick={() => {
+              void invite.run('create', async () => setCode(await api.createJoinToken('')))
+            }}
+          >
+            {invite.busy === 'create' ? 'Creating…' : 'Create connection code'}
           </Button>
         }
       >
-        {invite ? (
+        {code ? (
           <div className="space-y-3">
             <p className="text-sm">
-              Run this on the computer you want to back up. The code works once and expires{' '}
-              {relative(invite.expires_at).replace(' ago', '')} from now.
+              Run this on the computer you want to back up. The code works once, and expires in about{' '}
+              {relative(code.expires_at).replace(' ago', '')}.
             </p>
-            <CopyBlock
-              text={`openbackup connect --server ${invite.server_url} --code ${invite.code}`}
-            />
+            <CopyBlock text={`openbackup connect --server ${code.server_url} --code ${code.code}`} />
             <p className="text-xs text-[var(--color-ink-muted)]">
               Not installed yet? On Linux and macOS:{' '}
               <code className="rounded bg-[var(--color-surface-muted)] px-1 py-0.5">
-                curl -fsSL {invite.server_url}/install.sh | sh
+                curl -fsSL {code.server_url}/install.sh | sh
               </code>
               . On Windows, download the installer from the releases page.
             </p>
           </div>
         ) : (
           <p className="text-sm text-[var(--color-ink-muted)]">
-            Each device gets its own one-time code. Nothing else needs configuring: the agent finds your
-            documents, pictures and other personal folders by itself, and skips system files and things like{' '}
+            Each device gets its own one-time code. Nothing else needs configuring: the agent finds your documents,
+            pictures and other personal folders by itself, and skips system files and things like{' '}
             <code className="rounded bg-[var(--color-surface-muted)] px-1 py-0.5 text-xs">node_modules</code>.
           </p>
         )}
       </Card>
 
       <Card title="Connected devices">
-        {!devices ? (
+        {loading ? (
           <Spinner />
-        ) : devices.length === 0 ? (
+        ) : !devices || devices.length === 0 ? (
           <Empty title="No devices yet" hint="Create a connection code above." />
         ) : (
           <ul className="divide-y divide-[var(--color-border-subtle)]">
             {devices.map((device) => (
-              <DeviceRow key={device.id} device={device} onChanged={load} />
+              <DeviceRow key={device.id} device={device} onChanged={reload} />
             ))}
           </ul>
         )}
@@ -102,21 +81,7 @@ export default function DevicesPage() {
 function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => void }) {
   const [renaming, setRenaming] = useState(false)
   const [name, setName] = useState(device.name)
-  const [busy, setBusy] = useState<string>()
-  const [error, setError] = useState<string>()
-
-  const act = async (label: string, fn: () => Promise<unknown>) => {
-    setBusy(label)
-    setError(undefined)
-    try {
-      await fn()
-      onChanged()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'That did not work')
-    } finally {
-      setBusy(undefined)
-    }
-  }
+  const { busy, error, run } = useAction()
 
   return (
     <li className="py-4 first:pt-0 last:pb-0">
@@ -127,10 +92,14 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
               className="flex items-center gap-2"
               onSubmit={(event) => {
                 event.preventDefault()
-                void act('rename', async () => {
-                  await api.renameDevice(device.id, name)
-                  setRenaming(false)
-                })
+                void run(
+                  'rename',
+                  async () => {
+                    await api.renameDevice(device.id, name)
+                    setRenaming(false)
+                  },
+                  onChanged,
+                )
               }}
             >
               <input className={`${inputClass} mt-0 w-48`} value={name} onChange={(e) => setName(e.target.value)} />
@@ -162,15 +131,24 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={() => act('backup', () => api.sendCommand(device.id, 'backup_now'))} disabled={!!busy}>
+          <Button
+            disabled={!!busy}
+            onClick={() => void run('backup', () => api.sendCommand(device.id, 'backup_now'), onChanged)}
+          >
             {busy === 'backup' ? 'Sending…' : 'Back up now'}
           </Button>
           {device.state === 'paused' ? (
-            <Button onClick={() => act('resume', () => api.sendCommand(device.id, 'resume'))} disabled={!!busy}>
+            <Button
+              disabled={!!busy}
+              onClick={() => void run('resume', () => api.sendCommand(device.id, 'resume'), onChanged)}
+            >
               Resume
             </Button>
           ) : (
-            <Button onClick={() => act('pause', () => api.sendCommand(device.id, 'pause'))} disabled={!!busy}>
+            <Button
+              disabled={!!busy}
+              onClick={() => void run('pause', () => api.sendCommand(device.id, 'pause'), onChanged)}
+            >
               Pause
             </Button>
           )}
@@ -188,7 +166,7 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
               ) {
                 return
               }
-              void act('remove', () => api.removeDevice(device.id))
+              void run('remove', () => api.removeDevice(device.id), onChanged)
             }}
           >
             Remove
@@ -205,10 +183,11 @@ function CopyBlock({ text }: { text: string }) {
     <div className="flex items-center gap-2 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-3">
       <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs">{text}</code>
       <Button
-        onClick={async () => {
-          await navigator.clipboard.writeText(text)
-          setCopied(true)
-          setTimeout(() => setCopied(false), 2000)
+        onClick={() => {
+          void navigator.clipboard.writeText(text).then(() => {
+            setCopied(true)
+            setTimeout(() => setCopied(false), 2000)
+          })
         }}
       >
         {copied ? 'Copied' : 'Copy'}

@@ -1,9 +1,13 @@
 @import 'tailwindcss';
 
 /*
- * The palette is intentionally calm. A backup dashboard is looked at when
- * someone is worried, so the default state should read as "everything is fine"
- * without shouting, and problems should be the only thing using a warm colour.
+ * The palette is intentionally calm. A backup dashboard gets opened when someone
+ * is worried, so the resting state should read as "everything is fine" without
+ * shouting, and a problem should be the only thing using a warm colour.
+ *
+ * Colours are declared once as theme tokens and then re-pointed for dark mode:
+ * Tailwind v4 resolves @theme at build time, so the dark values have to arrive
+ * as plain custom properties rather than a second @theme block.
  */
 @theme {
   --color-surface: oklch(100% 0 0);
@@ -22,14 +26,17 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  @theme {
+  :root {
     --color-surface: oklch(21% 0.015 265);
-    --color-surface-muted: oklch(25% 0.015 265);
+    --color-surface-muted: oklch(17% 0.012 265);
     --color-border-subtle: oklch(32% 0.015 265);
     --color-ink: oklch(96% 0.005 260);
     --color-ink-muted: oklch(72% 0.015 260);
     --color-brand: oklch(70% 0.14 250);
     --color-brand-soft: oklch(30% 0.05 250);
+    --color-good: oklch(70% 0.14 155);
+    --color-warn: oklch(78% 0.15 75);
+    --color-bad: oklch(66% 0.18 25);
   }
 }
 
@@ -44,4 +51,15 @@ body {
 /* Numbers in tables must line up, or comparing sizes becomes guesswork. */
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/* Respect a user's reduced-motion preference: the only animation here is a
+   loading spinner, and it is not worth making anyone ill. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }

@@ -2,44 +2,34 @@
 
 /**
  * Overview answers the only question most visitors have: is my data safe right
- * now? The health of the least healthy device is therefore the first thing on
- * the page, ahead of any storage statistics.
+ * now? The health of the least healthy device therefore comes first, ahead of any
+ * storage statistics.
  */
 
-import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { api, type Device, type Snapshot, type Usage } from '@/lib/api'
 import { bytes, count, platformLabel, relative } from '@/lib/format'
+import { useLoader } from '@/lib/use-loader'
 import { Badge, Card, Empty, ErrorNote, Meter, Spinner, Stat } from '@/components/ui'
 
-export default function OverviewPage() {
-  const [devices, setDevices] = useState<Device[]>()
-  const [usage, setUsage] = useState<Usage>()
-  const [snapshots, setSnapshots] = useState<Snapshot[]>()
-  const [error, setError] = useState<string>()
+type Overview = { devices: Device[]; usage: Usage; snapshots: Snapshot[] }
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [d, u, s] = await Promise.all([api.devices(), api.usage(), api.snapshots()])
-        setDevices(d)
-        setUsage(u)
-        setSnapshots(s)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not load the dashboard')
-      }
-    }
-    void load()
+export default function OverviewPage() {
+  const { data, error, loading } = useLoader<Overview>(
+    async () => {
+      const [devices, usage, snapshots] = await Promise.all([api.devices(), api.usage(), api.snapshots()])
+      return { devices, usage, snapshots }
+    },
     // Refresh while the page is open so a running backup is visible.
-    const timer = setInterval(load, 15000)
-    return () => clearInterval(timer)
-  }, [])
+    { pollMs: 15000 },
+  )
 
   if (error) return <ErrorNote>{error}</ErrorNote>
-  if (!devices || !usage) return <Spinner />
+  if (loading || !data) return <Spinner />
 
+  const { devices, usage, snapshots } = data
   const problems = devices.filter((d) => d.health === 'error' || d.health === 'stale')
-  const newest = snapshots?.reduce<Snapshot | undefined>(
+  const newest = snapshots.reduce<Snapshot | undefined>(
     (best, s) => (s.status === 'complete' && (!best || s.started_at > best.started_at) ? s : best),
     undefined,
   )
@@ -71,10 +61,7 @@ export default function OverviewPage() {
       <div className="grid gap-6 lg:grid-cols-3">
         <Card title="Devices" className="lg:col-span-2">
           {devices.length === 0 ? (
-            <Empty
-              title="No devices yet"
-              hint="Add one from the Devices page to get a connection code."
-            />
+            <Empty title="No devices yet" hint="Add one from the Devices page to get a connection code." />
           ) : (
             <ul className="divide-y divide-[var(--color-border-subtle)]">
               {devices.map((device) => (
@@ -134,8 +121,15 @@ export default function OverviewPage() {
             </div>
           </Card>
 
-          <Card title="Latest backups" action={<Link className="text-xs text-[var(--color-brand)]" href="/backups">All</Link>}>
-            {!snapshots || snapshots.length === 0 ? (
+          <Card
+            title="Latest backups"
+            action={
+              <Link className="text-xs text-[var(--color-brand)]" href="/backups">
+                All
+              </Link>
+            }
+          >
+            {snapshots.length === 0 ? (
               <Empty title="Nothing backed up yet" />
             ) : (
               <ul className="space-y-2.5">
@@ -162,14 +156,18 @@ export default function OverviewPage() {
 }
 
 /**
- * HealthBanner states the overall situation in one sentence. Users should never
- * have to interpret a table to find out whether their backups are working.
+ * HealthBanner states the overall situation in one sentence. Nobody should have
+ * to interpret a table to find out whether their backups are working.
  */
 function HealthBanner({ devices, newest }: { devices: Device[]; newest?: Snapshot }) {
   if (devices.length === 0) {
     return (
       <Banner tone="brand" title="No devices are connected yet.">
-        Go to <Link className="underline" href="/devices">Devices</Link> to create a connection code, then run{' '}
+        Go to{' '}
+        <Link className="underline" href="/devices">
+          Devices
+        </Link>{' '}
+        to create a connection code, then run{' '}
         <code className="rounded bg-[var(--color-surface-muted)] px-1 py-0.5 text-xs">openbackup connect</code> on the
         computer you want to back up.
       </Banner>
@@ -217,7 +215,7 @@ function Banner({
   title: string
   children: React.ReactNode
 }) {
-  const color = `var(--color-${tone === 'brand' ? 'brand' : tone})`
+  const color = `var(--color-${tone})`
   return (
     <div
       className="rounded-xl border px-5 py-4"

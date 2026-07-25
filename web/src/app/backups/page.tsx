@@ -5,16 +5,18 @@
  *
  * The browser is a plain folder view rather than a tree: people looking for a
  * lost file navigate the way they do in their file manager, and a flat listing
- * paginated by path keeps it fast even with millions of entries.
+ * paginated by path stays fast with millions of entries.
  */
 
-import { Suspense, useCallback, useEffect, useState } from 'react'
+import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { api, archiveUrl, downloadUrl, type Entry, type Snapshot } from '@/lib/api'
 import { absolute, baseName, bytes, count, parentPath, relative } from '@/lib/format'
+import { useAction, useLoader } from '@/lib/use-loader'
 import { Badge, Button, Card, Empty, ErrorNote, Spinner } from '@/components/ui'
 
 export default function BackupsPage() {
+  // useSearchParams needs a Suspense boundary in a statically exported app.
   return (
     <Suspense fallback={<Spinner />}>
       <Backups />
@@ -28,83 +30,77 @@ function Backups() {
   const selected = params.get('id') ?? ''
   const prefix = params.get('path') ?? ''
 
-  const [snapshots, setSnapshots] = useState<Snapshot[]>()
-  const [error, setError] = useState<string>()
-
-  const load = useCallback(async () => {
-    try {
-      setSnapshots(await api.snapshots())
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load backups')
-    }
-  }, [])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  if (error) return <ErrorNote>{error}</ErrorNote>
-  if (!snapshots) return <Spinner />
-  if (snapshots.length === 0) {
-    return <Empty title="No backups yet" hint="They will appear here after the first backup finishes." />
-  }
+  const { data: snapshots, error, loading, reload } = useLoader<Snapshot[]>(() => api.snapshots())
+  const { busy, error: actionError, run } = useAction()
 
   if (selected) {
     return (
       <SnapshotBrowser
         snapshotId={selected}
         prefix={prefix}
-        onNavigate={(path) =>
-          router.push(`/backups?id=${selected}${path ? `&path=${encodeURIComponent(path)}` : ''}`)
-        }
+        onNavigate={(path) => router.push(`/backups?id=${selected}${path ? `&path=${encodeURIComponent(path)}` : ''}`)}
         onClose={() => router.push('/backups')}
       />
     )
   }
 
+  if (error) return <ErrorNote>{error}</ErrorNote>
+  if (loading || !snapshots) return <Spinner />
+  if (snapshots.length === 0) {
+    return <Empty title="No backups yet" hint="They will appear here after the first backup finishes." />
+  }
+
   return (
-    <Card title={`${snapshots.length} backups`}>
-      <ul className="divide-y divide-[var(--color-border-subtle)]">
-        {snapshots.map((snapshot) => (
-          <li key={snapshot.id} className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
-            <div className="min-w-0">
+    <div className="space-y-4">
+      {actionError && <ErrorNote>{actionError}</ErrorNote>}
+      <Card title={`${snapshots.length} backups`}>
+        <ul className="divide-y divide-[var(--color-border-subtle)]">
+          {snapshots.map((snapshot) => (
+            <li
+              key={snapshot.id}
+              className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
+            >
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <button
+                    className="text-sm font-medium hover:underline"
+                    onClick={() => router.push(`/backups?id=${snapshot.id}`)}
+                  >
+                    {snapshot.device_name ?? 'device'} — {absolute(snapshot.started_at)}
+                  </button>
+                  {snapshot.status !== 'complete' && (
+                    <Badge tone={snapshot.status === 'failed' ? 'bad' : 'warn'}>{snapshot.status}</Badge>
+                  )}
+                  {snapshot.kind === 'delta' && <Badge>incremental</Badge>}
+                </div>
+                <div className="mt-0.5 text-xs text-[var(--color-ink-muted)]">
+                  {count(snapshot.file_count)} files · {bytes(snapshot.total_bytes)} · uploaded{' '}
+                  {bytes(snapshot.uploaded_bytes)} · {relative(snapshot.started_at)}
+                </div>
+              </div>
               <div className="flex items-center gap-2">
-                <button
-                  className="text-sm font-medium hover:underline"
-                  onClick={() => router.push(`/backups?id=${snapshot.id}`)}
+                <Button onClick={() => router.push(`/backups?id=${snapshot.id}`)}>Browse</Button>
+                <Button href={archiveUrl(snapshot.id, '')}>Download all</Button>
+                <Button
+                  variant="danger"
+                  disabled={busy === snapshot.id}
+                  onClick={() => {
+                    if (!confirm('Delete this backup? Files it uniquely holds will be gone for good.')) return
+                    void run(snapshot.id, () => api.deleteSnapshot(snapshot.id), reload)
+                  }}
                 >
-                  {snapshot.device_name ?? 'device'} — {absolute(snapshot.started_at)}
-                </button>
-                {snapshot.status !== 'complete' && (
-                  <Badge tone={snapshot.status === 'failed' ? 'bad' : 'warn'}>{snapshot.status}</Badge>
-                )}
-                {snapshot.kind === 'delta' && <Badge>incremental</Badge>}
+                  Delete
+                </Button>
               </div>
-              <div className="mt-0.5 text-xs text-[var(--color-ink-muted)]">
-                {count(snapshot.file_count)} files · {bytes(snapshot.total_bytes)} · uploaded{' '}
-                {bytes(snapshot.uploaded_bytes)} · {relative(snapshot.started_at)}
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button onClick={() => router.push(`/backups?id=${snapshot.id}`)}>Browse</Button>
-              <Button href={archiveUrl(snapshot.id, '')}>Download all</Button>
-              <Button
-                variant="danger"
-                onClick={async () => {
-                  if (!confirm('Delete this backup? Files it uniquely holds will be gone for good.')) return
-                  await api.deleteSnapshot(snapshot.id)
-                  void load()
-                }}
-              >
-                Delete
-              </Button>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </Card>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </div>
   )
 }
+
+type Page = { snapshot: Snapshot; entries: Entry[]; cursor: string }
 
 function SnapshotBrowser({
   snapshotId,
@@ -117,58 +113,39 @@ function SnapshotBrowser({
   onNavigate: (path: string) => void
   onClose: () => void
 }) {
-  const [entries, setEntries] = useState<Entry[]>()
-  const [cursor, setCursor] = useState('')
-  const [snapshot, setSnapshot] = useState<Snapshot>()
-  const [error, setError] = useState<string>()
-  const [loadingMore, setLoadingMore] = useState(false)
+  const { data, error, loading } = useLoader<Page>(
+    async () => {
+      const [snapshot, page] = await Promise.all([api.snapshot(snapshotId), api.browse(snapshotId, prefix)])
+      return { snapshot, entries: page.entries ?? [], cursor: page.next_cursor ?? '' }
+    },
+    { deps: [snapshotId, prefix] },
+  )
 
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      setEntries(undefined)
-      try {
-        const [snap, page] = await Promise.all([api.snapshot(snapshotId), api.browse(snapshotId, prefix)])
-        if (cancelled) return
-        setSnapshot(snap)
-        setEntries(page.entries ?? [])
-        setCursor(page.next_cursor ?? '')
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Could not open this backup')
-      }
-    }
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [snapshotId, prefix])
-
-  const loadMore = async () => {
-    setLoadingMore(true)
-    try {
-      const page = await api.browse(snapshotId, prefix, cursor)
-      setEntries((current) => [...(current ?? []), ...(page.entries ?? [])])
-      setCursor(page.next_cursor ?? '')
-    } finally {
-      setLoadingMore(false)
-    }
-  }
+  // Extra pages are appended locally so paging does not reset the view.
+  const [extra, setExtra] = useState<{ key: string; entries: Entry[]; cursor: string }>()
+  const more = useAction()
 
   if (error) return <ErrorNote>{error}</ErrorNote>
+  if (loading || !data) return <Spinner label="Opening" />
 
-  // The listing is flat, so immediate children are derived from the paths. This
-  // keeps the server's query trivial and works the same for a delta snapshot,
-  // whose entries come from several places in the chain.
+  const key = `${snapshotId}:${prefix}`
+  const appended = extra?.key === key ? extra.entries : []
+  const cursor = extra?.key === key ? extra.cursor : data.cursor
+  const entries = [...data.entries, ...appended]
+
+  // The listing is flat, so the immediate children are derived from the paths.
+  // That keeps the server query trivial and behaves identically for a delta
+  // snapshot, whose entries are inherited from several points in the chain.
   const folders = new Set<string>()
   const files: Entry[] = []
-  for (const entry of entries ?? []) {
-    const relative = prefix ? entry.path.slice(prefix.length + 1) : entry.path
-    if (!relative) continue
-    const slash = relative.indexOf('/')
+  for (const entry of entries) {
+    const tail = prefix ? entry.path.slice(prefix.length + 1) : entry.path
+    if (!tail) continue
+    const slash = tail.indexOf('/')
     if (slash >= 0) {
-      folders.add(relative.slice(0, slash))
+      folders.add(tail.slice(0, slash))
     } else if (entry.type === 'dir') {
-      folders.add(relative)
+      folders.add(tail)
     } else {
       files.push(entry)
     }
@@ -179,10 +156,10 @@ function SnapshotBrowser({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-sm font-semibold">
-            {snapshot?.device_name ?? 'Backup'} — {absolute(snapshot?.started_at)}
+            {data.snapshot.device_name ?? 'Backup'} — {absolute(data.snapshot.started_at)}
           </div>
           <div className="mt-0.5 text-xs text-[var(--color-ink-muted)]">
-            {count(snapshot?.file_count)} files · {bytes(snapshot?.total_bytes)}
+            {count(data.snapshot.file_count)} files · {bytes(data.snapshot.total_bytes)}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -221,9 +198,7 @@ function SnapshotBrowser({
       </nav>
 
       <Card>
-        {!entries ? (
-          <Spinner label="Opening" />
-        ) : folders.size === 0 && files.length === 0 ? (
+        {folders.size === 0 && files.length === 0 ? (
           <Empty title="This folder is empty in that backup" />
         ) : (
           <ul className="divide-y divide-[var(--color-border-subtle)] text-sm">
@@ -270,8 +245,20 @@ function SnapshotBrowser({
         )}
         {cursor && (
           <div className="mt-4 text-center">
-            <Button onClick={loadMore} disabled={loadingMore}>
-              {loadingMore ? 'Loading…' : 'Show more'}
+            <Button
+              disabled={more.busy === 'more'}
+              onClick={() => {
+                void more.run('more', async () => {
+                  const page = await api.browse(snapshotId, prefix, cursor)
+                  setExtra({
+                    key,
+                    entries: [...appended, ...(page.entries ?? [])],
+                    cursor: page.next_cursor ?? '',
+                  })
+                })
+              }}
+            >
+              {more.busy === 'more' ? 'Loading…' : 'Show more'}
             </Button>
           </div>
         )}
