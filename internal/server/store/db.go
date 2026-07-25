@@ -211,6 +211,14 @@ CREATE TABLE settings (
     value TEXT NOT NULL
 );
 `},
+
+	// Upload speed and the encryption requirement started as server-wide flags,
+	// but they are decisions an owner makes per account from the dashboard, and
+	// agents receive them in the policy on every heartbeat.
+	{"0002_account_policy", `
+ALTER TABLE users ADD COLUMN max_upload_bytes_per_sec INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN require_encryption INTEGER NOT NULL DEFAULT 0;
+`},
 }
 
 func (db *DB) migrate(ctx context.Context) error {

@@ -65,6 +65,10 @@ const (
 	CodeProtocolTooOld = "protocol_too_old"
 	CodeNotFound       = "not_found"
 	CodeRateLimited    = "rate_limited"
+	// CodeEncryptionRequired tells an agent to turn on end-to-end encryption
+	// before retrying, rather than to keep resending a chunk that will never be
+	// accepted.
+	CodeEncryptionRequired = "encryption_required"
 )
 
 // EnrollRequest pairs a new device with an account using a join token that the

@@ -45,6 +45,10 @@ type Config struct {
 	GCInterval time.Duration
 	// QuotaBytes is the default per-account quota; 0 means unlimited.
 	QuotaBytes int64
+	// RequireEncryption refuses plaintext chunks server-wide. Accounts can also
+	// require it individually from the dashboard; this is the harder switch, for
+	// an operator who never wants readable data on the disk they administer.
+	RequireEncryption bool
 	// LogLevel is debug, info, warn or error.
 	LogLevel string
 	// LogJSON emits structured logs, which is what you want in a container.
@@ -93,6 +97,9 @@ func Load() (Config, error) {
 		return cfg, err
 	}
 	if cfg.LogJSON, err = envBool("OPENBACKUP_LOG_JSON", cfg.LogJSON); err != nil {
+		return cfg, err
+	}
+	if cfg.RequireEncryption, err = envBool("OPENBACKUP_REQUIRE_ENCRYPTION", cfg.RequireEncryption); err != nil {
 		return cfg, err
 	}
 	if cfg.SecureCookies, err = envBool("OPENBACKUP_SECURE_COOKIES", strings.HasPrefix(cfg.PublicURL, "https://")); err != nil {

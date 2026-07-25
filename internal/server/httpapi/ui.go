@@ -23,12 +23,17 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// The dashboard is a static export with no server-rendered redirect, so this
+	// one unauthenticated call is what tells it whether to show the first-run
+	// form, the sign-in form, or the dashboard itself.
+	_, sessionErr := s.currentUser(r)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"needs_setup":  count == 0,
-		"allow_signup": s.cfg.AllowSignup && count == 0,
-		"public_url":   s.cfg.PublicURL,
-		"version":      version.Version,
-		"protocol":     api.Version,
+		"needs_setup":   count == 0,
+		"authenticated": sessionErr == nil,
+		"allow_signup":  s.cfg.AllowSignup && count == 0,
+		"public_url":    s.cfg.PublicURL,
+		"version":       version.Version,
+		"protocol":      api.Version,
 	})
 }
 
@@ -151,8 +156,8 @@ func publicUser(u *store.User) map[string]any {
 		"id":             u.ID,
 		"email":          u.Email,
 		"is_admin":       u.IsAdmin,
-		"retention_days": u.RetentionDays,
-		"quota_bytes":    u.QuotaBytes,
+		"retention_days": u.Policy.RetentionDays,
+		"quota_bytes":    u.Policy.QuotaBytes,
 		"created_at":     u.CreatedAt,
 	}
 }
@@ -408,44 +413,77 @@ func (s *Server) handleCreateJoinToken(w http.ResponseWriter, r *http.Request, u
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request, user *store.User) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"retention_days": user.RetentionDays,
-		"quota_bytes":    user.QuotaBytes,
-		"public_url":     s.cfg.PublicURL,
-		"gc_interval":    s.cfg.GCInterval.String(),
-	})
+	writeJSON(w, http.StatusOK, settingsPayload(user.Policy, s.cfg.PublicURL, s.cfg.GCInterval.String()))
 }
 
+// handleUpdateSettings applies a partial update: the dashboard saves one field at
+// a time as it is changed, so anything absent from the body must be left alone.
 func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request, user *store.User) {
 	var req struct {
-		RetentionDays *int   `json:"retention_days"`
-		QuotaBytes    *int64 `json:"quota_bytes"`
+		RetentionDays        *int   `json:"retention_days"`
+		QuotaBytes           *int64 `json:"quota_bytes"`
+		MaxUploadBytesPerSec *int64 `json:"max_upload_bytes_per_sec"`
+		RequireEncryption    *bool  `json:"require_encryption"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "", "invalid request body")
 		return
 	}
-	retention := user.RetentionDays
+	policy := user.Policy
 	if req.RetentionDays != nil {
-		retention = *req.RetentionDays
+		policy.RetentionDays = *req.RetentionDays
 	}
-	quota := user.QuotaBytes
 	if req.QuotaBytes != nil {
-		quota = *req.QuotaBytes
+		policy.QuotaBytes = *req.QuotaBytes
 	}
-	if retention < 0 || retention > 3650 {
+	if req.MaxUploadBytesPerSec != nil {
+		policy.MaxUploadBytesPerSec = *req.MaxUploadBytesPerSec
+	}
+	if req.RequireEncryption != nil {
+		policy.RequireEncryption = *req.RequireEncryption
+	}
+
+	if policy.RetentionDays < 0 || policy.RetentionDays > 3650 {
 		writeError(w, http.StatusBadRequest, "", "retention must be between 0 (keep forever) and 3650 days")
 		return
 	}
-	if quota < 0 {
+	if policy.QuotaBytes < 0 {
 		writeError(w, http.StatusBadRequest, "", "quota must not be negative")
 		return
 	}
-	if err := s.db.UpdateUserPolicy(r.Context(), user.ID, retention, quota); err != nil {
+	if policy.MaxUploadBytesPerSec < 0 {
+		writeError(w, http.StatusBadRequest, "", "upload limit must not be negative")
+		return
+	}
+	// Turning the requirement on later would silently orphan whatever is already
+	// stored in plaintext, so say so instead of pretending it applies backwards.
+	if req.RequireEncryption != nil && *req.RequireEncryption && !user.Policy.RequireEncryption {
+		stored, err := s.db.CountRows(r.Context(), "snapshots")
+		if err == nil && stored > 0 {
+			writeError(w, http.StatusConflict, "",
+				"backups already exist on this account; encryption can only be required before the first backup")
+			return
+		}
+	}
+
+	if err := s.db.UpdateUserPolicy(r.Context(), user.ID, policy); err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"retention_days": retention, "quota_bytes": quota})
+	// Agents pick the new policy up on their next heartbeat, which is within a
+	// minute, so there is nothing for the user to do on each machine.
+	writeJSON(w, http.StatusOK, settingsPayload(policy, s.cfg.PublicURL, s.cfg.GCInterval.String()))
+}
+
+func settingsPayload(p store.UserPolicy, publicURL, gcInterval string) map[string]any {
+	return map[string]any{
+		"retention_days":           p.RetentionDays,
+		"quota_bytes":              p.QuotaBytes,
+		"max_upload_bytes_per_sec": p.MaxUploadBytesPerSec,
+		"require_encryption":       p.RequireEncryption,
+		"public_url":               publicURL,
+		"gc_interval":              gcInterval,
+	}
 }
 
 // handleIgnoreRules publishes the default exclusion rules with their reasons.

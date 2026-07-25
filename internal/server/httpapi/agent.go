@@ -111,7 +111,9 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// policyFor builds the policy an agent must honour.
+// policyFor builds the policy an agent must honour: chunking parameters that
+// must match across the fleet for deduplication to work, plus the account
+// settings the owner controls from the dashboard.
 func (s *Server) policyFor(r *http.Request, userID string) (api.Policy, error) {
 	policy := api.DefaultPolicy()
 	policy.RetentionDays = s.cfg.RetentionDays
@@ -120,11 +122,24 @@ func (s *Server) policyFor(r *http.Request, userID string) (api.Policy, error) {
 	if err != nil {
 		return policy, err
 	}
+	return applyUserPolicy(policy, user.Policy), nil
+}
+
+// applyUserPolicy overlays an account's choices on the server defaults. Config
+// values act as the floor: an environment variable can set a quota for a fresh
+// install, and the dashboard can then narrow it per account.
+func applyUserPolicy(policy api.Policy, user store.UserPolicy) api.Policy {
 	policy.RetentionDays = user.RetentionDays
 	if user.QuotaBytes > 0 {
 		policy.QuotaBytes = user.QuotaBytes
 	}
-	return policy, nil
+	if user.MaxUploadBytesPerSec > 0 {
+		policy.MaxUploadBytesPerSec = user.MaxUploadBytesPerSec
+	}
+	if user.RequireEncryption {
+		policy.RequireEncryption = true
+	}
+	return policy
 }
 
 func (s *Server) handleDeviceSelf(w http.ResponseWriter, r *http.Request, device *store.Device) {
@@ -256,6 +271,10 @@ func (s *Server) handlePutChunk(w http.ResponseWriter, r *http.Request, device *
 	// proxy before the data is committed. Encrypted blobs carry their own AEAD
 	// tag and are verified by the client on restore, since the server has no key.
 	if !codec.IsEncrypted(blob) {
+		// A plaintext chunk can be verified against its digest, which catches a
+		// corrupted upload before it is stored under the wrong name. Encrypted
+		// chunks are opaque by design, so integrity there rests on the AEAD tag
+		// the agent checks when restoring.
 		plain, err := s.codec.Decode(blob)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "", "chunk could not be decoded: "+err.Error())
@@ -265,9 +284,11 @@ func (s *Server) handlePutChunk(w http.ResponseWriter, r *http.Request, device *
 			writeError(w, http.StatusBadRequest, "", "chunk content does not match its digest")
 			return
 		}
-	} else if s.requireEncryptionMismatch(false) {
-		writeError(w, http.StatusBadRequest, "", "this server requires end-to-end encrypted chunks")
-		return
+		if s.requiresEncryption(r, device) {
+			writeError(w, http.StatusBadRequest, api.CodeEncryptionRequired,
+				"this account only accepts end-to-end encrypted backups")
+			return
+		}
 	}
 
 	written, err := s.blobs.Put(r.Context(), digest, blob)
@@ -288,10 +309,19 @@ func (s *Server) handlePutChunk(w http.ResponseWriter, r *http.Request, device *
 	w.WriteHeader(http.StatusCreated)
 }
 
-// requireEncryptionMismatch reports whether the server's encryption policy is
-// violated. Kept as a helper so the policy check has one place to grow.
-func (s *Server) requireEncryptionMismatch(encrypted bool) bool {
-	return api.DefaultPolicy().RequireEncryption && !encrypted
+// requiresEncryption reports whether this device's account refuses plaintext.
+// A database error errs on the side of accepting the upload: losing a backup
+// because a query failed would be the worse outcome, and the setting is about
+// the account's own privacy rather than the server's safety.
+func (s *Server) requiresEncryption(r *http.Request, device *store.Device) bool {
+	if s.cfg.RequireEncryption {
+		return true
+	}
+	user, err := s.db.UserByID(r.Context(), device.UserID)
+	if err != nil {
+		return false
+	}
+	return user.Policy.RequireEncryption
 }
 
 // registerChunk records chunk metadata, deriving sizes from the blob when it is
@@ -504,7 +534,7 @@ func (s *Server) checkQuota(r *http.Request, userID string) error {
 	if err != nil {
 		return err
 	}
-	quota := user.QuotaBytes
+	quota := user.Policy.QuotaBytes
 	if quota == 0 {
 		quota = s.cfg.QuotaBytes
 	}

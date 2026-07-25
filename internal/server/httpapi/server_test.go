@@ -950,3 +950,129 @@ func TestBrowsePaginates(t *testing.T) {
 		t.Fatalf("pagination returned %d of %d entries", len(seen), len(files))
 	}
 }
+
+// TestBootstrapReportsAuthState covers the one call the dashboard makes before it
+// renders anything. Getting it wrong shows a signed-in user the login form, or
+// worse, shows the dashboard to someone who is not signed in.
+func TestBootstrapReportsAuthState(t *testing.T) {
+	h := newHarness(t)
+
+	type bootstrap struct {
+		NeedsSetup    bool   `json:"needs_setup"`
+		Authenticated bool   `json:"authenticated"`
+		Version       string `json:"version"`
+	}
+
+	var fresh bootstrap
+	h.do(http.MethodGet, "/api/v1/ui/bootstrap", nil, &fresh)
+	if !fresh.NeedsSetup || fresh.Authenticated {
+		t.Fatalf("a fresh server must ask for setup and report nobody signed in, got %+v", fresh)
+	}
+
+	h.setupAccount()
+
+	var ready bootstrap
+	h.do(http.MethodGet, "/api/v1/ui/bootstrap", nil, &ready)
+	if ready.NeedsSetup {
+		t.Error("setup must not be requested twice")
+	}
+	if !ready.Authenticated {
+		t.Error("creating the first account must sign that browser in")
+	}
+
+	resp := h.do(http.MethodPost, "/api/v1/ui/logout", nil, nil)
+	resp.Body.Close()
+
+	var after bootstrap
+	h.do(http.MethodGet, "/api/v1/ui/bootstrap", nil, &after)
+	if after.Authenticated {
+		t.Error("bootstrap still reports a session after signing out")
+	}
+}
+
+// TestSettingsReachAgents is the whole point of the settings page: a change made
+// in the browser must arrive at every device without anyone touching them.
+func TestSettingsReachAgents(t *testing.T) {
+	h := newHarness(t)
+	h.setupAccount()
+	client := h.enroll("laptop")
+
+	type settings struct {
+		RetentionDays        int   `json:"retention_days"`
+		QuotaBytes           int64 `json:"quota_bytes"`
+		MaxUploadBytesPerSec int64 `json:"max_upload_bytes_per_sec"`
+		RequireEncryption    bool  `json:"require_encryption"`
+	}
+
+	var saved settings
+	resp := h.do(http.MethodPut, "/api/v1/ui/settings", map[string]any{
+		"retention_days":           90,
+		"max_upload_bytes_per_sec": 2 << 20,
+	}, &saved)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT settings returned %d", resp.StatusCode)
+	}
+	if saved.RetentionDays != 90 || saved.MaxUploadBytesPerSec != 2<<20 {
+		t.Fatalf("settings were not stored: %+v", saved)
+	}
+
+	// A partial update must not reset the fields it does not mention.
+	var second settings
+	h.do(http.MethodPut, "/api/v1/ui/settings", map[string]any{"quota_bytes": 5 << 30}, &second)
+	if second.RetentionDays != 90 || second.MaxUploadBytesPerSec != 2<<20 || second.QuotaBytes != 5<<30 {
+		t.Fatalf("a partial update clobbered other settings: %+v", second)
+	}
+
+	hb, err := client.Heartbeat(context.Background(), api.HeartbeatRequest{State: api.StateIdle})
+	if err != nil {
+		t.Fatalf("Heartbeat: %v", err)
+	}
+	if hb.Policy.RetentionDays != 90 {
+		t.Errorf("agent policy retention = %d, want 90", hb.Policy.RetentionDays)
+	}
+	if hb.Policy.MaxUploadBytesPerSec != 2<<20 {
+		t.Errorf("agent policy upload limit = %d, want %d", hb.Policy.MaxUploadBytesPerSec, 2<<20)
+	}
+	if hb.Policy.QuotaBytes != 5<<30 {
+		t.Errorf("agent policy quota = %d, want %d", hb.Policy.QuotaBytes, 5<<30)
+	}
+}
+
+// TestRequireEncryptionRejectsPlaintext checks that the setting is enforced where
+// it matters, at the moment a chunk is stored, rather than being advice.
+func TestRequireEncryptionRejectsPlaintext(t *testing.T) {
+	h := newHarness(t)
+	h.setupAccount()
+
+	var saved struct {
+		RequireEncryption bool `json:"require_encryption"`
+	}
+	resp := h.do(http.MethodPut, "/api/v1/ui/settings", map[string]any{"require_encryption": true}, &saved)
+	if resp.StatusCode != http.StatusOK || !saved.RequireEncryption {
+		t.Fatalf("could not require encryption: status %d, %+v", resp.StatusCode, saved)
+	}
+
+	client := h.enroll("laptop")
+	content := []byte("a plaintext file that must be refused")
+	digest := hash.Sum(content)
+	blob, err := h.codec.Encode(content, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = client.PutChunk(context.Background(), digest, blob, len(content))
+	if err == nil {
+		t.Fatal("server accepted a plaintext chunk while the account requires encryption")
+	}
+
+	// Once backups exist, turning the requirement on would misrepresent what is
+	// already stored, so the server must refuse rather than mislead.
+	h2 := newHarness(t)
+	h2.setupAccount()
+	other := h2.enroll("desktop")
+	h2.backup(other, api.SnapshotFull, "", map[string][]byte{"Documents/a.txt": []byte("hello")}, nil)
+	resp = h2.do(http.MethodPut, "/api/v1/ui/settings", map[string]any{"require_encryption": true}, nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("enabling encryption after a backup returned %d, want 409", resp.StatusCode)
+	}
+}

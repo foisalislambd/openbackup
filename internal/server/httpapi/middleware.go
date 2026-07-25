@@ -51,6 +51,16 @@ func (s *Server) agentOnly(next func(http.ResponseWriter, *http.Request, *store.
 }
 
 // userOnly authenticates a dashboard session.
+// currentUser resolves the session without writing a response, for endpoints
+// that are reachable both signed in and signed out.
+func (s *Server) currentUser(r *http.Request) (*store.User, error) {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil || cookie.Value == "" {
+		return nil, store.ErrNotFound
+	}
+	return s.db.SessionUser(r.Context(), auth.HashToken(cookie.Value))
+}
+
 func (s *Server) userOnly(next func(http.ResponseWriter, *http.Request, *store.User)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie(sessionCookieName)

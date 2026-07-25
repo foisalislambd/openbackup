@@ -13,30 +13,51 @@ import (
 
 // User is an account.
 type User struct {
-	ID            string
-	Email         string
-	PasswordHash  string
-	IsAdmin       bool
-	QuotaBytes    int64
-	RetentionDays int
-	CreatedAt     time.Time
+	ID           string
+	Email        string
+	PasswordHash string
+	IsAdmin      bool
+	CreatedAt    time.Time
+	// Policy is what the owner controls from the dashboard, and what every
+	// device of this account is told to honour.
+	Policy UserPolicy
 }
+
+// UserPolicy is the per-account half of api.Policy: the parts a person chooses,
+// as opposed to the chunking parameters that must stay identical everywhere.
+type UserPolicy struct {
+	// QuotaBytes caps stored data; 0 means unlimited.
+	QuotaBytes int64
+	// RetentionDays is how long snapshots are kept; 0 means forever.
+	RetentionDays int
+	// MaxUploadBytesPerSec throttles every device; 0 means unlimited.
+	MaxUploadBytesPerSec int64
+	// RequireEncryption rejects data from devices without end-to-end encryption.
+	RequireEncryption bool
+}
+
+// userColumns keeps the SELECT list in one place so adding a column cannot leave
+// one query behind.
+const userColumns = `id, email, password_hash, is_admin, quota_bytes, retention_days,
+	max_upload_bytes_per_sec, require_encryption, created_at`
 
 // CreateUser inserts a user. Email comparison is case-insensitive because
 // treating Alice@ and alice@ as different accounts only ever confuses people.
 func (db *DB) CreateUser(ctx context.Context, email, passwordHash string, isAdmin bool) (*User, error) {
 	u := &User{
-		ID:            idgen.NewPrefixed("usr"),
-		Email:         normalizeEmail(email),
-		PasswordHash:  passwordHash,
-		IsAdmin:       isAdmin,
-		RetentionDays: api.DefaultPolicy().RetentionDays,
-		CreatedAt:     time.Now().UTC(),
+		ID:           idgen.NewPrefixed("usr"),
+		Email:        normalizeEmail(email),
+		PasswordHash: passwordHash,
+		IsAdmin:      isAdmin,
+		CreatedAt:    time.Now().UTC(),
+		Policy:       UserPolicy{RetentionDays: api.DefaultPolicy().RetentionDays},
 	}
 	_, err := db.sql.ExecContext(ctx,
-		`INSERT INTO users (id, email, password_hash, is_admin, quota_bytes, retention_days, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		u.ID, u.Email, u.PasswordHash, boolToInt(isAdmin), u.QuotaBytes, u.RetentionDays, toMillis(u.CreatedAt))
+		`INSERT INTO users (id, email, password_hash, is_admin, quota_bytes, retention_days,
+		 max_upload_bytes_per_sec, require_encryption, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		u.ID, u.Email, u.PasswordHash, boolToInt(isAdmin), u.Policy.QuotaBytes, u.Policy.RetentionDays,
+		u.Policy.MaxUploadBytesPerSec, boolToInt(u.Policy.RequireEncryption), toMillis(u.CreatedAt))
 	if err != nil {
 		return nil, err
 	}
@@ -46,24 +67,24 @@ func (db *DB) CreateUser(ctx context.Context, email, passwordHash string, isAdmi
 // UserByEmail looks up an account for login.
 func (db *DB) UserByEmail(ctx context.Context, email string) (*User, error) {
 	return db.scanUser(db.sql.QueryRowContext(ctx,
-		`SELECT id, email, password_hash, is_admin, quota_bytes, retention_days, created_at
-		 FROM users WHERE email = ?`, normalizeEmail(email)))
+		`SELECT `+userColumns+` FROM users WHERE email = ?`, normalizeEmail(email)))
 }
 
 // UserByID looks up an account by id.
 func (db *DB) UserByID(ctx context.Context, id string) (*User, error) {
 	return db.scanUser(db.sql.QueryRowContext(ctx,
-		`SELECT id, email, password_hash, is_admin, quota_bytes, retention_days, created_at
-		 FROM users WHERE id = ?`, id))
+		`SELECT `+userColumns+` FROM users WHERE id = ?`, id))
 }
 
 func (db *DB) scanUser(row *sql.Row) (*User, error) {
 	var (
-		u       User
-		admin   int
-		created int64
+		u         User
+		admin     int
+		encrypted int
+		created   int64
 	)
-	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &admin, &u.QuotaBytes, &u.RetentionDays, &created)
+	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &admin, &u.Policy.QuotaBytes, &u.Policy.RetentionDays,
+		&u.Policy.MaxUploadBytesPerSec, &encrypted, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -71,6 +92,7 @@ func (db *DB) scanUser(row *sql.Row) (*User, error) {
 		return nil, err
 	}
 	u.IsAdmin = admin != 0
+	u.Policy.RequireEncryption = encrypted != 0
 	u.CreatedAt = fromMillis(created)
 	return &u, nil
 }
@@ -80,8 +102,7 @@ func (db *DB) scanUser(row *sql.Row) (*User, error) {
 // email address.
 func (db *DB) FirstUser(ctx context.Context) (*User, error) {
 	return db.scanUser(db.sql.QueryRowContext(ctx,
-		`SELECT id, email, password_hash, is_admin, quota_bytes, retention_days, created_at
-		 FROM users ORDER BY created_at ASC LIMIT 1`))
+		`SELECT `+userColumns+` FROM users ORDER BY created_at ASC LIMIT 1`))
 }
 
 // CountUsers reports how many accounts exist. The server uses it to decide
@@ -98,10 +119,12 @@ func (db *DB) UpdateUserPassword(ctx context.Context, userID, passwordHash strin
 	return affected(res, err)
 }
 
-// UpdateUserPolicy stores the account's retention and quota settings.
-func (db *DB) UpdateUserPolicy(ctx context.Context, userID string, retentionDays int, quotaBytes int64) error {
+// UpdateUserPolicy stores the account's dashboard-controlled settings.
+func (db *DB) UpdateUserPolicy(ctx context.Context, userID string, p UserPolicy) error {
 	res, err := db.sql.ExecContext(ctx,
-		`UPDATE users SET retention_days = ?, quota_bytes = ? WHERE id = ?`, retentionDays, quotaBytes, userID)
+		`UPDATE users SET retention_days = ?, quota_bytes = ?, max_upload_bytes_per_sec = ?,
+		 require_encryption = ? WHERE id = ?`,
+		p.RetentionDays, p.QuotaBytes, p.MaxUploadBytesPerSec, boolToInt(p.RequireEncryption), userID)
 	return affected(res, err)
 }
 
