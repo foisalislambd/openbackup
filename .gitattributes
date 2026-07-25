@@ -1,0 +1,24 @@
+# Normalise line endings in the repository so a Windows checkout cannot produce a
+# shell script or Makefile that breaks on Linux: `#!/bin/sh\r` is not a valid
+# interpreter, and make treats a trailing \r as part of the command.
+* text=auto eol=lf
+
+# Files that must be LF even if a contributor's editor disagrees.
+*.sh text eol=lf
+Makefile text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Windows-only files where CRLF is correct.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary, so git should never try to convert anything.
+*.png binary
+*.ico binary
+*.jpg binary
+*.woff2 binary
+*.zst binary
+*.exe binary

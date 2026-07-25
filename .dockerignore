@@ -1,0 +1,28 @@
+# Keep the build context small and reproducible: everything the image needs is
+# built inside it.
+.git
+.github
+bin/
+dist/
+data/
+*.exe
+
+# Node and Next output. The image runs `npm ci` and `next build` itself, so a
+# local install here would only slow the upload down and risk a stale export.
+web/node_modules/
+web/.next/
+web/out/
+
+# The embedded copy is produced by the web build stage.
+internal/server/web/dist/*
+!internal/server/web/dist/.gitkeep
+
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.local
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

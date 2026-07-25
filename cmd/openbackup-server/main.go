@@ -47,6 +47,8 @@ func run(args []string) error {
 		return runInvite(args)
 	case "user":
 		return runUser(args)
+	case "health":
+		return runHealth(args)
 	case "version":
 		fmt.Println(version.String())
 		return nil
@@ -67,6 +69,7 @@ Usage:
   openbackup-server check [--fix]      Verify that stored data matches the index
   openbackup-server invite [--email]   Create a device enrolment code
   openbackup-server user add           Create an account
+  openbackup-server health             Probe a running server (used by Docker)
   openbackup-server version            Print the build version
 
 Configuration comes from the environment; every value has a working default:
@@ -236,6 +239,48 @@ func bootstrapAdmin(ctx context.Context, d *deps) error {
 		return fmt.Errorf("bootstrap admin: %w", err)
 	}
 	d.log.Info("created the first administrator account", "email", user.Email)
+	return nil
+}
+
+// runHealth probes a running server over HTTP and exits non-zero if it is not
+// serving. The container image has no shell and no curl, so the binary has to be
+// able to check itself; it also means one health definition rather than a
+// Dockerfile's idea of one and the server's idea of another.
+func runHealth(args []string) error {
+	fs := flag.NewFlagSet("health", flag.ContinueOnError)
+	target := fs.String("url", "", "base URL to probe (defaults to the configured listen address)")
+	timeout := fs.Duration("timeout", 5*time.Second, "how long to wait")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	url := *target
+	if url == "" {
+		addr := os.Getenv("OPENBACKUP_ADDR")
+		if addr == "" {
+			addr = ":8080"
+		}
+		if strings.HasPrefix(addr, ":") {
+			addr = "127.0.0.1" + addr
+		}
+		url = "http://" + addr
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(url, "/")+"/api/v1/health", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("server is not answering on %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned %s", resp.Status)
+	}
+	fmt.Println("ok")
 	return nil
 }
 

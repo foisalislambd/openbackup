@@ -4,6 +4,7 @@ go 1.26.5
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/kardianos/service v1.3.0
 	github.com/klauspost/compress v1.19.1
 	github.com/minio/minio-go/v7 v7.2.1
 	github.com/shirou/gopsutil/v4 v4.26.6
@@ -19,7 +20,6 @@ require (
 	github.com/ebitengine/purego v0.10.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/kardianos/service v1.3.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.11 // indirect
 	github.com/klauspost/crc32 v1.3.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect

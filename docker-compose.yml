@@ -1,0 +1,79 @@
+# OpenBackup server.
+#
+#   docker compose up -d
+#
+# That is the whole deployment: one container, one volume. There is no separate
+# database container because the database is SQLite inside the data volume, and
+# no separate web container because the dashboard is embedded in the binary.
+#
+# Put this behind a reverse proxy that terminates TLS (Caddy is two lines, and
+# handles certificates itself) and set OPENBACKUP_PUBLIC_URL to the https address.
+# Device tokens travel in headers, so plain HTTP is only acceptable on a private
+# network you control.
+
+services:
+  openbackup:
+    image: openbackup/server:latest
+    # Uncomment to build from a checkout instead of pulling the published image.
+    # build:
+    #   context: .
+    container_name: openbackup
+    restart: unless-stopped
+
+    ports:
+      # Bind to localhost when a reverse proxy on the same host will front it, so
+      # the server is never briefly exposed without TLS. Use "8080:8080" if you
+      # are proxying from another machine.
+      - '127.0.0.1:8080:8080'
+
+    volumes:
+      # Everything that matters lives here: the SQLite database and every stored
+      # block. Back this volume up, or the backup server becomes a single point of
+      # failure for the backups.
+      - openbackup-data:/data
+
+    environment:
+      # The address browsers and agents use. Enrolment commands and links are
+      # built from it, and https here also turns on Secure session cookies.
+      OPENBACKUP_PUBLIC_URL: ${OPENBACKUP_PUBLIC_URL:-}
+
+      # Creates the first account on an empty database, so the install finishes
+      # with a working login instead of a setup form on a public URL. Remove both
+      # once you have signed in; they are ignored after the first account exists.
+      OPENBACKUP_ADMIN_EMAIL: ${OPENBACKUP_ADMIN_EMAIL:-}
+      OPENBACKUP_ADMIN_PASSWORD: ${OPENBACKUP_ADMIN_PASSWORD:-}
+
+      # Required when running behind a reverse proxy, so rate limiting and logs
+      # see the real client address rather than the proxy's.
+      OPENBACKUP_TRUST_PROXY: ${OPENBACKUP_TRUST_PROXY:-true}
+
+      # How long snapshots are kept, and how much space an account may use.
+      # Both are also editable per account from the dashboard.
+      OPENBACKUP_RETENTION_DAYS: ${OPENBACKUP_RETENTION_DAYS:-30}
+      OPENBACKUP_QUOTA_BYTES: ${OPENBACKUP_QUOTA_BYTES:-0}
+
+      # After the first account exists, new sign-ups are refused anyway; set this
+      # to false to also refuse the very first one and create accounts by hand.
+      OPENBACKUP_ALLOW_SIGNUP: ${OPENBACKUP_ALLOW_SIGNUP:-true}
+
+      # Optional: keep blocks in S3-compatible object storage instead of the
+      # volume. The database stays local either way.
+      # OPENBACKUP_S3_ENDPOINT: s3.eu-central-1.amazonaws.com
+      # OPENBACKUP_S3_BUCKET: my-backups
+      # OPENBACKUP_S3_ACCESS_KEY: ...
+      # OPENBACKUP_S3_SECRET_KEY: ...
+
+    # The image declares its own healthcheck; this only shortens the startup grace
+    # period so `docker compose up --wait` returns quickly.
+    healthcheck:
+      start_period: 5s
+
+    # A backup server is not a place for surprises: cap what the container can do.
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+volumes:
+  openbackup-data:
