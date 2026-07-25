@@ -1,0 +1,4 @@
+The dashboard build output is written here by `make web`, which runs the Next.js
+static export and copies web/out into this directory so it can be embedded in
+the server binary. Build artefacts are not committed; this file only keeps the
+directory present so //go:embed has something to match.

@@ -1,0 +1,47 @@
+@import 'tailwindcss';
+
+/*
+ * The palette is intentionally calm. A backup dashboard is looked at when
+ * someone is worried, so the default state should read as "everything is fine"
+ * without shouting, and problems should be the only thing using a warm colour.
+ */
+@theme {
+  --color-surface: oklch(100% 0 0);
+  --color-surface-muted: oklch(98% 0.004 250);
+  --color-border-subtle: oklch(92% 0.006 250);
+  --color-ink: oklch(24% 0.02 260);
+  --color-ink-muted: oklch(52% 0.015 260);
+  --color-brand: oklch(56% 0.16 250);
+  --color-brand-soft: oklch(96% 0.03 250);
+  --color-good: oklch(62% 0.14 155);
+  --color-warn: oklch(72% 0.15 75);
+  --color-bad: oklch(58% 0.19 25);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-surface: oklch(21% 0.015 265);
+    --color-surface-muted: oklch(25% 0.015 265);
+    --color-border-subtle: oklch(32% 0.015 265);
+    --color-ink: oklch(96% 0.005 260);
+    --color-ink-muted: oklch(72% 0.015 260);
+    --color-brand: oklch(70% 0.14 250);
+    --color-brand-soft: oklch(30% 0.05 250);
+  }
+}
+
+html,
+body {
+  background: var(--color-surface-muted);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numbers in tables must line up, or comparing sizes becomes guesswork. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
