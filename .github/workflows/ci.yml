@@ -185,7 +185,13 @@ jobs:
       # Wails builds the frontend itself, so this also proves the embed works.
       - name: Build (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: wails build -tags webkit2_41
+        run: |
+          wails build -tags webkit2_41
+          arch=$(uname -m)
+          case "$arch" in x86_64|amd64) goarch=amd64 ;; aarch64|arm64) goarch=arm64 ;; *) echo "unsupported $arch"; exit 1 ;; esac
+          cp build/bin/openbackup-desktop "build/bin/openbackup-desktop-linux-${goarch}"
+          cp build/linux/openbackup-desktop.desktop build/bin/
+          cp build/appicon.png build/bin/openbackup.png
         working-directory: desktop
 
       - name: Build (Windows)
@@ -207,6 +213,17 @@ jobs:
           name: openbackup-desktop-windows
           path: |
             desktop/build/bin/*.exe
+          if-no-files-found: error
+
+      - name: Upload the Linux build
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v7
+        with:
+          name: openbackup-desktop-linux
+          path: |
+            desktop/build/bin/openbackup-desktop-linux-*
+            desktop/build/bin/openbackup-desktop.desktop
+            desktop/build/bin/openbackup.png
           if-no-files-found: error
 
   docker:

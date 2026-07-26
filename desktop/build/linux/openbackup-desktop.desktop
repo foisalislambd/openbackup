@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=OpenBackup
+GenericName=Backup
+Comment=Automatic backup for your files
+Exec=openbackup-desktop
+Icon=openbackup
+Terminal=false
+Categories=Utility;Archiving;
+StartupWMClass=OpenBackup
+Keywords=backup;restore;files;

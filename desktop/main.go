@@ -19,6 +19,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/linux"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -51,10 +52,12 @@ func main() {
 
 	release, only := singleInstance()
 	if !only {
-		// Another window is already open. Raising it is handled by the running
-		// instance's tray; exiting quietly is better than a second window or an
-		// error the user cannot act on.
-		log.Info("another OpenBackup window is already open")
+		// Another window is already open — ask it to come forward, then exit.
+		if signalRaise() {
+			log.Info("raised the existing OpenBackup window")
+		} else {
+			log.Info("another OpenBackup window is already open")
+		}
 		return
 	}
 	defer release()
@@ -79,6 +82,10 @@ func main() {
 			// The tray runs its own message loop, so it gets its own goroutine;
 			// blocking here would stop the window from ever appearing.
 			go trayIcon.start(ctx)
+			listenForRaise(ctx, func() {
+				wruntime.WindowShow(ctx)
+				wruntime.WindowUnminimise(ctx)
+			})
 		},
 		OnBeforeClose: func(ctx context.Context) bool {
 			// Closing the window hides it instead of quitting, because backups
@@ -97,6 +104,16 @@ func main() {
 			BackdropType:         windows.Mica,
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,
+		},
+		Linux: &linux.Options{
+			Icon:                notificationIcon,
+			WindowIsTranslucent: false,
+			// Matches the .desktop StartupWMClass so the window groups with its
+			// launcher icon on GNOME/KDE.
+			ProgramName: "OpenBackup",
+			// Default when Linux options are set; Never caused blank windows on
+			// some NVIDIA/Wayland setups — OnDemand is the safer middle ground.
+			WebviewGpuPolicy: linux.WebviewGpuPolicyOnDemand,
 		},
 	})
 	if err != nil {

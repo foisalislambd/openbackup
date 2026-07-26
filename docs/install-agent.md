@@ -10,6 +10,18 @@ hours by default.
 
 ## Linux and macOS
 
+### Desktop app (Linux — same window as Windows)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-desktop-linux.sh | sh
+openbackup-desktop
+```
+
+That installs the agent CLI, the desktop window, and an app-menu entry. First
+launch walks you through connecting with a dashboard code.
+
+### Terminal only
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
 openbackup connect --server https://backup.example.com --code ABCD-EFGH-JKLM

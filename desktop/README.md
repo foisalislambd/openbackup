@@ -44,9 +44,16 @@ to a Go struct shows up as a TypeScript error.
 ## Working on it
 
 ```bash
-make desktop-dev    # live-reloading window
+make desktop-dev    # live-reloading window (uses webkit2_41 on Linux)
 make desktop        # release build into build/bin
 make desktop-check  # go vet and tsc
+make desktop-linux-package  # Linux: release-named binary + .desktop + icon
+```
+
+On Linux you can also install a local or release build into `~/.local`:
+
+```bash
+../scripts/install-desktop-linux.sh
 ```
 
 Icons are generated, not drawn:

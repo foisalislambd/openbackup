@@ -31,6 +31,8 @@ help:
 	@echo "make build        Build the server and agent for this machine"
 	@echo "make web          Build the dashboard and embed it in the server"
 	@echo "make desktop      Build the desktop app for this machine (needs wails)"
+	@echo "make desktop-dev  Live-reload desktop window"
+	@echo "make desktop-linux-package  Linux release binary + .desktop + icon"
 	@echo "make test         Run every test"
 	@echo "make check        Format check, vet and test (what CI runs)"
 	@echo "make run-server   Run the server against ./data"
@@ -123,12 +125,32 @@ desktop:
 
 .PHONY: desktop-dev
 desktop-dev:
-	cd desktop && wails dev
+	@command -v wails >/dev/null || \
+		(echo "install the Wails CLI: go install github.com/wailsapp/wails/v2/cmd/wails@latest" && exit 1)
+	@if [ "$$(uname -s)" = Linux ]; then \
+		cd desktop && wails dev -tags webkit2_41; \
+	else \
+		cd desktop && wails dev; \
+	fi
 
 .PHONY: desktop-check
 desktop-check:
 	cd desktop && go vet ./...
 	cd desktop/frontend && npm run typecheck
+
+# After `make desktop` on Linux: rename the binary for Releases and copy the
+# .desktop template next to it for packaging.
+.PHONY: desktop-linux-package
+desktop-linux-package: desktop
+	@test "$$(uname -s)" = Linux || (echo "desktop-linux-package only runs on Linux" && exit 1)
+	@arch=$$(uname -m); \
+	case "$$arch" in x86_64|amd64) goarch=amd64 ;; aarch64|arm64) goarch=arm64 ;; *) echo "unsupported arch $$arch"; exit 1 ;; esac; \
+	src=desktop/build/bin/openbackup-desktop; \
+	dst=desktop/build/bin/openbackup-desktop-linux-$$goarch; \
+	cp "$$src" "$$dst"; \
+	cp desktop/build/linux/openbackup-desktop.desktop desktop/build/bin/; \
+	cp desktop/build/appicon.png desktop/build/bin/openbackup.png; \
+	echo "packaged $$dst (+ .desktop + icon)"
 
 .PHONY: dev
 dev:
