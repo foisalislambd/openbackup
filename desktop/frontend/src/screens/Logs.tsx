@@ -99,7 +99,7 @@ export function Logs({ status }: { status: Overview }) {
 
       <Card
         title="Recent activity"
-        action={
+        actions={
           <Button tone="quiet" onClick={() => void load()}>
             Refresh
           </Button>

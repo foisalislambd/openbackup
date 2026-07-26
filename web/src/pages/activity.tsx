@@ -2,35 +2,42 @@
  * Logs: live progress (which file is uploading) plus the activity feed.
  */
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { api, type ActivityEvent, type Device } from '@/lib/api'
 import { absolute, relative } from '@/lib/format'
 import { useLoader } from '@/lib/use-loader'
 import { Badge, Card, Empty, ErrorNote } from '@/components/ui'
 import { ActivitySkeleton } from '@/components/skeleton'
 
-type LogsData = { devices: Device[]; events: ActivityEvent[] }
+type LogsData = { devices: Device[]; events: ActivityEvent[]; fetchedAt: number }
+
+const LIVE_MAX_AGE_MS = 3 * 60 * 1000
+
+function isLiveDevice(device: Device, now: number): boolean {
+  if (!device.last_seen) return false
+  const ageMs = now - new Date(device.last_seen).getTime()
+  // Heartbeats are ~15–60s while working; ignore stale leftover state.
+  if (Number.isNaN(ageMs) || ageMs > LIVE_MAX_AGE_MS) return false
+  return Boolean(device.current_path) || device.state === 'uploading' || device.state === 'scanning'
+}
 
 export default function ActivityPage() {
   const { data, error, loading } = useLoader<LogsData>(
     async () => {
       const [devices, events] = await Promise.all([api.devices(), api.events(250)])
-      return { devices, events }
+      return { devices, events, fetchedAt: Date.now() }
     },
     { pollMs: 8000 },
   )
   const [filter, setFilter] = useState<'all' | 'problems' | 'files'>('all')
 
+  const live = useMemo(
+    () => (data ? data.devices.filter((d) => isLiveDevice(d, data.fetchedAt)) : []),
+    [data],
+  )
+
   if (error) return <ErrorNote>{error}</ErrorNote>
   if (loading || !data) return <ActivitySkeleton />
-
-  const live = data.devices.filter((d) => {
-    if (!d.last_seen) return false
-    const ageMs = Date.now() - new Date(d.last_seen).getTime()
-    // Heartbeats are ~15–60s while working; ignore stale leftover state.
-    if (Number.isNaN(ageMs) || ageMs > 3 * 60 * 1000) return false
-    return Boolean(d.current_path) || d.state === 'uploading' || d.state === 'scanning'
-  })
 
   const shown = data.events.filter((e) => {
     if (filter === 'problems') return e.level === 'warn' || e.level === 'error'

@@ -477,12 +477,12 @@ func (e *Engine) Control() ipc.Handler { return controlAdapter{e} }
 
 type controlAdapter struct{ e *Engine }
 
-func (c controlAdapter) Status() any                          { return c.e.Status() }
-func (c controlAdapter) BackupNow(reason string)              { c.e.BackupNow(reason) }
-func (c controlAdapter) Pause(d time.Duration)                { c.e.Pause(d) }
-func (c controlAdapter) Resume()                              { c.e.Resume() }
-func (c controlAdapter) Reload(ctx context.Context) error     { return c.e.Reload(ctx) }
-func (c controlAdapter) RecentEvents(limit int) []api.Event   { return c.e.RecentEvents(limit) }
+func (c controlAdapter) Status() any                        { return c.e.Status() }
+func (c controlAdapter) BackupNow(reason string)            { c.e.BackupNow(reason) }
+func (c controlAdapter) Pause(d time.Duration)              { c.e.Pause(d) }
+func (c controlAdapter) Resume()                            { c.e.Resume() }
+func (c controlAdapter) Reload(ctx context.Context) error   { return c.e.Reload(ctx) }
+func (c controlAdapter) RecentEvents(limit int) []api.Event { return c.e.RecentEvents(limit) }
 
 // runBackup performs one backup pass with all the guards around it.
 func (e *Engine) runBackup(ctx context.Context, t trigger) {
