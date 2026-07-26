@@ -58,6 +58,7 @@ export const api = {
   info: () => call<AppInfo>('Info'),
 
   connect: (req: ConnectRequest) => call<ConnectResult>('Connect', req),
+  disconnect: () => call<void>('Disconnect'),
 
   folders: () => call<Folder[]>('Folders'),
   suggestedFolders: () => call<Folder[]>('SuggestedFolders'),

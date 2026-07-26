@@ -125,8 +125,67 @@ export function Settings({ status }: { status: Overview }) {
 
       <Encryption encrypted={draft.encrypted} hasBackups={status.snapshot_count > 0} />
 
+      <Account serverURL={status.server_url} deviceName={status.device_name} />
+
       <About />
     </div>
+  )
+}
+
+function Account({ serverURL, deviceName }: { serverURL: string; deviceName: string }) {
+  const action = useAction()
+  const [confirming, setConfirming] = useState(false)
+
+  return (
+    <Card
+      title="This device"
+      description="Log out clears the connection on this computer. Your backups stay on the server until you delete the device in the dashboard."
+    >
+      <dl className="mb-4 space-y-2 text-sm">
+        <div className="flex justify-between gap-4">
+          <dt className="text-ink-muted">Device</dt>
+          <dd className="selectable truncate text-ink">{deviceName || '—'}</dd>
+        </div>
+        <div className="flex justify-between gap-4">
+          <dt className="text-ink-muted">Server</dt>
+          <dd className="selectable truncate text-ink" title={serverURL}>
+            {serverURL.replace(/^https?:\/\//, '') || '—'}
+          </dd>
+        </div>
+      </dl>
+
+      {action.error && <Notice tone="bad">{action.error}</Notice>}
+
+      {!confirming ? (
+        <Button tone="quiet" className="self-start" onClick={() => setConfirming(true)}>
+          Log out
+        </Button>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <Notice tone="warn" title="Log out of this device?">
+            You will need a new connection code to back up from here again. If encryption is on,
+            keep your recovery code somewhere safe — it is removed from this computer.
+          </Notice>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              tone="danger"
+              busy={action.busy}
+              onClick={() =>
+                action.run(async () => {
+                  await api.disconnect()
+                  // Status polling will flip the window back to onboarding.
+                })
+              }
+            >
+              Log out
+            </Button>
+            <Button tone="quiet" disabled={action.busy} onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </Card>
   )
 }
 

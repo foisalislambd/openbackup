@@ -61,6 +61,8 @@ func run(args []string) error {
 	switch command {
 	case "connect":
 		return cmdConnect(rest)
+	case "disconnect", "logout":
+		return cmdDisconnect(rest)
 	case "run", "daemon":
 		return cmdRun(rest)
 	case "status":
@@ -107,6 +109,7 @@ func usage() {
 Getting started:
   openbackup connect --server https://backup.example.com --code ABCD-EFGH
   openbackup service install        Run in the background from now on
+  openbackup disconnect             Log out of this device (keeps server backups)
 
 Everyday use:
   openbackup status                 Is my data backed up?
@@ -230,6 +233,26 @@ server does not have a copy:
 	}
 	fmt.Println("\nNext step: 'openbackup service install' to back up automatically in the background,")
 	fmt.Println("or 'openbackup backup' to run one backup now.")
+	return nil
+}
+
+func cmdDisconnect(args []string) error {
+	fs := flag.NewFlagSet("disconnect", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	agent, err := openAgent()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := agent.Disconnect(ctx); err != nil {
+		return err
+	}
+	fmt.Println("Logged out on this device. Backups on the server are still there.")
+	fmt.Println("To remove them too, delete this device in the dashboard under Devices.")
+	fmt.Println("Connect again with a new code when you are ready.")
 	return nil
 }
 

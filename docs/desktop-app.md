@@ -41,7 +41,7 @@ window and the terminal stay in agreement.
 | **Overview** | The one answer that matters: everything is backed up, or here is what is wrong. Last backup, files protected, size, versions kept. Back up now, pause for an hour |
 | **Folders** | What is backed up, with the folders found on this computer that are not yet included and a button for each. Pause or remove one, or open it in the file manager |
 | **Restore** | Browse any backup one folder at a time, search by name, restore to a folder you pick, with progress and a cancel button |
-| **Settings** | Upload ceiling, the CPU threshold, and the pause rules for metered connections, battery and full-screen apps. End-to-end encryption, including the recovery code |
+| **Settings** | Upload ceiling, the CPU threshold, and the pause rules for metered connections, battery and full-screen apps. End-to-end encryption, including the recovery code. **Log out** to disconnect this device |
 | **Diagnostics** | The same checks as `openbackup doctor`: configuration, service, server, folders, backups. Plus a link to the logs and to the dashboard |
 
 ## The tray icon

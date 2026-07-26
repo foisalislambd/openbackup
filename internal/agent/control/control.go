@@ -382,6 +382,33 @@ func (a *Agent) Connect(ctx context.Context, req ConnectRequest) (*ConnectResult
 	}, nil
 }
 
+// Disconnect clears this device's enrolment from the local config so the app
+// returns to the connect screen. It does not delete backups on the server —
+// remove the device in the dashboard if you want that too. The recovery code is
+// wiped from disk with the rest of the credentials; write it down first if you
+// still need it.
+func (a *Agent) Disconnect(ctx context.Context) error {
+	if !a.cfg.Enrolled() {
+		return ErrNotConnected
+	}
+	// Best-effort: stop in-flight work so the daemon does not keep using stale
+	// credentials after we wipe them.
+	_ = a.Pause(ctx, 24*time.Hour)
+
+	if err := a.cfg.Update(func(c *config.Config) error {
+		c.ServerURL = ""
+		c.DeviceID = ""
+		c.DeviceToken = ""
+		c.DeviceName = ""
+		c.Encryption = config.Encryption{}
+		return nil
+	}); err != nil {
+		return err
+	}
+	_ = a.applyToDaemon(ctx)
+	return nil
+}
+
 // deriveKey reproduces an existing key from a recovery code, or makes a new one.
 func deriveKey(recoveryCode string) (*codec.Key, error) {
 	if code := strings.TrimSpace(recoveryCode); code != "" {

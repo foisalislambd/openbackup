@@ -195,6 +195,21 @@ func (a *App) Connect(req control.ConnectRequest) (*control.ConnectResult, error
 	return result, nil
 }
 
+// Disconnect logs this device out locally so the window returns to onboarding.
+// Server-side backups stay until the device is removed in the dashboard.
+func (a *App) Disconnect() error {
+	if a.agent == nil {
+		return a.configError()
+	}
+	ctx, cancel := context.WithTimeout(a.context(), 30*time.Second)
+	defer cancel()
+	if err := a.agent.Disconnect(ctx); err != nil {
+		return err
+	}
+	a.notify("Logged out", "This device is no longer connected. Connect again with a new code when you are ready.")
+	return nil
+}
+
 // -----------------------------------------------------------------------------
 // Folders
 // -----------------------------------------------------------------------------
