@@ -26,6 +26,7 @@ function keepDist(): Plugin {
   }
 }
 
+// https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss(), keepDist()],
   build: {
