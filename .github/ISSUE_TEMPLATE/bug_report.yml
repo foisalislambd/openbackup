@@ -1,0 +1,100 @@
+name: Bug report
+description: Something behaved wrongly — a crash, a wrong result, a file that was not backed up
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A backup that silently skipped something counts as a bug even though nothing crashed.
+
+        If this is a security problem, please do not file it here — see
+        [SECURITY.md](https://github.com/openbackup/openbackup/blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+      placeholder: |
+        I added ~/Projects and expected the source files to be backed up.
+        `openbackup snapshots` shows 0 files.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The shortest sequence that shows the problem. Exact commands help.
+      placeholder: |
+        1. openbackup folders add ~/Projects
+        2. openbackup backup
+        3. openbackup snapshots
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part
+      multiple: true
+      options:
+        - Agent (background service or CLI)
+        - Server
+        - Dashboard (in a browser)
+        - Desktop app
+        - Installer script
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: openbackup doctor
+      description: >
+        Output of `openbackup doctor`, which checks the whole chain at once.
+        Redact any paths you would rather not publish.
+      render: text
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Versions
+      description: >
+        `openbackup version`, and `openbackup-server version` or the image tag if
+        the server is involved.
+      placeholder: agent v0.3.1, server openbackup/server:latest
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: Operating system and version of the affected machine.
+      placeholder: Windows 11 24H2 / Ubuntu 24.04 / macOS 15.3 on Apple silicon
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: >
+        Agent logs live in its state directory (`%LocalAppData%\OpenBackup`,
+        `~/Library/Caches/OpenBackup`, `~/.cache/OpenBackup`). Server logs are
+        `docker compose logs`. A few lines around the failure is enough.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: data-safety
+    attributes:
+      label: Before you post
+      options:
+        - label: I have removed anything private from the paths, logs and screenshots above.
+          required: true

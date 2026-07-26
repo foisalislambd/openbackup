@@ -1,0 +1,49 @@
+name: Feature or change request
+description: Suggest something that should work differently
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The project aims at zero configuration, so the most useful requests describe a
+        situation the software handles badly rather than a setting to add. A good
+        outcome is often a better default, not a new option.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What were you trying to do, and where did the software get in the way?
+      placeholder: >
+        I keep an external drive that is only plugged in weekly. The agent reports
+        the folder as missing, so the whole device looks unhealthy.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like to happen
+      description: A rough idea is fine. If you can think of a default that needs no setting, say so.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried or considered
+      description: Existing commands or settings that came close, and why they were not enough.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Does it fit the project's constraints
+      description: >
+        Not a test — just so the discussion starts in the right place. See
+        [CONTRIBUTING.md](https://github.com/openbackup/openbackup/blob/main/CONTRIBUTING.md).
+      options:
+        - label: It does not require the agent to touch files outside the user's own data.
+        - label: It does not add a decision most users would have to make.
+        - label: It does not make the idle agent noticeably heavier.

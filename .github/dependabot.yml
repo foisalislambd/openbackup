@@ -1,0 +1,49 @@
+# Dependency updates.
+#
+# Grouped and monthly on purpose: a backup tool gains nothing from a stream of
+# single-dependency pull requests, and a smaller number of larger updates is
+# easier to review against the one rule that matters here - everything must still
+# cross-compile with CGO_ENABLED=0.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      go-dependencies:
+        patterns: ['*']
+
+  # The desktop app is a separate module and tracks the Wails release it is built
+  # against, so it updates on its own schedule.
+  - package-ecosystem: gomod
+    directory: /desktop
+    schedule:
+      interval: monthly
+    groups:
+      desktop-go-dependencies:
+        patterns: ['*']
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: monthly
+    groups:
+      dashboard:
+        patterns: ['*']
+
+  - package-ecosystem: npm
+    directory: /desktop/frontend
+    schedule:
+      interval: monthly
+    groups:
+      desktop-frontend:
+        patterns: ['*']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*']
