@@ -77,8 +77,20 @@ func systemRoots(goos string) []Rule {
 			{"/bin", "operating system binaries"},
 			{"/sbin", "operating system binaries"},
 			{"/etc", "system configuration"},
-			{"/var", "system state"},
-			{"/private", "system private data"},
+			{"/var/db", "system database"},
+			{"/var/root", "root home directory"},
+			{"/var/log", "system logs"},
+			{"/var/vm", "virtual memory files"},
+			{"/var/tmp", "temporary files"},
+			{"/var/folders", "per-user temporary files"},
+			{"/private/etc", "system configuration"},
+			{"/private/var/db", "system database"},
+			{"/private/var/root", "root home directory"},
+			{"/private/var/log", "system logs"},
+			{"/private/var/vm", "virtual memory files"},
+			{"/private/var/folders", "per-user temporary files"},
+			{"/tmp", "temporary files"},
+			{"/private/tmp", "temporary files"},
 			{"/cores", "kernel core dumps"},
 			{"/dev", "device nodes"},
 			{"/Volumes", "mounted volumes; add specific drives explicitly"},
@@ -117,6 +129,34 @@ func systemRoots(goos string) []Rule {
 			{"/media", "removable media; add specific drives explicitly"},
 		}
 	}
+}
+
+// softSystemPrefixes are system roots a user may still choose explicitly as a
+// backup folder. Walks that escape into them from elsewhere still stop, but
+// Go's testing.TempDir (under /tmp or /var/folders) must be backable or every
+// agent test is empty. Exact prefixes such as /tmp itself remain forbidden.
+func softSystemPrefixes(goos string) map[string]struct{} {
+	var list []string
+	switch goos {
+	case "windows":
+		// No soft prefixes: Windows temp is under the user profile, not a
+		// protected system root.
+	case "darwin":
+		list = []string{
+			"/tmp", "/private/tmp",
+			"/var/folders", "/private/var/folders",
+			"/cores", "/Volumes",
+		}
+	default:
+		list = []string{"/tmp", "/var/tmp", "/run", "/mnt", "/media"}
+	}
+	out := make(map[string]struct{}, len(list))
+	for _, p := range list {
+		if clean := normalizeAbs(p); clean != "" {
+			out[clean] = struct{}{}
+		}
+	}
+	return out
 }
 
 // junkRules cover files that exist only to serve a local UI or filesystem and

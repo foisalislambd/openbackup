@@ -114,8 +114,9 @@ func (s *Scanner) walkRoot(ctx context.Context, root config.Root, result *Result
 		return err
 	}
 	// Refuse a root that is itself a protected location: a user who types C:\ or
-	// / should get a clear refusal, not a machine-wide read.
-	if d := s.matcher.IsSystemPath(absRoot); d.Skip {
+	// /usr should get a clear refusal, not a machine-wide read. Soft prefixes
+	// such as /tmp only refuse the exact path, so TempDir-based tests work.
+	if d := s.matcher.IsForbiddenRoot(absRoot); d.Skip {
 		return fmt.Errorf("refusing to back up a protected system location (%s)", d.Reason)
 	}
 
@@ -147,7 +148,9 @@ func (s *Scanner) walkRoot(ctx context.Context, root config.Root, result *Result
 
 		// Protected locations win over everything, including user includes: a
 		// junction or symlink pointing into C:\Windows must not drag the OS in.
-		if d := s.matcher.IsSystemPath(abs); d.Skip {
+		// Paths that stay inside an accepted root under a soft prefix (/tmp) are
+		// allowed — otherwise every TempDir-based backup would be empty.
+		if d := s.matcher.SystemPathOutside(abs, absRoot); d.Skip {
 			result.recordSkip(Skip{SnapPath: snapPath, Reason: d.Reason, Rule: d.Rule,
 				Category: string(d.Category), IsDir: entry.IsDir()})
 			if entry.IsDir() {

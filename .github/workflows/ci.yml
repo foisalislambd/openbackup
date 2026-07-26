@@ -160,8 +160,10 @@ jobs:
           cache-dependency-path: desktop/frontend/package-lock.json
 
       # Wails links against the platform's webview, so the Linux runner needs the
-      # WebKitGTK headers. Windows builds against WebView2, which ships with the
-      # OS.
+      # WebKitGTK headers. Ubuntu 24.04 (ubuntu-latest) ships webkit2gtk-4.1, and
+      # Wails needs the matching build tag — without it pkg-config looks for the
+      # removed 4.0 package and the compile fails. Windows builds against
+      # WebView2, which ships with the OS.
       - name: Install the Linux webview dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -181,7 +183,13 @@ jobs:
         working-directory: desktop
 
       # Wails builds the frontend itself, so this also proves the embed works.
-      - name: Build
+      - name: Build (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: wails build -tags webkit2_41
+        working-directory: desktop
+
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
         run: wails build
         working-directory: desktop
 
@@ -226,6 +234,8 @@ jobs:
             openbackup/server:ci
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8080/api/v1/health >/dev/null; then break; fi
+            echo "waiting for server ($i)..."
+            docker logs ob 2>&1 | tail -20 || true
             sleep 1
           done
           curl -fsS http://127.0.0.1:8080/api/v1/health

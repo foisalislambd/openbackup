@@ -2,6 +2,7 @@ package ignore
 
 import (
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -42,6 +43,9 @@ type Matcher struct {
 	cfg Config
 	// systemRoots are absolute prefixes that are never traversed.
 	systemRoots []Rule
+	// softRoots are systemRoots that may still be chosen as an explicit backup
+	// root when the path is a descendant (see IsForbiddenRoot).
+	softRoots map[string]struct{}
 	// global holds patterns evaluated against every relative path.
 	global []categorised
 	// devPatterns are evaluated only inside detected project roots.
@@ -92,6 +96,7 @@ func New(cfg Config) *Matcher {
 
 	if !disabled[CategorySystem] {
 		m.systemRoots = SystemRootPaths()
+		m.softRoots = softSystemPrefixes(runtime.GOOS)
 	}
 	addAll := func(cat Category, rules []Rule) {
 		if disabled[cat] {
@@ -133,9 +138,10 @@ func New(cfg Config) *Matcher {
 // MaxFileSize reports the effective size cut-off; zero means unlimited.
 func (m *Matcher) MaxFileSize() int64 { return m.maxFileSize }
 
-// IsSystemPath reports whether abs falls inside a protected OS location. The
-// scanner calls this before opening anything, so a misconfigured backup root
-// such as C:\ still cannot read Windows or ProgramData.
+// IsSystemPath reports whether abs falls inside a protected OS location. Soft
+// prefixes (temp dirs, mount points) still match so a walk that escapes into
+// them is stopped; use IsForbiddenRoot to decide whether a path may be a backup
+// root, and SystemPathOutside when walking inside an already-accepted root.
 func (m *Matcher) IsSystemPath(abs string) Decision {
 	norm := normalizeAbs(abs)
 	if norm == "" {
@@ -147,6 +153,51 @@ func (m *Matcher) IsSystemPath(abs string) Decision {
 		}
 	}
 	return Decision{}
+}
+
+// IsForbiddenRoot reports whether abs must not be configured as a backup root.
+// Hard system prefixes are always refused. Soft prefixes are refused only when
+// the path is exactly the prefix (backing up all of /tmp), so a folder inside
+// the OS temp directory — including Go's testing.TempDir — can still be added.
+func (m *Matcher) IsForbiddenRoot(abs string) Decision {
+	norm := normalizeAbs(abs)
+	if norm == "" {
+		return Decision{}
+	}
+	for _, r := range m.systemRoots {
+		if norm == r.Pattern {
+			return Decision{Skip: true, Reason: r.Reason, Rule: r.Pattern, Category: CategorySystem}
+		}
+		if strings.HasPrefix(norm, r.Pattern+"/") {
+			if _, soft := m.softRoots[r.Pattern]; soft {
+				continue
+			}
+			return Decision{Skip: true, Reason: r.Reason, Rule: r.Pattern, Category: CategorySystem}
+		}
+	}
+	return Decision{}
+}
+
+// SystemPathOutside reports a protected location reached from root that is not
+// part of the tree the user asked to back up — typically a Windows junction
+// into C:\Windows. Paths that stay under root are allowed even when root itself
+// sits under a soft system prefix such as /tmp.
+func (m *Matcher) SystemPathOutside(abs, root string) Decision {
+	d := m.IsSystemPath(abs)
+	if !d.Skip {
+		return Decision{}
+	}
+	rootNorm := normalizeAbs(root)
+	absNorm := normalizeAbs(abs)
+	if rootNorm == "" || absNorm == "" {
+		return d
+	}
+	if absNorm == rootNorm || strings.HasPrefix(absNorm, rootNorm+"/") {
+		if rootDec := m.IsSystemPath(root); rootDec.Skip && rootDec.Rule == d.Rule {
+			return Decision{}
+		}
+	}
+	return d
 }
 
 // RegisterProject records a detected project so that developer rules apply

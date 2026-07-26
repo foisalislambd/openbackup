@@ -114,7 +114,11 @@ web-check:
 desktop:
 	@command -v wails >/dev/null || \
 		(echo "install the Wails CLI: go install github.com/wailsapp/wails/v2/cmd/wails@latest" && exit 1)
-	cd desktop && wails build -trimpath -ldflags '$(LDFLAGS)'
+	@if [ "$$(uname -s)" = Linux ]; then \
+		cd desktop && wails build -trimpath -ldflags '$(LDFLAGS)' -tags webkit2_41; \
+	else \
+		cd desktop && wails build -trimpath -ldflags '$(LDFLAGS)'; \
+	fi
 	@echo "desktop app in desktop/build/bin"
 
 .PHONY: desktop-dev

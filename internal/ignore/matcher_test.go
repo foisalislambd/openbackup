@@ -138,7 +138,7 @@ func TestDisableCategory(t *testing.T) {
 
 func TestSystemPathsAreNeverBackedUp(t *testing.T) {
 	m := New(Config{})
-	var protected, allowed []string
+	var protected, allowed, softDescendant []string
 	switch runtime.GOOS {
 	case "windows":
 		protected = []string{`C:\Windows`, `C:\Windows\System32\ntdll.dll`, `C:\Program Files\App\bin.exe`, `C:\$Recycle.Bin\S-1-5`, `c:\programdata\state.db`}
@@ -146,18 +146,28 @@ func TestSystemPathsAreNeverBackedUp(t *testing.T) {
 	case "darwin":
 		protected = []string{"/System/Library/x", "/usr/bin/ls", "/private/var/db"}
 		allowed = []string{"/Users/alice/Documents/a.txt"}
+		softDescendant = []string{"/var/folders/xx/T/openbackup-test", "/private/var/folders/xx/T/openbackup-test"}
 	default:
-		protected = []string{"/proc/1/mem", "/sys/class", "/dev/sda", "/var/lib/docker/overlay2/x"}
+		protected = []string{"/proc/1/mem", "/sys/class", "/dev/sda", "/var/lib/docker/overlay2/x", "/usr/bin/ls", "/tmp"}
 		allowed = []string{"/home/alice/Documents/a.txt"}
+		softDescendant = []string{"/tmp/openbackup-test/home"}
 	}
 	for _, p := range protected {
-		if d := m.IsSystemPath(p); !d.Skip {
-			t.Errorf("expected %q to be protected", p)
+		if d := m.IsForbiddenRoot(p); !d.Skip {
+			t.Errorf("expected %q to be a forbidden root", p)
 		}
 	}
 	for _, p := range allowed {
-		if d := m.IsSystemPath(p); d.Skip {
-			t.Errorf("expected %q to be allowed, got %q", p, d.Reason)
+		if d := m.IsForbiddenRoot(p); d.Skip {
+			t.Errorf("expected %q to be allowed as a root, got %q", p, d.Reason)
+		}
+	}
+	for _, p := range softDescendant {
+		if d := m.IsForbiddenRoot(p); d.Skip {
+			t.Errorf("expected soft descendant %q to be allowed as a root, got %q", p, d.Reason)
+		}
+		if d := m.SystemPathOutside(p+"/a.txt", p); d.Skip {
+			t.Errorf("expected path under accepted soft root %q to be readable, got %q", p, d.Reason)
 		}
 	}
 }

@@ -34,7 +34,7 @@ ARG DATE=unknown
 # CGO stays off: the SQLite driver is pure Go, which is what lets this run on a
 # scratch image and cross-compile without a C toolchain.
 ENV CGO_ENABLED=0
-RUN go build -trimpath \
+RUN mkdir -p /data && go build -trimpath \
 	-ldflags "-s -w \
 	-X github.com/foisalislambd/openbackup/internal/version.Version=${VERSION} \
 	-X github.com/foisalislambd/openbackup/internal/version.Commit=${COMMIT} \
@@ -46,8 +46,14 @@ FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=build /out/openbackup-server /usr/local/bin/openbackup-server
 
+# Distroless has no shell, so ownership has to be set at COPY time. Without a
+# writable /data the process exits on startup and the published port never
+# answers — which is exactly what the CI smoke test caught.
+COPY --from=build --chown=nonroot:nonroot /data/ /data/
+
 # The data directory holds the SQLite database and every blob, so it must be a
-# volume: losing it loses the backups.
+# volume: losing it loses the backups. On first mount Docker copies the image
+# directory (including ownership) into an empty volume.
 VOLUME /data
 ENV OPENBACKUP_DATA_DIR=/data \
 	OPENBACKUP_ADDR=:8080 \

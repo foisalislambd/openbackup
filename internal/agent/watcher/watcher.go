@@ -215,7 +215,7 @@ func (w *Watcher) AddRoots(ctx context.Context, roots []config.Root) error {
 			if !entry.IsDir() {
 				return nil
 			}
-			if d := matcher.IsSystemPath(abs); d.Skip {
+			if d := matcher.SystemPathOutside(abs, absRoot); d.Skip {
 				return fs.SkipDir
 			}
 			if abs != absRoot {
@@ -339,7 +339,7 @@ func (w *Watcher) handleEvent(ctx context.Context, event fsnotify.Event) bool {
 		return false
 	}
 	matcher := w.rules()
-	if d := matcher.IsSystemPath(event.Name); d.Skip {
+	if d := matcher.SystemPathOutside(event.Name, absRoot); d.Skip {
 		return false
 	}
 	rel, ok := ignore.RelPath(absRoot, event.Name)

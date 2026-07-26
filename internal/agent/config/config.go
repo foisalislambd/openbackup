@@ -392,7 +392,7 @@ func (c *Config) AddRoot(path string) error {
 		return fmt.Errorf("config: %s is not a folder", abs)
 	}
 	matcher := ignore.New(ignore.Config{})
-	if d := matcher.IsSystemPath(abs); d.Skip {
+	if d := matcher.IsForbiddenRoot(abs); d.Skip {
 		return fmt.Errorf("config: %s is a protected system location (%s)", abs, d.Reason)
 	}
 	for _, r := range c.Roots {
