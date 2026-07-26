@@ -41,13 +41,13 @@ export function AppSidebar({
           onClick={closeMobileSidebar}
           className={cn('flex min-w-0 flex-1 items-center gap-3 no-underline', !showLabels && 'justify-center')}
         >
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500 text-base font-bold text-white shadow-md shadow-brand-500/25">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-500 text-sm font-bold text-white shadow-theme-xs">
             O
           </span>
           {showLabels && (
-            <div className="min-w-0">
-              <p className="truncate text-[15px] font-semibold text-gray-900 dark:text-white">OpenBackup</p>
-              <p className="truncate text-xs text-gray-500">v{version}</p>
+            <div className="min-w-0 leading-tight">
+              <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">OpenBackup</p>
+              <p className="truncate text-[11px] text-gray-500">v{version}</p>
             </div>
           )}
         </Link>
@@ -75,17 +75,19 @@ export function AppSidebar({
               title={!showLabels ? item.label : undefined}
               aria-current={active ? 'page' : undefined}
               className={cn(
-                'group relative flex items-center gap-3 rounded-xl px-3 py-3 text-[15px] font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40',
+                'group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30',
                 active
-                  ? 'bg-brand-500 text-white shadow-md shadow-brand-500/25'
-                  : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/8',
+                  ? 'bg-brand-50 text-brand-500 dark:bg-brand-500/12 dark:text-brand-400'
+                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5',
                 !showLabels && 'justify-center px-0',
               )}
             >
               <Icon
                 className={cn(
-                  'h-[22px] w-[22px] shrink-0',
-                  active ? 'text-white' : 'text-gray-500 group-hover:text-gray-700 dark:text-gray-400',
+                  'h-5 w-5 shrink-0',
+                  active
+                    ? 'text-brand-500 dark:text-brand-400'
+                    : 'text-gray-500 group-hover:text-gray-700 dark:text-gray-400 dark:group-hover:text-gray-300',
                 )}
               />
               {showLabels && <span className="truncate">{item.label}</span>}

@@ -6,25 +6,23 @@ import { cn } from '@/lib/cn'
 
 export function AppHeader({
   title,
-  subtitle,
   dark,
   onToggleTheme,
 }: {
   title: string
-  subtitle: string
   dark: boolean
   onToggleTheme: () => void
 }) {
   const { isMobileOpen, isDesktop, toggleMobileSidebar } = useSidebar()
 
   return (
-    <header className="admin-topbar sticky top-0 z-30 w-full bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 dark:bg-gray-900/95 dark:supports-[backdrop-filter]:bg-gray-900/80">
-      <div className="flex min-h-16 items-center gap-2 px-3 sm:gap-3 sm:px-5 lg:px-6">
+    <header className="admin-topbar sticky top-0 z-30 w-full overflow-hidden bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 dark:bg-gray-900/95 dark:supports-[backdrop-filter]:bg-gray-900/80">
+      <div className="flex h-full items-center gap-2 px-3 sm:gap-3 sm:px-5 lg:px-6">
         <button
           type="button"
           onClick={toggleMobileSidebar}
           className={cn(
-            'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-600 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30 sm:h-10 sm:w-10 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-white/5',
+            'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-600 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-white/5',
             isDesktop && 'lg:hidden',
           )}
           aria-label={!isDesktop && isMobileOpen ? 'Close menu' : 'Open menu'}
@@ -33,26 +31,22 @@ export function AppHeader({
           {!isDesktop && isMobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
 
-        <div className="min-w-0 flex-1 lg:hidden">
-          <PageTitle title={title} subtitle={subtitle} />
-        </div>
-
-        <div className="hidden min-w-0 flex-1 lg:block">
-          <PageTitle title={title} subtitle={subtitle} />
+        <div className="min-w-0 flex-1">
+          <PageTitle title={title} />
         </div>
 
         <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
           <button
             type="button"
             onClick={onToggleTheme}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-600 transition hover:bg-gray-50 sm:h-10 sm:w-10 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-white/5"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-600 transition hover:bg-gray-50 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-white/5"
             aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
           >
             {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </button>
           <Link
             to="/files"
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-brand-500 px-2.5 text-sm font-semibold text-white shadow-sm shadow-brand-500/25 transition hover:bg-brand-600 sm:h-10 sm:gap-2 sm:px-3.5"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-brand-500 px-2.5 text-sm font-medium text-white shadow-theme-xs transition hover:bg-brand-600 sm:gap-2 sm:px-3.5"
           >
             <FolderOpen className="h-4 w-4" />
             <span className="hidden sm:inline">Browse</span>

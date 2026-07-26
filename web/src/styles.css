@@ -2,22 +2,24 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/*
- * ZenPanel-inspired admin palette for the OpenBackup dashboard.
- */
 @theme {
-  --font-sans: 'Outfit', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: Outfit, 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 
+  --color-brand-25: #f2f7ff;
   --color-brand-50: #ecf3ff;
   --color-brand-100: #dde9ff;
+  --color-brand-200: #c2d6ff;
   --color-brand-300: #9cb9ff;
   --color-brand-400: #7592ff;
   --color-brand-500: #465fff;
   --color-brand-600: #3641f5;
   --color-brand-700: #2a31d8;
   --color-brand-800: #252dae;
+  --color-brand-900: #262e89;
+  --color-brand-950: #161950;
 
+  --color-gray-25: #fcfcfd;
   --color-gray-50: #f9fafb;
   --color-gray-100: #f2f4f7;
   --color-gray-200: #e4e7ec;
@@ -28,16 +30,45 @@
   --color-gray-700: #344054;
   --color-gray-800: #1d2939;
   --color-gray-900: #101828;
+  --color-gray-950: #0c111d;
+  --color-gray-dark: #1a2231;
 
+  --color-success-25: #f6fef9;
   --color-success-50: #ecfdf3;
+  --color-success-100: #d1fadf;
+  --color-success-200: #a6f4c5;
+  --color-success-300: #6ce9a6;
+  --color-success-400: #32d583;
   --color-success-500: #12b76a;
   --color-success-600: #039855;
-  --color-warning-50: #fffaeb;
-  --color-warning-500: #f79009;
-  --color-error-50: #fef3f2;
-  --color-error-500: #f04438;
+  --color-success-700: #027a48;
 
-  /* Legacy aliases used across pages during migration */
+  --color-error-25: #fffbfa;
+  --color-error-50: #fef3f2;
+  --color-error-100: #fee4e2;
+  --color-error-200: #fecdca;
+  --color-error-300: #fda29b;
+  --color-error-400: #f97066;
+  --color-error-500: #f04438;
+  --color-error-600: #d92d20;
+  --color-error-700: #b42318;
+
+  --color-warning-25: #fffcf5;
+  --color-warning-50: #fffaeb;
+  --color-warning-100: #fef0c7;
+  --color-warning-200: #fedf89;
+  --color-warning-300: #fec84b;
+  --color-warning-400: #fdb022;
+  --color-warning-500: #f79009;
+  --color-warning-600: #dc6803;
+  --color-warning-700: #b54708;
+
+  --shadow-theme-xs: 0px 1px 2px 0px rgba(16, 24, 40, 0.05);
+  --shadow-theme-sm: 0px 1px 3px 0px rgba(16, 24, 40, 0.1), 0px 1px 2px 0px rgba(16, 24, 40, 0.06);
+  --shadow-theme-md: 0px 4px 8px -2px rgba(16, 24, 40, 0.1), 0px 2px 4px -2px rgba(16, 24, 40, 0.06);
+  --shadow-focus-ring: 0px 0px 0px 4px rgba(70, 95, 255, 0.12);
+
+  /* Legacy aliases used by older page classes */
   --color-canvas: #f9fafb;
   --color-surface: #ffffff;
   --color-surface-muted: #f2f4f7;
@@ -54,8 +85,8 @@
   --color-folder: #fdb022;
   --color-file: #7592ff;
 
-  --shadow-panel: 0 1px 2px 0 rgba(16, 24, 40, 0.05);
-  --shadow-lift: 0 8px 24px rgba(70, 95, 255, 0.12);
+  --shadow-panel: var(--shadow-theme-xs);
+  --shadow-lift: var(--shadow-theme-md);
 }
 
 .dark {
@@ -67,7 +98,7 @@
   --color-ink: #f9fafb;
   --color-ink-muted: #98a2b3;
   --color-brand: #7592ff;
-  --color-brand-soft: rgba(70, 95, 255, 0.15);
+  --color-brand-soft: rgba(70, 95, 255, 0.12);
   --color-brand-strong: #9cb9ff;
   --color-good: #12b76a;
   --color-warn: #f79009;
@@ -75,7 +106,7 @@
   --color-folder: #fdb022;
   --color-file: #9cb9ff;
   --shadow-panel: none;
-  --shadow-lift: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-lift: var(--shadow-theme-md);
 }
 
 html,
@@ -86,14 +117,15 @@ body,
 
 html,
 body {
-  background-color: var(--color-canvas);
-  color: var(--color-ink);
+  background-color: var(--color-gray-50);
+  color: var(--color-gray-900);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
 .dark body {
-  background-color: #0c111d;
+  background-color: var(--color-gray-950);
+  color: var(--color-gray-50);
 }
 
 .tabular {
@@ -102,46 +134,48 @@ body {
 
 .admin-shell {
   font-family: var(--font-sans);
-  background-color: #f9fafb;
+  background-color: var(--color-gray-50);
 }
 
 .dark .admin-shell {
-  background-color: #0c111d;
+  background-color: var(--color-gray-950);
 }
 
 .admin-main {
   height: 100dvh;
   width: 100%;
   overflow: hidden;
-  background-color: #f9fafb;
+  background-color: var(--color-gray-50);
 }
 
 .dark .admin-main {
-  background-color: #101828;
+  background-color: var(--color-gray-900);
 }
 
 .admin-topbar {
+  height: 4rem;
   min-height: 4rem;
+  max-height: 4rem;
   flex-shrink: 0;
-  border-bottom: 1px solid #e4e7ec;
+  border-bottom: 1px solid var(--color-gray-200);
 }
 
 .dark .admin-topbar {
-  border-bottom-color: #1d2939;
+  border-bottom-color: var(--color-gray-800);
 }
 
 .admin-card,
 .panel {
   border-radius: 0.75rem;
-  border: 1px solid #e4e7ec;
+  border: 1px solid var(--color-gray-200);
   background-color: #ffffff;
-  box-shadow: var(--shadow-panel);
+  box-shadow: var(--shadow-theme-xs);
 }
 
 .dark .admin-card,
 .dark .panel {
-  border-color: #1d2939;
-  background-color: rgba(255, 255, 255, 0.03);
+  border-color: var(--color-gray-800);
+  background-color: var(--color-gray-dark);
   box-shadow: none;
 }
 
@@ -152,11 +186,11 @@ body {
 
 .admin-scrollbar::-webkit-scrollbar-thumb {
   border-radius: 9999px;
-  background-color: #d0d5dd;
+  background-color: var(--color-gray-300);
 }
 
 .dark .admin-scrollbar::-webkit-scrollbar-thumb {
-  background-color: #344054;
+  background-color: var(--color-gray-700);
 }
 
 .no-scrollbar::-webkit-scrollbar {
@@ -179,7 +213,11 @@ body {
 }
 
 .file-row:hover {
-  background: var(--color-surface-muted);
+  background: var(--color-gray-100);
+}
+
+.dark .file-row:hover {
+  background: rgba(255, 255, 255, 0.05);
 }
 
 @media (max-width: 900px) {
@@ -210,9 +248,9 @@ body {
   gap: 0.85rem;
   padding: 1.1rem;
   border-radius: 0.75rem;
-  border: 1px solid var(--color-border-subtle);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-panel);
+  border: 1px solid var(--color-gray-200);
+  background: #ffffff;
+  box-shadow: var(--shadow-theme-xs);
   text-align: left;
   transition:
     border-color 0.15s ease,
@@ -220,9 +258,15 @@ body {
     transform 0.15s ease;
 }
 
+.dark .content-tile {
+  border-color: var(--color-gray-800);
+  background: var(--color-gray-dark);
+  box-shadow: none;
+}
+
 .content-tile:hover {
-  border-color: color-mix(in srgb, var(--color-brand) 40%, var(--color-border-subtle));
-  box-shadow: var(--shadow-lift);
+  border-color: var(--color-brand-300);
+  box-shadow: var(--shadow-theme-md);
   transform: translateY(-1px);
 }
 

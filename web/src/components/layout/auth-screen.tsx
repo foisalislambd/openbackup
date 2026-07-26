@@ -18,7 +18,7 @@ export function AuthScreen({ mode, onDone }: { mode: 'setup' | 'signin'; onDone:
   return (
     <main className="flex min-h-dvh flex-col justify-center bg-gray-50 px-5 py-10 dark:bg-gray-900 sm:px-10">
       <div className="mx-auto w-full max-w-[400px]">
-        <div className="mb-8 flex h-11 w-11 items-center justify-center rounded-xl bg-brand-500 text-base font-bold text-white shadow-md shadow-brand-500/25">
+        <div className="mb-8 flex h-11 w-11 items-center justify-center rounded-xl bg-brand-500 text-base font-bold text-white shadow-theme-xs">
           O
         </div>
         <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-white">

@@ -3,15 +3,12 @@
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/cn'
 
-export function PageTitle({ title, subtitle }: { title: string; subtitle?: string }) {
+export function PageTitle({ title }: { title: string; subtitle?: string }) {
   return (
-    <div className="min-w-0">
-      <h1 className="truncate text-lg font-semibold tracking-tight text-gray-900 dark:text-white sm:text-xl">
+    <div className="min-w-0 leading-tight">
+      <h1 className="truncate text-base font-semibold tracking-tight text-gray-900 dark:text-white sm:text-lg">
         {title}
       </h1>
-      {subtitle && (
-        <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400 sm:text-sm">{subtitle}</p>
-      )}
     </div>
   )
 }
@@ -108,11 +105,11 @@ export function Button({
   className?: string
 }) {
   const styles: Record<string, string> = {
-    primary: 'bg-brand-500 text-white hover:bg-brand-600 shadow-sm shadow-brand-500/20',
+    primary: 'bg-brand-500 text-white shadow-theme-xs hover:bg-brand-600 disabled:bg-brand-300',
     secondary:
-      'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-transparent dark:text-gray-200 dark:hover:bg-white/5',
+      'bg-white text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-400 dark:ring-gray-700 dark:hover:bg-white/[0.03]',
     danger: 'border border-error-500 text-error-500 hover:bg-error-50 dark:hover:bg-error-500/10',
-    ghost: 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-white/5 dark:hover:text-white',
+    ghost: 'text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/5 dark:hover:text-gray-300',
   }
   const base = cn(
     'inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
@@ -145,7 +142,7 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
 }
 
 export const inputClass =
-  'mt-1.5 h-11 w-full rounded-lg border border-gray-200 bg-white px-3.5 text-sm text-gray-900 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-brand-400 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white'
+  'mt-1.5 h-11 w-full rounded-lg border border-gray-300 bg-transparent px-3.5 text-sm text-gray-800 shadow-theme-xs outline-none transition placeholder:text-gray-400 focus:border-brand-300 focus:ring-[3px] focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30'
 
 export function Empty({ title, hint }: { title: string; hint?: string }) {
   return (
