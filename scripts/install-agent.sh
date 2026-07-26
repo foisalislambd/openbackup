@@ -2,11 +2,12 @@
 # OpenBackup agent installer for Linux and macOS.
 #
 #   curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
-#   openbackup connect --server https://YOUR-SERVER --code YOUR-CODE
 #
-# Prefers a GitHub release binary; if none exists, builds from git (downloads a
-# temporary Go toolchain if needed). Installs one binary and a background
-# service. Nothing is backed up until you connect with a dashboard code.
+# Prefers a GitHub release binary; if none exists, builds the agent from git.
+# On Linux it also downloads the desktop app when a release binary exists
+# (same window as Windows). Skip with OPENBACKUP_SKIP_DESKTOP=1.
+#
+# Nothing is backed up until you connect with a dashboard code (or open the app).
 set -eu
 
 VERSION="${OPENBACKUP_VERSION:-}"
@@ -15,6 +16,8 @@ REPO="${OPENBACKUP_REPO:-https://github.com/foisalislambd/openbackup.git}"
 REF="${OPENBACKUP_REF:-main}"
 GO_VERSION="${OPENBACKUP_GO_VERSION:-1.26.5}"
 FORCE_BUILD="${OPENBACKUP_FORCE_BUILD:-0}"
+SKIP_DESKTOP="${OPENBACKUP_SKIP_DESKTOP:-0}"
+PREFIX="${OPENBACKUP_PREFIX:-}"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -38,10 +41,13 @@ esac
 
 # Root → system-wide. Otherwise → per-user (better for personal machines).
 if [ "$(id -u)" = "0" ]; then
-	bindir=/usr/local/bin
+	bindir="${PREFIX:-/usr/local}/bin"
+	datadir="${PREFIX:-/usr/local}/share"
 	scope=system
 else
-	bindir="${HOME}/.local/bin"
+	home_prefix="${PREFIX:-$HOME/.local}"
+	bindir="$home_prefix/bin"
+	datadir="$home_prefix/share"
 	scope=user
 fi
 mkdir -p "$bindir"
@@ -57,9 +63,15 @@ else
 fi
 
 if [ -n "$VERSION" ]; then
-	url="${RELEASES}/download/${VERSION}/openbackup-${goos}-${goarch}"
+	agent_url="${RELEASES}/download/${VERSION}/openbackup-${goos}-${goarch}"
+	desktop_url="${RELEASES}/download/${VERSION}/openbackup-desktop-${goos}-${goarch}"
+	icon_url="${RELEASES}/download/${VERSION}/openbackup.png"
+	desktop_entry_url="${RELEASES}/download/${VERSION}/openbackup-desktop.desktop"
 else
-	url="${RELEASES}/latest/download/openbackup-${goos}-${goarch}"
+	agent_url="${RELEASES}/latest/download/openbackup-${goos}-${goarch}"
+	desktop_url="${RELEASES}/latest/download/openbackup-desktop-${goos}-${goarch}"
+	icon_url="${RELEASES}/latest/download/openbackup.png"
+	desktop_entry_url="${RELEASES}/latest/download/openbackup-desktop.desktop"
 fi
 
 tmp=$(mktemp -d)
@@ -69,8 +81,8 @@ bin="$tmp/openbackup"
 
 try_download() {
 	say "Downloading the OpenBackup agent (${goos}/${goarch})..."
-	if ! fetch "$url" "$bin"; then
-		say "Release binary not available at $url"
+	if ! fetch "$agent_url" "$bin"; then
+		say "Release binary not available at $agent_url"
 		rm -f "$bin"
 		return 1
 	fi
@@ -122,6 +134,82 @@ build_from_git() {
 	say "Built from source"
 }
 
+# On Linux, also install the desktop app from Releases when available.
+install_desktop_linux() {
+	[ "$goos" = linux ] || return 0
+	[ "$SKIP_DESKTOP" = "1" ] && {
+		say "OPENBACKUP_SKIP_DESKTOP=1 — skipping desktop app"
+		return 0
+	}
+
+	desk="$tmp/openbackup-desktop"
+	say "Looking for Linux desktop app (${goarch})..."
+	if ! fetch "$desktop_url" "$desk" 2>/dev/null; then
+		say "No desktop release binary yet — agent CLI only. Re-run later after a desktop release."
+		rm -f "$desk"
+		return 0
+	fi
+	chmod 755 "$desk"
+
+	cp "$desk" "$bindir/.openbackup-desktop.new"
+	mv "$bindir/.openbackup-desktop.new" "$bindir/openbackup-desktop"
+	say "Installed $bindir/openbackup-desktop"
+
+	applications="$datadir/applications"
+	icons="$datadir/icons/hicolor/256x256/apps"
+	mkdir -p "$applications" "$icons" "$datadir/openbackup"
+
+	if fetch "$icon_url" "$tmp/openbackup.png" 2>/dev/null; then
+		cp "$tmp/openbackup.png" "$icons/openbackup.png"
+		cp "$tmp/openbackup.png" "$datadir/openbackup/appicon.png"
+	fi
+
+	desktop_file="$applications/openbackup-desktop.desktop"
+	if fetch "$desktop_entry_url" "$tmp/entry.desktop" 2>/dev/null; then
+		# Point Exec at the path we actually installed.
+		sed "s|^Exec=.*|Exec=$bindir/openbackup-desktop|" "$tmp/entry.desktop" >"$desktop_file"
+	else
+		cat >"$desktop_file" <<EOF
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=OpenBackup
+GenericName=Backup
+Comment=Automatic backup for your files
+Exec=$bindir/openbackup-desktop
+Icon=openbackup
+Terminal=false
+Categories=Utility;Archiving;
+StartupWMClass=OpenBackup
+Keywords=backup;restore;files;
+EOF
+	fi
+	chmod 644 "$desktop_file"
+
+	if have update-desktop-database; then
+		update-desktop-database "$applications" >/dev/null 2>&1 || true
+	fi
+
+	# Runtime WebKitGTK is required to open the window.
+	if ! ldconfig -p 2>/dev/null | grep -q 'libwebkit2gtk-4\.1\.so'; then
+		if [ ! -e /usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.1.so.0 ] &&
+			[ ! -e /usr/lib/aarch64-linux-gnu/libwebkit2gtk-4.1.so.0 ] &&
+			[ ! -e /usr/lib64/libwebkit2gtk-4.1.so.0 ]; then
+			say ""
+			say "Desktop app needs WebKitGTK 4.1. Install then open openbackup-desktop:"
+			if have apt-get; then
+				say "  sudo apt-get install -y libwebkit2gtk-4.1-0 libgtk-3-0"
+			elif have dnf; then
+				say "  sudo dnf install -y webkit2gtk4.1 gtk3"
+			elif have pacman; then
+				say "  sudo pacman -S webkit2gtk-4.1 gtk3"
+			else
+				say "  (install your distro's webkit2gtk 4.1 package)"
+			fi
+		fi
+	fi
+}
+
 if [ "$FORCE_BUILD" = "1" ]; then
 	say "OPENBACKUP_FORCE_BUILD=1 — skipping release download"
 	build_from_git
@@ -152,10 +240,19 @@ else
 	say "Run '$ob service install' yourself, or start it manually with '$ob run'."
 fi
 
+install_desktop_linux
+
 say ""
 say "Installed. Nothing is being backed up yet."
 say ""
-say "Connect this device using the one-time code from your dashboard:"
+if [ -x "$bindir/openbackup-desktop" ]; then
+	say "Open the app (same as Windows):"
+	say "  openbackup-desktop"
+	say ""
+	say "Or connect from the terminal:"
+else
+	say "Connect this device using the one-time code from your dashboard:"
+fi
 say "  $ob connect --server https://YOUR-SERVER --code YOUR-CODE"
 say ""
 say "Then '$ob status' shows what it is doing, and '$ob folders' shows"

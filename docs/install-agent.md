@@ -10,31 +10,32 @@ hours by default.
 
 ## Linux and macOS
 
-### Desktop app (Linux — same window as Windows)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-desktop-linux.sh | sh
-openbackup-desktop
-```
-
-That installs the agent CLI, the desktop window, and an app-menu entry. First
-launch walks you through connecting with a dashboard code.
-
-### Terminal only
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
+```
+
+On **Linux**, the same script also downloads the desktop app when a release binary
+exists (`openbackup-desktop` + app-menu entry). Open the app and connect with a
+dashboard code, or use the terminal:
+
+```bash
 openbackup connect --server https://backup.example.com --code ABCD-EFGH-JKLM
 ```
 
-Same pattern as the server installer: one script from this repo on GitHub, then
-connect with *your* server URL and code. It prefers a published release binary; if
-none exists yet, it clones the repository and builds the agent (downloading a
-temporary Go toolchain if needed). Then it registers a background service and
-stops.
+Agent-only (no desktop window):
+
+```bash
+OPENBACKUP_SKIP_DESKTOP=1 curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
+```
+
+Same pattern as the server installer: one script from this repo on GitHub. It
+prefers a published release binary; if none exists yet, it clones the repository
+and builds the agent (downloading a temporary Go toolchain if needed). Then it
+registers a background service and stops.
 
 Optional overrides: `OPENBACKUP_FORCE_BUILD=1`, `OPENBACKUP_REPO`, `OPENBACKUP_REF`
-(default `main`), `OPENBACKUP_GO_VERSION`, `OPENBACKUP_VERSION`.
+(default `main`), `OPENBACKUP_GO_VERSION`, `OPENBACKUP_VERSION`,
+`OPENBACKUP_SKIP_DESKTOP=1`.
 
 Where it installs depends on how you run it:
 

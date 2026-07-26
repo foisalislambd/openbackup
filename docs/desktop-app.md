@@ -9,13 +9,16 @@ Available for Windows, macOS and Linux. Same screens and design on every platfor
 
 - **Windows:** download the installer from the
   [releases page](https://github.com/foisalislambd/openbackup/releases).
-- **Linux:** install with one command (agent CLI + desktop window + app-menu entry):
+- **Linux:** the agent installer also installs the desktop app when a release
+  build exists:
 
   ```bash
-  curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-desktop-linux.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
+  openbackup-desktop
   ```
 
-  Or build locally: `make desktop` then `./scripts/install-desktop-linux.sh`.
+  CLI only: `OPENBACKUP_SKIP_DESKTOP=1` before the same curl. Or build locally
+  with `make desktop`.
 - **macOS:** build with `make desktop` for now (same Wails app).
 
 ## It is a client, not the backup
@@ -70,8 +73,8 @@ make desktop-linux-package   # Linux only: release-named binary + .desktop + ico
 ```
 
 On Windows, `./scripts/build.ps1 -Desktop`, or `-Installer` to package it with
-NSIS. On Linux, `scripts/install-desktop-linux.sh` installs a built or released
-binary into `~/.local` and adds an app-menu entry. Each platform's app is built
+NSIS. On Linux, `scripts/install-agent.sh` installs a released desktop binary
+alongside the agent when one is published. Each platform's app is built
 on that platform: there is no cross-compiling a native webview.
 
 Built with [Wails](https://wails.io) — Go for the logic, React and TypeScript for

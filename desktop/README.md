@@ -50,11 +50,8 @@ make desktop-check  # go vet and tsc
 make desktop-linux-package  # Linux: release-named binary + .desktop + icon
 ```
 
-On Linux you can also install a local or release build into `~/.local`:
-
-```bash
-../scripts/install-desktop-linux.sh
-```
+On Linux the agent installer (`scripts/install-agent.sh`) also pulls the desktop
+binary from GitHub Releases when available.
 
 Icons are generated, not drawn:
 
