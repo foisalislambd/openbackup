@@ -2,7 +2,6 @@
  * Home: status first, then each computer as an openable tile.
  */
 
-import type { ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, type Device, type Snapshot, type Usage } from '@/lib/api'
 import { bytes, count, platformLabel, relative } from '@/lib/format'
@@ -182,23 +181,23 @@ export default function HomePage() {
 function HealthBanner({ devices, newest }: { devices: Device[]; newest?: Snapshot }) {
   if (devices.length === 0) {
     return (
-      <div className="relative overflow-hidden rounded-2xl border border-brand-200/60 bg-gradient-to-br from-brand-500 via-brand-600 to-brand-800 p-5 sm:p-6 lg:p-8 dark:border-brand-500/20">
+      <div className="relative overflow-hidden rounded-2xl border border-brand-200/60 bg-gradient-to-br from-brand-500 via-brand-600 to-brand-800 px-5 py-4 sm:px-6 sm:py-5 dark:border-brand-500/20">
         <div
-          className="pointer-events-none absolute -top-16 -right-16 h-48 w-48 rounded-full bg-white/10 blur-2xl"
+          className="pointer-events-none absolute -top-12 -right-12 h-32 w-32 rounded-full bg-white/10 blur-2xl"
           aria-hidden
         />
         <div
-          className="pointer-events-none absolute -bottom-20 -left-10 h-40 w-40 rounded-full bg-brand-300/20 blur-2xl"
+          className="pointer-events-none absolute -bottom-14 -left-8 h-28 w-28 rounded-full bg-brand-300/20 blur-2xl"
           aria-hidden
         />
 
-        <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="min-w-0">
-            <p className="text-sm font-medium text-brand-100">Get started</p>
-            <h2 className="mt-1 text-2xl font-bold tracking-tight text-white sm:text-3xl">
+            <p className="text-xs font-medium text-brand-100">Get started</p>
+            <h2 className="mt-0.5 text-lg font-bold tracking-tight text-white sm:text-xl">
               Ready when you are
             </h2>
-            <p className="mt-2 max-w-xl text-sm text-brand-100/90">
+            <p className="mt-1 max-w-xl text-sm text-brand-100/90">
               Create a connection code, then run{' '}
               <code className="rounded-md bg-white/15 px-1.5 py-0.5 font-mono text-[11px] text-white">
                 openbackup connect
@@ -210,13 +209,13 @@ function HealthBanner({ devices, newest }: { devices: Device[]; newest?: Snapsho
           <div className="flex shrink-0 flex-wrap gap-2">
             <Link
               to="/devices"
-              className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-brand-600 shadow-sm transition hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+              className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-3.5 text-sm font-semibold text-brand-600 shadow-sm transition hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
             >
               Add a device
             </Link>
             <Link
               to="/settings"
-              className="inline-flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-white/25 bg-white/10 px-3.5 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
             >
               Settings
             </Link>
@@ -232,76 +231,124 @@ function HealthBanner({ devices, newest }: { devices: Device[]; newest?: Snapsho
 
   if (failing.length > 0) {
     return (
-      <Banner tone="bad" title={`${failing.length} device${failing.length === 1 ? '' : 's'} reported an error`}>
-        {failing[0].last_error || 'Check Logs for details.'}
-      </Banner>
+      <StatusHero
+        tone="bad"
+        eyebrow="Needs attention"
+        title={`${failing.length} device${failing.length === 1 ? '' : 's'} reported an error`}
+        description={failing[0].last_error || 'Check Logs for details.'}
+        primary={{ to: '/logs', label: 'Open logs' }}
+        secondary={{ to: '/devices', label: 'Devices' }}
+      />
     )
   }
   if (stale.length > 0) {
     return (
-      <Banner tone="warn" title={`${stale.length} device${stale.length === 1 ? '' : 's'} out of date`}>
-        {stale.map((d) => d.name).join(', ')} may be offline.
-      </Banner>
+      <StatusHero
+        tone="warn"
+        eyebrow="Out of date"
+        title={`${stale.length} device${stale.length === 1 ? '' : 's'} need a sync`}
+        description={`${stale.map((d) => d.name).join(', ')} may be offline.`}
+        primary={{ to: '/devices', label: 'Check devices' }}
+        secondary={{ to: '/logs', label: 'Logs' }}
+      />
     )
   }
   if (never.length > 0) {
+    const name = never.length === 1 ? never[0].name : `${never.length} devices`
     return (
-      <Banner tone="warn" title={`${never.length === 1 ? never[0].name : `${never.length} devices`} never backed up`}>
-        {never.length === 1
-          ? 'Start a backup from Devices.'
-          : `${never.map((d) => d.name).join(', ')} need a first backup.`}
-      </Banner>
+      <StatusHero
+        tone="warn"
+        eyebrow="Almost there"
+        title={`${name} never backed up`}
+        description={
+          never.length === 1
+            ? 'Run the first backup from Devices to start protecting files.'
+            : `${never.map((d) => d.name).join(', ')} still need a first backup.`
+        }
+        primary={{ to: '/devices', label: 'Start backup' }}
+        secondary={{ to: '/settings', label: 'Settings' }}
+      />
     )
   }
   return (
-    <Banner tone="good" title="Everything is backed up">
-      Last run {relative(newest?.started_at)} · {count(newest?.file_count)} files.
-    </Banner>
+    <StatusHero
+      tone="good"
+      eyebrow="All good"
+      title="Everything is backed up"
+      description={`Last run ${relative(newest?.started_at)} · ${count(newest?.file_count)} files.`}
+      primary={{ to: '/files', label: 'Browse files' }}
+      secondary={{ to: '/devices', label: 'Devices' }}
+    />
   )
 }
 
-function Banner({
+function StatusHero({
   tone,
+  eyebrow,
   title,
-  children,
+  description,
+  primary,
+  secondary,
 }: {
   tone: 'good' | 'warn' | 'bad'
+  eyebrow: string
   title: string
-  children: ReactNode
+  description: string
+  primary: { to: string; label: string }
+  secondary: { to: string; label: string }
 }) {
   const styles = {
     good: {
-      box: 'border-success-200 bg-success-50 dark:border-success-500/20 dark:bg-success-500/10',
-      accent: 'bg-success-500',
-      iconWrap: 'bg-success-500 text-white',
-      path: 'M20 6 9 17l-5-5',
+      box: 'border-success-400/40 bg-gradient-to-br from-success-500 via-success-600 to-success-700 dark:border-success-500/25',
+      eyebrow: 'text-success-100',
+      body: 'text-success-100/90',
+      glow: 'bg-success-300/25',
     },
     warn: {
-      box: 'border-warning-200 bg-warning-50 dark:border-warning-500/20 dark:bg-warning-500/10',
-      accent: 'bg-warning-500',
-      iconWrap: 'bg-warning-500 text-white',
-      path: 'M12 9v4m0 4h.01M10.3 4.3 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0Z',
+      box: 'border-warning-400/40 bg-gradient-to-br from-warning-500 via-warning-600 to-warning-700 dark:border-warning-500/25',
+      eyebrow: 'text-warning-100',
+      body: 'text-warning-100/90',
+      glow: 'bg-warning-300/25',
     },
     bad: {
-      box: 'border-error-200 bg-error-50 dark:border-error-500/20 dark:bg-error-500/10',
-      accent: 'bg-error-500',
-      iconWrap: 'bg-error-500 text-white',
-      path: 'M18 6 6 18M6 6l12 12',
+      box: 'border-error-400/40 bg-gradient-to-br from-error-500 via-error-600 to-error-700 dark:border-error-500/25',
+      eyebrow: 'text-error-100',
+      body: 'text-error-100/90',
+      glow: 'bg-error-300/25',
     },
   }[tone]
 
   return (
-    <div className={`relative overflow-hidden rounded-2xl border ${styles.box}`}>
-      <div className={`absolute inset-y-0 left-0 w-1.5 ${styles.accent}`} aria-hidden />
-      <div className="flex items-start gap-3 px-5 py-4 sm:px-6">
-        <span className={`mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl ${styles.iconWrap}`}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <path d={styles.path} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </span>
+    <div className={`relative overflow-hidden rounded-2xl border px-5 py-4 sm:px-6 sm:py-5 ${styles.box}`}>
+      <div
+        className="pointer-events-none absolute -top-12 -right-12 h-32 w-32 rounded-full bg-white/10 blur-2xl"
+        aria-hidden
+      />
+      <div
+        className={`pointer-events-none absolute -bottom-14 -left-8 h-28 w-28 rounded-full blur-2xl ${styles.glow}`}
+        aria-hidden
+      />
+
+      <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{title}</p>
-          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{children}</p>
+          <p className={`text-xs font-medium ${styles.eyebrow}`}>{eyebrow}</p>
+          <h2 className="mt-0.5 text-lg font-bold tracking-tight text-white sm:text-xl">{title}</h2>
+          <p className={`mt-1 max-w-xl text-sm ${styles.body}`}>{description}</p>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Link
+            to={primary.to}
+            className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-3.5 text-sm font-semibold text-gray-800 shadow-sm transition hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+          >
+            {primary.label}
+          </Link>
+          <Link
+            to={secondary.to}
+            className="inline-flex h-9 items-center gap-2 rounded-lg border border-white/25 bg-white/10 px-3.5 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+          >
+            {secondary.label}
+          </Link>
         </div>
       </div>
     </div>
