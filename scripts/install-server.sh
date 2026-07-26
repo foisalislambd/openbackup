@@ -6,10 +6,15 @@
 # It writes a docker compose file to /opt/openbackup, generates an admin password,
 # starts the server, and prints how to reach it. Nothing else on the machine is
 # touched; removing the directory and the Docker volume removes everything.
+#
+# Prefer a published image (foisalislambd/openbackup:latest). If pull fails —
+# before the first Docker Hub push — clone this repo and build locally.
 set -eu
 
 DIR="${OPENBACKUP_DIR:-/opt/openbackup}"
-IMAGE="${OPENBACKUP_IMAGE:-openbackup/server:latest}"
+IMAGE="${OPENBACKUP_IMAGE:-foisalislambd/openbackup:latest}"
+REPO="${OPENBACKUP_REPO:-https://github.com/foisalislambd/openbackup.git}"
+REF="${OPENBACKUP_REF:-main}"
 PORT="${OPENBACKUP_PORT:-8080}"
 PUBLIC_URL="${OPENBACKUP_PUBLIC_URL:-}"
 ADMIN_EMAIL="${OPENBACKUP_ADMIN_EMAIL:-}"
@@ -72,12 +77,68 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Image: pull first, build from git if the published image is missing
+# ---------------------------------------------------------------------------
+
+use_build=0
+say "Looking for ${IMAGE}..."
+if docker image inspect "$IMAGE" >/dev/null 2>&1; then
+	say "Using the image already on this machine."
+elif docker pull "$IMAGE" >/dev/null 2>&1; then
+	say "Pulled ${IMAGE}."
+else
+	use_build=1
+	say "Published image not found — building from ${REPO} (${REF})."
+	command -v git >/dev/null 2>&1 || die "git is required to build from source (apt install git)"
+	if [ -d src/.git ]; then
+		say "Updating the local checkout..."
+		git -C src fetch --depth 1 origin "$REF"
+		git -C src checkout -q FETCH_HEAD
+	else
+		rm -rf src
+		git clone --depth 1 --branch "$REF" "$REPO" src 2>/dev/null || {
+			git clone --depth 1 "$REPO" src
+			git -C src checkout -q "$REF" 2>/dev/null || true
+		}
+	fi
+	IMAGE="foisalislambd/openbackup:local"
+fi
+
+# ---------------------------------------------------------------------------
 # Compose file
 # ---------------------------------------------------------------------------
 
 # Written fresh each run so an upgrade picks up changes here, while .env (which
 # holds the generated password) is only written once.
-cat > docker-compose.yml <<YAML
+if [ "$use_build" = 1 ]; then
+	cat > docker-compose.yml <<YAML
+services:
+  openbackup:
+    image: ${IMAGE}
+    build:
+      context: ./src
+      dockerfile: Dockerfile
+    container_name: openbackup
+    restart: unless-stopped
+    ports:
+      - '${PORT}:8080'
+    volumes:
+      - openbackup-data:/data
+    env_file:
+      - .env
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+volumes:
+  openbackup-data:
+YAML
+	say "Building the server image (first time can take a few minutes)..."
+	$compose build
+else
+	cat > docker-compose.yml <<YAML
 services:
   openbackup:
     image: ${IMAGE}
@@ -98,9 +159,7 @@ services:
 volumes:
   openbackup-data:
 YAML
-
-say "Pulling the server image..."
-$compose pull --quiet 2>/dev/null || $compose pull
+fi
 
 say "Starting..."
 $compose up -d
@@ -112,13 +171,13 @@ $compose up -d
 i=0
 until curl -fsS "http://127.0.0.1:${PORT}/api/v1/health" >/dev/null 2>&1; do
 	i=$((i + 1))
-	if [ "$i" -gt 30 ]; then
+	if [ "$i" -gt 60 ]; then
 		say ""
 		say "The server did not become healthy. Recent logs:"
 		$compose logs --tail 30
 		die "startup failed"
 	fi
-	sleep 1
+	sleep 2
 done
 
 url="${PUBLIC_URL:-http://$(hostname -I 2>/dev/null | awk '{print $1}'):${PORT}}"
@@ -146,4 +205,9 @@ if [ -z "$PUBLIC_URL" ]; then
 	say "'$compose up -d' again. Device tokens travel in headers and must not"
 	say "cross the internet unencrypted."
 fi
-say "Manage it with: cd ${DIR} && ${compose} [logs|restart|pull|down]"
+if [ "$use_build" = 1 ]; then
+	say ""
+	say "This install was built from source because no published image was found."
+	say "After you push foisalislambd/openbackup:latest, re-run this script to pull."
+fi
+say "Manage it with: cd ${DIR} && ${compose} [logs|restart|build|pull|down]"
