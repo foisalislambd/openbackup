@@ -99,6 +99,20 @@ func Uninstall(opt Options) error {
 	return disableAutostart()
 }
 
+// RemoveLegacyRegistration clears an old headless registration when it is safe.
+// On Windows the Run key is owned by EnableLoginAutostart — do not clear it here
+// or a failed start would leave the user with no login autostart.
+func RemoveLegacyRegistration() error {
+	if AgentIsSelf() {
+		return nil
+	}
+	if AgentRunning() {
+		_ = Stop(Options{})
+	}
+	// Run key is rewritten by EnableLoginAutostart; nothing else to remove.
+	return nil
+}
+
 // StatusText describes whether the agent is running / set to start at login.
 func StatusText(opt Options) (string, error) {
 	_ = opt

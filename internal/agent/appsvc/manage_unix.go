@@ -209,6 +209,18 @@ func Uninstall(opt Options) error {
 	return nil
 }
 
+// RemoveLegacyRegistration drops an old kardianos user service so login does not
+// start a headless agent alongside the desktop app. Safe no-op when we own IPC.
+func RemoveLegacyRegistration() error {
+	if AgentIsSelf() {
+		return nil
+	}
+	if AgentRunning() {
+		_ = Stop(Options{})
+	}
+	return Uninstall(Options{})
+}
+
 // StatusText returns a short human description of the service state.
 func StatusText(opt Options) (string, error) {
 	svc, err := newUnixService(opt)

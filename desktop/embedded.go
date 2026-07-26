@@ -157,13 +157,13 @@ func (a *App) ensureBackingUp() error {
 		return errors.New("connect this device before starting backups")
 	}
 
-	// Before we own IPC: safe to stop a leftover headless agent and remove the
-	// old CLI user-service registration so login does not start a second copy.
+	// Before we own IPC: stop a leftover headless agent and drop old CLI
+	// user-service units (Unix). Windows Run key is left to EnableLoginAutostart.
 	if !appsvc.AgentIsSelf() {
 		if appsvc.AgentRunning() {
 			_ = appsvc.Stop(appsvc.Options{})
 		}
-		_ = appsvc.Uninstall(appsvc.Options{})
+		_ = appsvc.RemoveLegacyRegistration()
 	}
 
 	if err := a.startEmbeddedAgent(); err != nil {

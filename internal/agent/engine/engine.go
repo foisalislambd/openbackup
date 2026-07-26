@@ -1031,9 +1031,9 @@ func (e *Engine) heartbeat(ctx context.Context) error {
 		BatteryPct:    machine.Battery.Percent,
 		OnMetered:     machine.Metered,
 		LastError:     status.LastError,
-		CurrentPath:   status.CurrentPath,
-		FilesDone:     status.FilesDone,
-		FilesTotal:    status.FilesTotal,
+		CurrentPath:   livePath(state, status.CurrentPath),
+		FilesDone:     liveCount(state, status.FilesDone),
+		FilesTotal:    liveCount(state, status.FilesTotal),
 	})
 	if err != nil {
 		return err
@@ -1049,6 +1049,20 @@ func (e *Engine) heartbeat(ctx context.Context) error {
 	}
 	e.flushEvents(ctx)
 	return nil
+}
+
+func livePath(state api.AgentState, path string) string {
+	if state == api.StateUploading || state == api.StateScanning {
+		return path
+	}
+	return ""
+}
+
+func liveCount(state api.AgentState, n int64) int64 {
+	if state == api.StateUploading || state == api.StateScanning {
+		return n
+	}
+	return 0
 }
 
 // applyPolicy takes the server's limits, which is how a user changes settings in

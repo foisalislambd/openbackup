@@ -24,9 +24,13 @@ export default function ActivityPage() {
   if (error) return <ErrorNote>{error}</ErrorNote>
   if (loading || !data) return <ActivitySkeleton />
 
-  const live = data.devices.filter(
-    (d) => d.current_path || d.state === 'uploading' || d.state === 'scanning',
-  )
+  const live = data.devices.filter((d) => {
+    if (!d.last_seen) return false
+    const ageMs = Date.now() - new Date(d.last_seen).getTime()
+    // Heartbeats are ~15–60s while working; ignore stale leftover state.
+    if (Number.isNaN(ageMs) || ageMs > 3 * 60 * 1000) return false
+    return Boolean(d.current_path) || d.state === 'uploading' || d.state === 'scanning'
+  })
 
   const shown = data.events.filter((e) => {
     if (filter === 'problems') return e.level === 'warn' || e.level === 'error'

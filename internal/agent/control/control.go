@@ -224,7 +224,7 @@ func describe(o Overview) (health, headline, detail string) {
 	switch {
 	case !o.AgentRunning:
 		return "agent_stopped", "Backups are not running",
-			"The OpenBackup background service is not running, so nothing is being backed up. Start it to continue."
+			"OpenBackup is not backing up right now. Open the app or use Start backups."
 	case o.Paused:
 		reason := o.PauseReason
 		if reason == "" {
