@@ -100,7 +100,9 @@ export default function App() {
       </nav>
 
       <main className="min-w-0 flex-1 overflow-y-auto p-6">
-        {tab === 'home' && <Home status={status} onGoToFolders={() => setTab('folders')} />}
+        {tab === 'home' && (
+          <Home status={status} onGoToFolders={() => setTab('folders')} onRefresh={refresh} />
+        )}
         {tab === 'folders' && <Folders status={status} />}
         {tab === 'restore' && <Restore />}
         {tab === 'settings' && <Settings status={status} onLoggedOut={refresh} />}

@@ -335,9 +335,23 @@ func (a *App) Resume() error {
 	return a.agent.Resume(a.context())
 }
 
-// StartService starts or installs the background service, which is the fix for
-// the "backups are not running" state the home screen reports.
-func (a *App) StartService() error { return installService() }
+// StartService starts or installs the background agent and waits until it answers.
+func (a *App) StartService() error {
+	if err := installService(); err != nil {
+		return err
+	}
+	overview := a.agent.Overview(a.context())
+	a.mu.Lock()
+	a.overview = overview
+	a.mu.Unlock()
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "status", overview)
+	}
+	if !overview.AgentRunning {
+		return errors.New("the background agent did not come up — open Diagnostics or check the log")
+	}
+	return nil
+}
 
 // -----------------------------------------------------------------------------
 // Browsing and restoring

@@ -11,9 +11,11 @@ import { Button, Card, Notice } from '../components/ui'
 export function Home({
   status,
   onGoToFolders,
+  onRefresh,
 }: {
   status: Overview
   onGoToFolders: () => void
+  onRefresh?: () => void
 }) {
   const action = useAction()
 
@@ -80,15 +82,18 @@ export function Home({
       {!status.agent_running && (
         <Notice
           tone="warn"
-          title="The background service is not running"
+          title="The background agent is not running"
           action={
-            <Button busy={action.busy} onClick={() => action.run(api.startService)}>
+            <Button
+              busy={action.busy}
+              onClick={() => action.run(api.startService, onRefresh)}
+            >
               Start it
             </Button>
           }
         >
-          Backups only happen while the service runs. Starting it may ask for administrator
-          permission.
+          Backups only happen while the agent runs. Starting it does not need administrator
+          rights — it will also start automatically when you sign in to Windows.
         </Notice>
       )}
 

@@ -3,7 +3,7 @@
 One app for the machine being backed up: the window **and** the background
 agent. Connect a device, see whether files are safe, browse and restore, change
 limits and encryption, and run diagnostics. Closing the window does not stop
-backups — the same binary keeps running as an OS service.
+backups — the same binary keeps running in the background.
 
 Available for Windows, macOS and Linux. Same screens and design on every platform.
 
@@ -28,8 +28,8 @@ Available for Windows, macOS and Linux. Same screens and design on every platfor
 | How you start it | What happens |
 | --- | --- |
 | Double-click / app menu | Opens the window |
-| OS service (`… service run`) | Runs the backup agent with no window |
-| **Start service** in the app | Registers **this** binary with Windows/systemd/launchd |
+| **Start it** in the app | Starts the agent in the background (no admin on Windows) |
+| Sign in to Windows / login | Agent starts automatically (Windows Run key; Linux/macOS user service) |
 
 A backup that only happens while a window is open is not a backup — so the agent
 keeps working when you close the UI. The tray icon is how you get back.
