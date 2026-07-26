@@ -288,7 +288,12 @@ jobs:
 
       - uses: actions/download-artifact@v7
         with:
+          # Only release assets — not Docker buildx/GHA cache artifacts
+          # (e.g. *.dockerbuild), which appear when the docker job runs in the
+          # same workflow and break a blanket download.
+          pattern: openbackup-*
           path: artifacts
+          merge-multiple: false
 
       - name: Stage release files
         run: |
