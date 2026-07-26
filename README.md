@@ -1,335 +1,224 @@
 # OpenBackup
 
-Automatic backups of your own files to a server you own. Install it on a VPS with
-one command, run one command on each computer, and stop thinking about it.
+**Back up your files to a small computer in the cloud that *you* rent — not to Google, Dropbox, or anyone else’s company.**
 
-It backs up your documents, pictures, videos, music and desktop. It does not back
-up Windows, `/usr`, installed programs, browser caches, or `node_modules` — and it
-tells you exactly what it skipped and why.
+Install once on a cheap VPS. On your PC or Mac, connect with one short code. After that it quietly backs up your documents, photos, videos, and desktop. When something goes wrong — deleted file, broken laptop — you get your files back.
 
-Free, MIT licensed, no paid tier, nothing phoning home. Windows, macOS and Linux,
-with a desktop app for people who would rather not use a terminal.
+Free. Open source (MIT). No subscription. Nothing phones home.
 
-```bash
-# On your server
-curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-server.sh | sudo sh
+---
 
-# On each computer, using the code the dashboard gives you
-curl -fsSL https://backup.example.com/install.sh | sh
-openbackup connect --server https://backup.example.com --code XXXX-XXXX-XXXX
-```
+## Why we built this
 
-There is nothing else to configure. The agent finds your folders, watches them for
-changes, and uploads only the parts of files that actually changed.
+Most people need a backup, but the choices feel bad:
 
-**New here?** [Install the server](docs/install-server.md) →
-[install an agent](docs/install-agent.md) → [restore something](docs/restoring.md)
-today, while nothing is wrong. Full documentation is in
-[`docs/`](docs/README.md).
-
-## Contents
-
-- [Why another backup tool](#why-another-backup-tool)
-- [Getting started](#getting-started)
-- [How it works](#how-it-works)
-- [What is not backed up](#what-is-not-backed-up)
-- [Everyday use](#everyday-use)
-- [Restoring](#restoring)
-- [End-to-end encryption](#end-to-end-encryption)
-- [The desktop app](#the-desktop-app)
-- [Running the server](#running-the-server)
-- [Documentation](#documentation)
-- [Building from source](#building-from-source)
-- [Project layout](#project-layout)
-- [Status](#status)
-- [Contributing](#contributing)
-- [Licence](#licence)
-
-## Why another backup tool
-
-Most backup tools are either a subscription with your files on someone else's
-computer, or a toolkit that expects you to design a backup strategy, write a
-schedule, and remember to test restores. This aims at the gap between them: your
-own server, and no decisions required to get a correct backup.
-
-The parts that usually go wrong are the ones handled by default:
-
-- **It backs up the right things.** Personal folders are detected per platform.
-  System directories are excluded, and so are caches and build output. A folder
-  named `build` inside a photo library is backed up; the same name inside a
-  project with a `package.json` beside it is not.
-- **It does not get in your way.** The agent pauses while you are gaming or on
-  battery, throttles itself on a metered connection, and yields when the CPU is
-  busy. Idle cost is a few megabytes of RAM and no measurable CPU.
-- **It survives being interrupted.** Uploads resume, a half-finished backup is
-  cleaned up rather than left to rot, and every block is verified against its
-  hash.
-- **Restores are the point.** Browse any backup in the dashboard, download a file
-  or a folder as a ZIP, or restore on the device with `openbackup restore`.
-
-## Getting started
-
-You need a machine with Docker that your computers can reach — a small VPS is
-plenty — and enough disk for what you keep.
-
-**1. The server.** One container, one volume. The database is SQLite inside that
-volume and the dashboard is embedded in the binary, so there is no second service
-to run.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-server.sh | sudo sh
-```
-
-It writes a Compose file to `/opt/openbackup`, generates an admin password, waits
-until the server actually answers, and prints the dashboard address and
-credentials. Prefer to do it by hand, or put TLS in front of it (you should):
-[docs/install-server.md](docs/install-server.md).
-
-**2. A connection code.** Sign in, open **Devices**, create one. Single-use, valid
-for 24 hours.
-
-**3. Each computer.** On Linux and macOS the installer is served by your own
-server, so the download and the address the agent will talk to are the same host:
-
-```bash
-curl -fsSL https://backup.example.com/install.sh | sh
-openbackup connect --server https://backup.example.com --code ABCD-EFGH-JKLM
-```
-
-On Windows, download the installer from the
-[releases page](https://github.com/foisalislambd/openbackup/releases) and let the app
-walk you through it.
-
-**4. Check it.** `openbackup status` says whether your files are safe;
-`openbackup doctor` checks the whole chain. Then read
-[docs/restoring.md](docs/restoring.md) and restore one file — a backup nobody has
-restored is a hypothesis.
-
-## How it works
-
-Files are split into variable-sized chunks (FastCDC), each identified by its
-BLAKE3 hash. The agent asks the server which chunks it does not already have, and
-uploads only those, compressed with Zstandard. Identical data is stored once,
-whether it repeats inside one file, across your machines, or across time — so
-keeping ninety days of history usually costs a small fraction of ninety copies.
-
-A backup ("snapshot") is a list of paths pointing at chunks. Snapshots after the
-first are deltas against their parent, which is why a daily backup of a large home
-directory takes seconds.
-
-With end-to-end encryption enabled (`openbackup encrypt`), chunks are
-encrypted on the device with XChaCha20-Poly1305 before upload. The server then
-holds data it cannot read, which also means browser-side restore is unavailable
-for those backups — the key never leaves your machines, so only they can decrypt.
-
-```
-┌──────────────┐   HTTPS + JSON     ┌──────────────────────────┐
-│    agent     │ ─────────────────▶ │          server          │
-│              │                    │                          │
-│ watch → chunk│  "which of these   │  SQLite metadata         │
-│ → hash → zip │   hashes are new?" │  content-addressed blobs │
-│ → encrypt    │ ◀───────────────── │  retention + GC          │
-└──────────────┘   only new chunks  │  dashboard (embedded)    │
-                                    └──────────────────────────┘
-```
-
-[docs/architecture.md](docs/architecture.md) has the rest: the local index, delta
-resolution, the block store, and the invariants the design protects.
-
-## What is not backed up
-
-Excluded by default, with a reason attached to every rule (visible in
-**Settings → What is not backed up**, or with `openbackup rules`):
-
-| Category | Examples |
+| Option | The catch |
 | --- | --- |
-| Operating system | `C:\Windows`, `Program Files`, `/proc`, `/sys`, `/usr`, `/System` |
-| Junk | `$Recycle.Bin`, `.Trash`, `Thumbs.db`, `.DS_Store` |
-| Caches | browser caches, `~/.cache`, package manager caches |
-| Developer | `node_modules`, `vendor`, `target`, `dist`, `.next`, `venv`, `__pycache__` |
-| Virtual machines | `.vdi`, `.vmdk`, `.qcow2`, Docker images |
-| Temporary | `*.tmp`, `*.part`, crash dumps, swap files |
+| Google Drive / Dropbox / iCloud | Monthly fee, *their* computers, *their* rules |
+| “Pro” backup software | Complicated schedules, jargon, easy to set up wrong |
+| Copying to a USB drive | Easy to forget — until the day you need it |
 
-Developer exclusions are scoped: they apply inside a directory that looks like a
-project (one of 32 marker files such as `package.json`, `go.mod`, `Cargo.toml`),
-so source code is always backed up and a coincidentally named personal folder is
-not skipped. Add anything back with `openbackup folders add <path>`, or turn off a
-whole category — [docs/ignore-rules.md](docs/ignore-rules.md).
+We wanted something in the middle:
 
-## Everyday use
+- **Your** server (you rent a small VPS — a few dollars a month)
+- **Almost no setup** — one command on the server, one code on each computer
+- **Sensible defaults** — it backs up the right folders and skips junk (Windows system files, caches, `node_modules`, etc.)
+
+If you’ve never heard of a “VPS”, that’s fine. Think of it as a small always-on computer you rent online. Your backups live there.
+
+---
+
+## What you get
+
+- **Automatic backups** of Documents, Pictures, Videos, Music, Desktop (and more if you add folders)
+- **Only changed pieces** of files are uploaded — so daily backups stay fast
+- **History** — restore yesterday’s version, or last week’s
+- **Dashboard in the browser** — see devices, download a file or folder as a ZIP
+- **Desktop app** (optional) — for people who prefer buttons over a terminal
+- **Optional encryption** — so even the server can’t read your files (you keep a recovery code)
+- **Windows, macOS, and Linux**
+
+It does **not** try to clone your whole Windows/macOS install. It backs up *your* files — the ones you’d miss.
+
+---
+
+## What you need
+
+1. **A VPS** — a small cloud server with enough disk for your files  
+2. **About 10 minutes** the first time  
+3. **Each computer** you want backed up (phone/Android support is not ready yet)
+
+### Where do I get a VPS?
+
+Any provider that gives you a Linux server with an IP address works. Popular beginner-friendly options:
+
+| Provider | Notes |
+| --- | --- |
+| [Hetzner](https://www.hetzner.com/cloud) | Often cheap, good for Europe |
+| [DigitalOcean](https://www.digitalocean.com/) | Simple UI, lots of tutorials |
+| [Linode / Akamai](https://www.linode.com/) | Straightforward plans |
+| [Vultr](https://www.vultr.com/) | Many locations |
+| [Contabo](https://www.contabo.com/) | Lots of disk for the price |
+
+**What to pick when creating the server:**
+
+- **OS:** Ubuntu 22.04 or 24.04 (easiest)
+- **Size:** the smallest plan is fine to start; add disk if you have lots of photos/video
+- **Access:** you’ll get an IP address and a root password (or SSH key)
+
+You don’t need to know Docker beforehand — our install script installs what it needs.
+
+> **Cost tip:** Many people run OpenBackup on a ~€4–6/month VPS. Disk space matters more than CPU.
+
+More detail: [Install the server](docs/install-server.md).
+
+---
+
+## Install in 4 steps
+
+### Step 1 — Put OpenBackup on your VPS
+
+Log into your VPS (SSH or the provider’s web console), then paste:
 
 ```bash
-openbackup status                             # is my data backed up?
-openbackup backup                             # back up right now
-openbackup folders                            # what it found, and what it skips
-openbackup folders add ~/Projects             # include something else
-openbackup pause --for 2h                     # stop for a while
+curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-server.sh | sudo sh
+```
+
+Wait until it finishes. It will print something like:
+
+- a web address: `http://YOUR_IP:18200`
+- an email and password to sign in
+
+Open that address in your browser and sign in.  
+(Change the password after your first login.)
+
+> Prefer not to pipe a script from the internet? Read it first: [`scripts/install-server.sh`](scripts/install-server.sh).
+
+### Step 2 — Create a connection code
+
+In the dashboard:
+
+1. Open **Devices**
+2. Create a connection code  
+   (looks like `ABCD-EFGH-JKLM`, works once, expires in 24 hours)
+
+### Step 3 — Connect each computer
+
+**Windows:** download the installer from [Releases](https://github.com/foisalislambd/openbackup/releases) and follow the app.
+
+**Mac / Linux:** in a terminal (replace the URL and code with yours):
+
+```bash
+curl -fsSL http://YOUR_IP:18200/install.sh | sh
+openbackup connect --server http://YOUR_IP:18200 --code ABCD-EFGH-JKLM
+```
+
+Use `https://…` instead if you’ve set up a domain and HTTPS (recommended for real use — see [install-server.md](docs/install-server.md)).
+
+### Step 4 — Check that it worked
+
+```bash
+openbackup status    # is my data safe?
+openbackup doctor    # full health check
+```
+
+Then try restoring **one file** while nothing is broken — so you know how when you need it: [Restoring](docs/restoring.md).
+
+---
+
+## Everyday use (optional)
+
+You don’t have to touch these — the background service keeps working. Handy when you want control:
+
+```bash
+openbackup status                  # what’s going on?
+openbackup backup                  # back up right now
+openbackup folders                 # what is included / skipped
+openbackup folders add ~/Projects  # add another folder
+openbackup pause --for 2h          # pause for a while
 openbackup resume
-openbackup limit --upload 5MB                 # cap the upload speed
-openbackup doctor                             # check that everything works
 ```
 
-Changes apply to the running background service immediately. Every command is in
-[docs/cli.md](docs/cli.md); what the agent decides on its own — and why an idle
-agent is usually correct rather than broken — is in
-[docs/backing-up.md](docs/backing-up.md).
-
-## Restoring
-
-Three routes, and all of them refuse to overwrite an existing file unless you say
-so:
+**Restore a file:**
 
 ```bash
-openbackup find "tax return"                        # where did it live?
+openbackup find "tax return"
 openbackup restore --path Documents/report.docx --to .
-openbackup restore --snapshot snp_06fss... --to ./recovered
 ```
 
-From the **dashboard**, browse any point in time and download a file or a folder
-as a ZIP — nothing installed, works from someone else's computer. From the
-**desktop app**, browse and restore with a native folder picker.
+Or use the **dashboard** in the browser — no install needed on that machine.
 
-Restoring onto a *new* machine works without the old one: any device on the
-account can read the account's backups, which is the case that actually matters.
-[docs/restoring.md](docs/restoring.md).
+Full command list: [CLI reference](docs/cli.md).
 
-## End-to-end encryption
+---
+
+## Desktop app
+
+![OpenBackup desktop overview](docs/images/desktop-overview.png)
+
+A simple window for: connect device, see status, browse backups, restore, pause/resume.  
+Closing the window does **not** stop backups — a small tray icon keeps watch.
+
+More: [Desktop app](docs/desktop-app.md).
+
+---
+
+## What is *not* backed up (on purpose)
+
+So your backup stays useful and doesn’t fill the disk with junk:
+
+- Windows / macOS / Linux **system** folders  
+- Trash, caches, temporary files  
+- Developer folders like `node_modules`, `venv`, build output  
+- Huge VM disk images  
+
+You can always add a folder back. Details: [What is not backed up](docs/ignore-rules.md).
+
+---
+
+## Encryption (optional)
+
+Want the server to store data it **cannot** read?
 
 ```bash
 openbackup encrypt
 ```
 
-Chunks are encrypted on the device before upload, and the printed recovery code is
-the only key. Write it down somewhere other than the machine it protects: with
-encryption on, a lost code means a lost backup, and there is no escrow and no
-reset. Deduplication still works, including across your devices.
+You’ll get a **recovery code**. Write it down somewhere safe (not only on that same computer).  
+Lose the code → those encrypted backups can’t be opened. There is no “reset password” on our side — that’s the point.
 
-What you give up is browser-based restore, because the server genuinely cannot
-read the data. [docs/encryption.md](docs/encryption.md), and
-[docs/security-model.md](docs/security-model.md) for what the system does and does
-not defend against.
+Details: [Encryption](docs/encryption.md).
 
-## The desktop app
-
-![The desktop app's overview screen](docs/images/desktop-overview.png)
-
-A window for the machine being backed up: connect a device, see whether your files
-are safe, browse and restore backups, change limits and encryption, run
-diagnostics. It closes to the notification area, where the tray icon shows the
-current state and offers Back up now, Pause and Resume.
-
-It is a thin client — the background service does the work, so closing the window
-stops nothing, and a change made here reaches the running service straight away.
-Idle it costs about 10 MB of RAM.
-
-Built with [Wails](https://wails.io): Go for the logic, React and TypeScript for
-the window. [docs/desktop-app.md](docs/desktop-app.md).
-
-## Running the server
-
-Configuration is environment variables, all optional:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `OPENBACKUP_ADDR` | `:18200` | Listen address |
-| `OPENBACKUP_DATA_DIR` | `./data` | Database and blobs |
-| `OPENBACKUP_PUBLIC_URL` | — | External URL; enables Secure cookies when https |
-| `OPENBACKUP_ADMIN_EMAIL` / `_PASSWORD` | — | Create the first account on an empty database |
-| `OPENBACKUP_TRUST_PROXY` | `false` | Honour `X-Forwarded-For` (set when proxied) |
-| `OPENBACKUP_RETENTION_DAYS` | `30` | Default retention; `0` keeps everything |
-| `OPENBACKUP_QUOTA_BYTES` | `0` | Per-account limit, e.g. `500GB` |
-| `OPENBACKUP_REQUIRE_ENCRYPTION` | `false` | Refuse unencrypted uploads |
-| `OPENBACKUP_S3_*` | — | Store blobs in S3/MinIO instead of the volume |
-
-The full list is in [docs/configuration.md](docs/configuration.md). Run it behind
-a reverse proxy that terminates TLS: device tokens travel in headers, so plain
-HTTP is only acceptable on a network you control.
-
-```bash
-openbackup-server invite            # print an enrolment code
-openbackup-server check --fix       # verify stored data against the index
-openbackup-server user add --email you@example.com
-openbackup-server health            # used by the container healthcheck
-```
-
-Retention, garbage collection, stale snapshot cleanup and log pruning run
-themselves once an hour. What you do have to do is back up the server's volume —
-it holds the only copy of your backups.
-[docs/operations.md](docs/operations.md).
+---
 
 ## Documentation
 
-| | |
+| Topic | Link |
 | --- | --- |
-| [Install the server](docs/install-server.md) | VPS, Compose, TLS, S3 |
-| [Install an agent](docs/install-agent.md) | Windows, macOS, Linux, services |
-| [Backing up](docs/backing-up.md) | Folders, timing, limits, retention |
-| [Restoring](docs/restoring.md) | Dashboard, CLI, app, a lost machine |
-| [What is not backed up](docs/ignore-rules.md) | Rules, project detection, overrides |
-| [Encryption](docs/encryption.md) | Recovery codes and trade-offs |
-| [Configuration](docs/configuration.md) | Every server variable and agent setting |
-| [CLI reference](docs/cli.md) | Both commands, flag by flag |
-| [HTTP API](docs/api.md) | Endpoints and the auth model |
-| [Architecture](docs/architecture.md) | How the pieces fit |
-| [Security model](docs/security-model.md) | Threats, keys, hardening |
-| [Operating a server](docs/operations.md) | Upgrades, backups, monitoring |
-| [Troubleshooting](docs/troubleshooting.md) | When something is wrong |
-| [FAQ](docs/faq.md) | Short answers, including the awkward ones |
-| [Development](docs/development.md) | Build it, test it, release it |
+| Install the server (VPS, HTTPS, disk) | [docs/install-server.md](docs/install-server.md) |
+| Install on a computer | [docs/install-agent.md](docs/install-agent.md) |
+| How backups work day to day | [docs/backing-up.md](docs/backing-up.md) |
+| Restore files | [docs/restoring.md](docs/restoring.md) |
+| Something’s wrong | [docs/troubleshooting.md](docs/troubleshooting.md) |
+| Short FAQ | [docs/faq.md](docs/faq.md) |
+| All docs | [docs/](docs/README.md) |
 
-## Building from source
+For developers (build, architecture, API): see [docs/development.md](docs/development.md) and [docs/architecture.md](docs/architecture.md).
 
-Needs Go 1.26+ and Node 22+.
-
-```bash
-make            # build the dashboard, embed it, build the binaries
-make test       # run the tests
-make check      # what CI runs: gofmt, vet, tests
-make release    # cross-compiled binaries in ./dist
-make desktop    # the desktop app for this machine (needs the Wails CLI)
-```
-
-On Windows, `./scripts/build.ps1` does the same thing.
-
-The dashboard lives in [`web/`](web/README.md) and is a Next.js static export
-copied into `internal/server/web/dist`, where `//go:embed` picks it up. `go build`
-alone produces a working server; it just uses whatever dashboard was last built.
-More in [docs/development.md](docs/development.md).
-
-## Project layout
-
-```
-cmd/openbackup/          agent CLI and background service
-cmd/openbackup-server/   server
-internal/agent/          config, index, scanner, watcher, uploader, governor,
-                         engine, restore, IPC, control
-internal/server/         store (SQLite + blobs), httpapi, auth, maintenance
-internal/api/            the wire protocol, shared by both sides
-internal/chunk/          FastCDC content-defined chunking
-internal/codec/          Zstandard + XChaCha20-Poly1305
-internal/ignore/         exclusion rules and project detection
-internal/userdirs/       per-platform personal folder detection
-web/                     dashboard
-desktop/                 Wails desktop app (its own module)
-docs/                    documentation
-```
+---
 
 ## Status
 
-The server, the agent, the dashboard and the desktop app work end to end:
-enrolment, full and incremental backups, deduplication, quotas, retention,
-garbage collection, integrity checking, browser restore and device restore.
-Android is not built yet. See [CHANGELOG.md](CHANGELOG.md) for what changed.
+Server, agent, dashboard, and desktop app work end to end.  
+Android is not ready yet. See [CHANGELOG.md](CHANGELOG.md).
 
-## Contributing
+---
 
-Bug reports, restore stories from unusual setups, and wording fixes are all
-welcome — [CONTRIBUTING.md](CONTRIBUTING.md) explains the house style and what a
-good pull request looks like. Questions belong in
-[Discussions](https://github.com/foisalislambd/openbackup/discussions); see
-[SUPPORT.md](SUPPORT.md).
+## Contributing & help
 
-Found a security problem? Report it privately: [SECURITY.md](SECURITY.md).
+- How to contribute: [CONTRIBUTING.md](CONTRIBUTING.md)  
+- Questions: [Discussions](https://github.com/foisalislambd/openbackup/discussions) · [SUPPORT.md](SUPPORT.md)  
+- Security issues (private): [SECURITY.md](SECURITY.md)
 
 ## Licence
 
