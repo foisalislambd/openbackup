@@ -1,24 +1,32 @@
-import { Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
-import { Shell } from '@/components/shell'
-import ActivityPage from '@/pages/activity'
-import BackupsPage from '@/pages/backups'
-import DevicesPage from '@/pages/devices'
-import NotFoundPage from '@/pages/not-found'
-import OverviewPage from '@/pages/overview'
-import SettingsPage from '@/pages/settings'
+import { DashboardLayout } from '@/components/layout/dashboard-layout'
+import DevicesPage from '@/pages/devices-page'
+import FilesPage from '@/pages/files-page'
+import HomePage from '@/pages/home-page'
+import LogsPage from '@/pages/logs-page'
+import NotFoundPage from '@/pages/not-found-page'
+import SettingsPage from '@/pages/settings-page'
+
+/** Keep old /backups and /activity URLs working with query strings intact. */
+function LegacyRedirect({ to }: { to: string }) {
+  const { search } = useLocation()
+  return <Navigate to={`${to}${search}`} replace />
+}
 
 export default function App() {
   return (
-    <Shell>
+    <DashboardLayout>
       <Routes>
-        <Route path="/" element={<OverviewPage />} />
+        <Route path="/" element={<HomePage />} />
+        <Route path="/files" element={<FilesPage />} />
         <Route path="/devices" element={<DevicesPage />} />
-        <Route path="/backups" element={<BackupsPage />} />
-        <Route path="/activity" element={<ActivityPage />} />
+        <Route path="/logs" element={<LogsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/backups" element={<LegacyRedirect to="/files" />} />
+        <Route path="/activity" element={<LegacyRedirect to="/logs" />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
-    </Shell>
+    </DashboardLayout>
   )
 }

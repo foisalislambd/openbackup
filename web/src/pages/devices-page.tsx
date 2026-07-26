@@ -1,7 +1,5 @@
 /**
  * Devices is where a machine is added, and where the connection code appears.
- * The code is shown next to the exact command it goes into, so connecting a
- * computer is a copy and a paste rather than a documentation hunt.
  */
 
 import { useState } from 'react'
@@ -18,7 +16,7 @@ export default function DevicesPage() {
   const [code, setCode] = useState<{ code: string; server_url: string; expires_at: string }>()
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       {error && <ErrorNote>{error}</ErrorNote>}
       {invite.error && <ErrorNote>{invite.error}</ErrorNote>}
 
@@ -32,30 +30,27 @@ export default function DevicesPage() {
               void invite.run('create', async () => setCode(await api.createJoinToken('')))
             }}
           >
-            {invite.busy === 'create' ? 'Creating…' : 'Create connection code'}
+            {invite.busy === 'create' ? 'Creating…' : 'Create code'}
           </Button>
         }
       >
         {code ? (
           <div className="space-y-3">
-            <p className="text-sm">
-              Run this on the computer you want to back up. The code works once, and expires{' '}
-              {until(code.expires_at)}.
+            <p className="text-sm text-gray-500">
+              Run on that computer. Code expires {until(code.expires_at)}.
             </p>
             <CopyBlock text={`openbackup connect --server ${code.server_url} --code ${code.code}`} />
-            <p className="text-xs text-[var(--color-ink-muted)]">
-              Not installed yet? On Linux and macOS:{' '}
-              <code className="rounded bg-[var(--color-surface-muted)] px-1 py-0.5">
+            <p className="text-xs leading-relaxed text-gray-500">
+              Not installed? Linux/macOS:{' '}
+              <code className="break-all rounded bg-gray-100 px-1 py-0.5 dark:bg-gray-800">
                 curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
               </code>
-              . On Windows, download the installer from the releases page.
+              . Windows: download the installer.
             </p>
           </div>
         ) : (
-          <p className="text-sm text-[var(--color-ink-muted)]">
-            Each device gets its own one-time code. Nothing else needs configuring: the agent finds your documents,
-            pictures and other personal folders by itself, and skips system files and things like{' '}
-            <code className="rounded bg-[var(--color-surface-muted)] px-1 py-0.5 text-xs">node_modules</code>.
+          <p className="text-sm text-gray-500">
+            One-time code per device. The agent picks personal folders and skips system junk.
           </p>
         )}
       </Card>
@@ -64,9 +59,9 @@ export default function DevicesPage() {
         {loading ? (
           <DevicesSkeleton />
         ) : !devices || devices.length === 0 ? (
-          <Empty title="No devices yet" hint="Create a connection code above." />
+          <Empty title="No devices yet" hint="Create a code above." />
         ) : (
-          <ul className="divide-y divide-[var(--color-border-subtle)]">
+          <ul className="divide-y divide-gray-100 dark:divide-gray-800">
             {devices.map((device) => (
               <DeviceRow key={device.id} device={device} onChanged={reload} />
             ))}
@@ -84,11 +79,11 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
 
   return (
     <li className="py-4 first:pt-0 last:pb-0">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
           {renaming ? (
             <form
-              className="flex items-center gap-2"
+              className="flex flex-wrap items-center gap-2"
               onSubmit={(event) => {
                 event.preventDefault()
                 void run(
@@ -101,7 +96,11 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
                 )
               }}
             >
-              <input className={`${inputClass} mt-0 w-48`} value={name} onChange={(e) => setName(e.target.value)} />
+              <input
+                className={`${inputClass} mt-0 w-full max-w-xs sm:w-48`}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
               <Button type="submit" variant="primary" disabled={busy === 'rename'}>
                 Save
               </Button>
@@ -110,31 +109,30 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
               </Button>
             </form>
           ) : (
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">{device.name}</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="truncate text-sm font-medium">{device.name}</span>
               <HealthBadge health={device.health} state={device.state} />
               {device.agent_version && <Badge>v{device.agent_version}</Badge>}
             </div>
           )}
-          <div className="mt-1 text-xs text-[var(--color-ink-muted)]">
+          <div className="mt-1 truncate text-xs text-gray-500">
             {platformLabel(device.platform)}
-            {device.os_version ? ` · ${device.os_version}` : ''} · {device.hostname} · last seen{' '}
-            {relative(device.last_seen)}
+            {device.hostname ? ` · ${device.hostname}` : ''} · seen {relative(device.last_seen)}
           </div>
-          <div className="mt-1 text-xs text-[var(--color-ink-muted)]">
-            {count(device.snapshot_count)} backups · {bytes(device.logical_bytes)} of files · last backup{' '}
+          <div className="mt-0.5 text-xs text-gray-500">
+            {count(device.snapshot_count)} backups · {bytes(device.logical_bytes)} · last{' '}
             {relative(device.last_backup_at)}
           </div>
-          {device.last_error && <div className="mt-1 text-xs text-[var(--color-bad)]">{device.last_error}</div>}
-          {error && <div className="mt-1 text-xs text-[var(--color-bad)]">{error}</div>}
+          {device.last_error && <div className="mt-1 text-xs text-error-500">{device.last_error}</div>}
+          {error && <div className="mt-1 text-xs text-error-500">{error}</div>}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           <Button
             disabled={!!busy}
             onClick={() => void run('backup', () => api.sendCommand(device.id, 'backup_now'), onChanged)}
           >
-            {busy === 'backup' ? 'Sending…' : 'Back up now'}
+            {busy === 'backup' ? 'Sending…' : 'Back up'}
           </Button>
           {device.state === 'paused' ? (
             <Button
@@ -160,7 +158,7 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
             onClick={() => {
               if (
                 !confirm(
-                  `Remove ${device.name}?\n\nIts backups are kept and can still be restored, but the device can no longer upload.`,
+                  `Remove ${device.name}?\n\nBackups stay; this device can no longer upload.`,
                 )
               ) {
                 return
@@ -179,9 +177,12 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
 function CopyBlock({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-3">
-      <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs">{text}</code>
+    <div className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-100 p-3 sm:flex-row sm:items-center dark:border-gray-800 dark:bg-gray-800">
+      <code className="min-w-0 flex-1 overflow-x-auto break-all font-mono text-xs whitespace-pre-wrap sm:whitespace-nowrap sm:break-normal">
+        {text}
+      </code>
       <Button
+        className="shrink-0 self-end sm:self-auto"
         onClick={() => {
           void navigator.clipboard.writeText(text).then(() => {
             setCopied(true)

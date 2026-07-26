@@ -1,6 +1,5 @@
 /**
- * My files: first level is each computer (device) as a folder, then that
- * device's backup roots and files. Multiple devices stay easy to tell apart.
+ * My files: computers first, then that device's folders and versions.
  */
 
 import { useState } from 'react'
@@ -21,7 +20,7 @@ import { BackupsSkeleton, BrowseSkeleton } from '@/components/skeleton'
 
 type Catalog = { devices: Device[]; snapshots: Snapshot[] }
 
-export default function BackupsPage() {
+export default function FilesPage() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const view = params.get('view') === 'history' ? 'history' : 'files'
@@ -53,7 +52,7 @@ export default function BackupsPage() {
       if (value) q.set(key, value)
     }
     const qs = q.toString()
-    navigate(qs ? `/backups?${qs}` : '/backups')
+    navigate(qs ? `/files?${qs}` : '/files')
   }
 
   if (error && !data) return <ErrorNote>{error}</ErrorNote>
@@ -63,13 +62,13 @@ export default function BackupsPage() {
   if (complete.length === 0) {
     const inProgress = data.snapshots.some((s) => s.status === 'running')
     return (
-      <div className="panel">
+      <div className="admin-card">
         <Empty
           title="No files backed up yet"
           hint={
             inProgress
-              ? 'A backup is in progress — files appear here when it finishes.'
-              : 'Connect a device and let the first backup finish.'
+              ? 'Backup in progress — files appear when it finishes.'
+              : 'Connect a device and finish the first backup.'
           }
         />
       </div>
@@ -144,7 +143,7 @@ export default function BackupsPage() {
           onDelete={(id) => {
             if (
               !confirm(
-                'Delete this backup?\n\nLater backups that depend on it may also be removed. Files only held here will be gone for good.',
+                'Delete this backup?\n\nLater backups that depend on it may also be removed.',
               )
             ) {
               return
@@ -161,12 +160,12 @@ export default function BackupsPage() {
           }
         />
       ) : !latest ? (
-        <div className="panel">
+        <div className="admin-card">
           <Empty
             title="No completed backup for this device"
-            hint="Pick another computer, or wait for the first backup to finish."
+            hint="Pick another computer, or wait for the first backup."
           />
-          <div className="border-t border-[var(--color-border-subtle)] px-5 py-4">
+          <div className="border-t border-gray-200 dark:border-gray-800 px-5 py-4">
             <Button onClick={() => setQuery({ device: undefined, path: undefined, file: undefined })}>
               All computers
             </Button>
@@ -230,21 +229,19 @@ function DeviceFolders({
 }) {
   if (devices.length === 0) {
     return (
-      <div className="panel">
+      <div className="admin-card">
         <Empty title="No computers with backups yet" />
       </div>
     )
   }
 
   return (
-    <div className="panel overflow-hidden">
-      <div className="border-b border-[var(--color-border-subtle)] px-5 py-4">
+    <div className="admin-card overflow-hidden">
+      <div className="border-b border-gray-200 dark:border-gray-800 px-5 py-4">
         <h2 className="text-sm font-semibold">Computers</h2>
-        <p className="mt-1 text-sm text-[var(--color-ink-muted)]">
-          Each folder is one device. Open it to browse that computer’s backed-up files.
-        </p>
+        <p className="mt-1 text-xs text-gray-500 sm:text-sm">One folder per device.</p>
       </div>
-      <div className="file-row border-b border-[var(--color-border-subtle)] text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-[var(--color-ink-muted)]">
+      <div className="file-row border-b border-gray-200 dark:border-gray-800 text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-gray-500">
         <span>Name</span>
         <span className="file-row-meta">Last backup</span>
         <span className="file-row-meta">Size</span>
@@ -261,19 +258,19 @@ function DeviceFolders({
                   <FolderGlyph />
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-semibold">{device.name}</span>
-                    <span className="mt-0.5 block text-xs text-[var(--color-ink-muted)]">
+                    <span className="mt-0.5 block text-xs text-gray-500">
                       {count(snaps.length)} backup{snaps.length === 1 ? '' : 's'}
                       {device.platform ? ` · ${device.platform}` : ''}
                     </span>
                   </span>
                 </span>
-                <span className="file-row-meta text-sm text-[var(--color-ink-muted)]">
+                <span className="file-row-meta text-sm text-gray-500">
                   {latest ? absolute(latest.started_at) : '—'}
                 </span>
-                <span className="file-row-meta tabular text-sm text-[var(--color-ink-muted)]">
+                <span className="file-row-meta tabular text-sm text-gray-500">
                   {latest ? bytes(latest.total_bytes) : '—'}
                 </span>
-                <span className="text-right text-sm text-[var(--color-ink-muted)]">Open</span>
+                <span className="text-right text-sm text-gray-500">Open</span>
               </button>
             </li>
           )
@@ -302,25 +299,23 @@ function HistoryList({
 }) {
   if (snapshots.length === 0) {
     return (
-      <div className="panel">
+      <div className="admin-card">
         <Empty title="No backups yet" />
       </div>
     )
   }
 
   return (
-    <div className="panel overflow-hidden">
-      <div className="border-b border-[var(--color-border-subtle)] px-5 py-4">
+    <div className="admin-card overflow-hidden">
+      <div className="border-b border-gray-200 dark:border-gray-800 px-5 py-4">
         <h2 className="text-sm font-semibold">Backup history</h2>
-        <p className="mt-1 text-sm text-[var(--color-ink-muted)]">
-          {filterDevice
-            ? `Points in time for ${filterDevice.name}.`
-            : 'Each row is a point in time — open one to browse that computer’s files.'}
+        <p className="mt-1 text-xs text-gray-500 sm:text-sm">
+          {filterDevice ? `History for ${filterDevice.name}.` : 'Open a point in time to browse files.'}
         </p>
         {filterDevice && (
           <button
             type="button"
-            className="mt-2 text-sm font-semibold text-[var(--color-brand)] hover:underline"
+            className="mt-2 text-sm font-semibold text-brand-500 hover:underline"
             onClick={onClearDevice}
           >
             Show all computers
@@ -351,13 +346,13 @@ function HistoryList({
                 >
                   <FolderGlyph />
                   <span className="min-w-0">
-                    <span className="block truncate text-sm font-semibold group-hover:text-[var(--color-brand)]">
+                    <span className="block truncate text-sm font-semibold group-hover:text-brand-500">
                       {title}
                       {(showDevice || filterDevice) && snapshot.device_name
                         ? ` · ${snapshot.device_name}`
                         : ''}
                     </span>
-                    <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-[var(--color-ink-muted)]">
+                    <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
                       {absolute(snapshot.started_at)}
                       {snapshot.kind === 'delta' && <Badge>changes only</Badge>}
                       {snapshot.kind === 'full' && <Badge>full</Badge>}
@@ -366,10 +361,10 @@ function HistoryList({
                     </span>
                   </span>
                 </button>
-                <span className="file-row-meta tabular text-sm text-[var(--color-ink-muted)]">
+                <span className="file-row-meta tabular text-sm text-gray-500">
                   {complete ? count(snapshot.file_count) : '—'}
                 </span>
-                <span className="file-row-meta tabular text-sm text-[var(--color-ink-muted)]">
+                <span className="file-row-meta tabular text-sm text-gray-500">
                   {complete ? bytes(snapshot.total_bytes) : '—'}
                 </span>
                 <div className="flex items-center justify-end gap-2">
@@ -457,9 +452,9 @@ function FileBrowser({
   return (
     <div className="space-y-4">
       {viewingOlder && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--color-warn)]/30 bg-[var(--color-warn)]/10 px-4 py-3 text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-warning-500/30 bg-warning-50 dark:bg-warning-500/10 px-4 py-3 text-sm">
           <span>
-            Viewing an earlier backup from {absolute(snapshot.started_at)}. Your current files may differ.
+            Viewing older backup from {absolute(snapshot.started_at)}.
           </span>
           <Button onClick={onUseLatest}>Back to latest</Button>
         </div>
@@ -470,29 +465,29 @@ function FileBrowser({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="truncate text-lg font-semibold tracking-tight">{deviceName}</div>
-          <div className="mt-0.5 text-sm text-[var(--color-ink-muted)]">
+          <div className="mt-0.5 text-sm text-gray-500">
             As of {absolute(snapshot.started_at)} · {count(snapshot.file_count)} files ·{' '}
             {bytes(snapshot.total_bytes)}
           </div>
         </div>
         <Button onClick={() => void download(() => downloadSnapshotArchive(snapshotId, prefix))}>
-          Download {prefix ? `“${baseName(prefix)}”` : 'everything'} ZIP
+          Download {prefix ? baseName(prefix) : 'all'} ZIP
         </Button>
       </div>
 
       <nav className="flex flex-wrap items-center gap-1 text-sm">
         <button
           type="button"
-          className="rounded-lg px-2 py-1 font-semibold text-[var(--color-brand)] hover:bg-[var(--color-brand-soft)]"
+          className="rounded-lg px-2 py-1 font-semibold text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/15"
           onClick={onBackToDevices}
         >
           Computers
         </button>
-        <span className="text-[var(--color-ink-muted)]">/</span>
+        <span className="text-gray-500">/</span>
         {prefix ? (
           <button
             type="button"
-            className="rounded-lg px-2 py-1 font-semibold text-[var(--color-brand)] hover:bg-[var(--color-brand-soft)]"
+            className="rounded-lg px-2 py-1 font-semibold text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/15"
             onClick={() => onNavigate('')}
           >
             {deviceName}
@@ -508,13 +503,13 @@ function FileBrowser({
             const isLast = index === all.length - 1
             return (
               <span key={path} className="flex items-center gap-1">
-                <span className="text-[var(--color-ink-muted)]">/</span>
+                <span className="text-gray-500">/</span>
                 {isLast ? (
                   <span className="rounded-lg px-2 py-1 font-semibold">{segment}</span>
                 ) : (
                   <button
                     type="button"
-                    className="rounded-lg px-2 py-1 font-semibold text-[var(--color-brand)] hover:bg-[var(--color-brand-soft)]"
+                    className="rounded-lg px-2 py-1 font-semibold text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/15"
                     onClick={() => onNavigate(path)}
                   >
                     {segment}
@@ -526,8 +521,8 @@ function FileBrowser({
       </nav>
 
       <div className={`grid gap-4 ${versionsPath ? 'xl:grid-cols-[1fr_20rem]' : ''}`}>
-        <div className="panel overflow-hidden">
-          <div className="file-row border-b border-[var(--color-border-subtle)] text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-[var(--color-ink-muted)]">
+        <div className="admin-card overflow-hidden">
+          <div className="file-row border-b border-gray-200 dark:border-gray-800 text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-gray-500">
             <span>Name</span>
             <span className="file-row-meta">Type</span>
             <span className="file-row-meta">Size</span>
@@ -536,8 +531,8 @@ function FileBrowser({
           <ul>
             <li>
               <button type="button" className="file-row w-full text-left" onClick={goUp}>
-                <span className="flex items-center gap-3 text-sm font-semibold text-[var(--color-ink-muted)]">
-                  <span className="grid size-7 place-items-center rounded-lg bg-[var(--color-surface-muted)]">
+                <span className="flex items-center gap-3 text-sm font-semibold text-gray-500">
+                  <span className="grid size-7 place-items-center rounded-lg bg-gray-100 dark:bg-gray-800">
                     ↑
                   </span>
                   {prefix ? 'Parent folder' : 'All computers'}
@@ -561,16 +556,16 @@ function FileBrowser({
                         <FolderGlyph />
                         <span className="truncate text-sm font-semibold">{baseName(folder.path)}</span>
                       </span>
-                      <span className="file-row-meta text-sm text-[var(--color-ink-muted)]">Folder</span>
-                      <span className="file-row-meta text-sm text-[var(--color-ink-muted)]">—</span>
-                      <span className="text-right text-sm text-[var(--color-ink-muted)]">Open</span>
+                      <span className="file-row-meta text-sm text-gray-500">Folder</span>
+                      <span className="file-row-meta text-sm text-gray-500">—</span>
+                      <span className="text-right text-sm text-gray-500">Open</span>
                     </button>
                   </li>
                 ))}
                 {files.map((file) => (
                   <li key={file.path}>
                     <div
-                      className={`file-row ${versionsPath === file.path ? 'bg-[var(--color-brand-soft)]' : ''}`}
+                      className={`file-row ${versionsPath === file.path ? 'bg-brand-50 dark:bg-brand-500/15' : ''}`}
                     >
                       <button
                         type="button"
@@ -581,17 +576,17 @@ function FileBrowser({
                         <FileGlyph />
                         <span className="min-w-0">
                           <span className="block truncate text-sm font-semibold">{baseName(file.path)}</span>
-                          <span className="mt-0.5 block text-xs text-[var(--color-ink-muted)]">
+                          <span className="mt-0.5 block text-xs text-gray-500">
                             {file.type === 'symlink'
                               ? `Link → ${file.link_target || '?'}`
                               : `Changed ${relative(file.mtime)}`}
                           </span>
                         </span>
                       </button>
-                      <span className="file-row-meta text-sm text-[var(--color-ink-muted)]">
+                      <span className="file-row-meta text-sm text-gray-500">
                         {file.type === 'symlink' ? 'Link' : 'File'}
                       </span>
-                      <span className="file-row-meta tabular text-sm text-[var(--color-ink-muted)]">
+                      <span className="file-row-meta tabular text-sm text-gray-500">
                         {file.type === 'symlink' ? '—' : bytes(file.size)}
                       </span>
                       <div className="flex items-center justify-end gap-2">
@@ -615,7 +610,7 @@ function FileBrowser({
             )}
           </ul>
           {cursor && (
-            <div className="border-t border-[var(--color-border-subtle)] px-5 py-4 text-center">
+            <div className="border-t border-gray-200 dark:border-gray-800 px-5 py-4 text-center">
               <Button
                 disabled={more.busy === 'more'}
                 onClick={() => {
@@ -667,12 +662,12 @@ function VersionPanel({
   )
 
   return (
-    <aside className="panel flex max-h-[70vh] flex-col overflow-hidden">
-      <div className="border-b border-[var(--color-border-subtle)] px-4 py-3">
+    <aside className="admin-card flex max-h-[70vh] flex-col overflow-hidden">
+      <div className="border-b border-gray-200 dark:border-gray-800 px-4 py-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold">{baseName(path)}</h2>
-            <p className="mt-0.5 truncate text-xs text-[var(--color-ink-muted)]" title={path}>
+            <p className="mt-0.5 truncate text-xs text-gray-500" title={path}>
               Version history
             </p>
           </div>
@@ -683,13 +678,13 @@ function VersionPanel({
       </div>
       <div className="flex-1 overflow-y-auto p-3">
         {(error || dlError) && <ErrorNote>{dlError || error}</ErrorNote>}
-        {loading && !data && <p className="text-sm text-[var(--color-ink-muted)]">Loading versions…</p>}
+        {loading && !data && <p className="text-sm text-gray-500">Loading versions…</p>}
         {data && data.length === 0 && (
           <Empty title="No versions found" hint="This path is not in any completed backup." />
         )}
         {data && data.length === 1 && (
-          <p className="mb-2 text-xs text-[var(--color-ink-muted)]">
-            Only one version — the file has not changed across backups yet.
+          <p className="mb-2 text-xs text-gray-500">
+            Only one version so far.
           </p>
         )}
         {data && data.length > 0 && (
@@ -697,7 +692,7 @@ function VersionPanel({
             {data.map((version, index) => (
               <li
                 key={version.snapshot.id}
-                className="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface)] p-3"
+                className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3"
               >
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-semibold">
@@ -705,7 +700,7 @@ function VersionPanel({
                   </span>
                   {version.snapshot.id === currentSnapshotId && <Badge>viewing</Badge>}
                 </div>
-                <p className="mt-1 text-xs text-[var(--color-ink-muted)]">
+                <p className="mt-1 text-xs text-gray-500">
                   {absolute(version.snapshot.started_at)} · {bytes(version.entry.size)}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -723,7 +718,7 @@ function VersionPanel({
                     variant="ghost"
                     onClick={() =>
                       navigate(
-                        `/backups?id=${version.snapshot.id}&path=${encodeURIComponent(parentPath(path))}&file=${encodeURIComponent(path)}${deviceId ? `&device=${deviceId}` : ''}`,
+                        `/files?id=${version.snapshot.id}&path=${encodeURIComponent(parentPath(path))}&file=${encodeURIComponent(path)}${deviceId ? `&device=${deviceId}` : ''}`,
                       )
                     }
                   >

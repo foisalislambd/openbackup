@@ -27,7 +27,7 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <Card title="Account">
         <div className="text-sm">
-          <span className="text-[var(--color-ink-muted)]">Signed in as </span>
+          <span className="text-gray-500">Signed in as </span>
           {data.me.email}
         </div>
         <div className="mt-4">
@@ -63,7 +63,7 @@ function PolicyCard({ initial }: { initial: Settings }) {
   return (
     <Card
       title="Backup policy"
-      action={state.saved ? <span className="text-xs text-[var(--color-good)]">Saved</span> : null}
+      action={state.saved ? <span className="text-xs text-success-600">Saved</span> : null}
     >
       {state.error && (
         <div className="mb-4">
@@ -73,7 +73,7 @@ function PolicyCard({ initial }: { initial: Settings }) {
       <div className="grid gap-5 sm:grid-cols-2">
         <Field
           label="Keep backups for"
-          hint="Older backups are deleted automatically. The newest backup of every device is always kept, whatever this says."
+          hint="Oldest copies are removed. Latest per device is always kept."
         >
           <select
             className={inputClass}
@@ -92,7 +92,7 @@ function PolicyCard({ initial }: { initial: Settings }) {
           </select>
         </Field>
 
-        <Field label="Storage limit" hint="Uploads stop when this is reached. Leave empty for no limit.">
+        <Field label="Storage limit" hint="Uploads stop at this limit. Empty = unlimited.">
           <input
             className={inputClass}
             type="text"
@@ -107,15 +107,12 @@ function PolicyCard({ initial }: { initial: Settings }) {
               save({ quota_bytes: Math.round(gb * 1024 ** 3) })
             }}
           />
-          <span className="mt-1 block text-xs text-[var(--color-ink-muted)]">
-            In gigabytes. Currently {settings.quota_bytes > 0 ? bytes(settings.quota_bytes) : 'unlimited'}.
+          <span className="mt-1 block text-xs text-gray-500">
+            GB. Now {settings.quota_bytes > 0 ? bytes(settings.quota_bytes) : 'unlimited'}.
           </span>
         </Field>
 
-        <Field
-          label="Maximum upload speed"
-          hint="Applies to every device. Useful on a slow connection where a backup would otherwise saturate the line."
-        >
+        <Field label="Maximum upload speed" hint="Cap for all devices (MB/s). Empty = unlimited.">
           <input
             className={inputClass}
             type="text"
@@ -134,16 +131,13 @@ function PolicyCard({ initial }: { initial: Settings }) {
               save({ max_upload_bytes_per_sec: Math.round(mb * 1024 * 1024) })
             }}
           />
-          <span className="mt-1 block text-xs text-[var(--color-ink-muted)]">
-            In megabytes per second. Currently{' '}
+          <span className="mt-1 block text-xs text-gray-500">
+            Now{' '}
             {settings.max_upload_bytes_per_sec > 0 ? `${bytes(settings.max_upload_bytes_per_sec)}/s` : 'unlimited'}.
           </span>
         </Field>
 
-        <Field
-          label="Require end-to-end encryption"
-          hint="Refuse data from devices that have not turned encryption on. Set this before connecting your first device."
-        >
+        <Field label="Require end-to-end encryption" hint="Reject devices that are not encrypted.">
           <label className="mt-2 flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -205,7 +199,9 @@ function PasswordChange() {
         {state.busy ? 'Saving…' : 'Change'}
       </Button>
       {state.message && (
-        <p className="text-xs sm:col-span-3" style={{ color: state.ok ? 'var(--color-good)' : 'var(--color-bad)' }}>
+        <p
+          className={`text-xs sm:col-span-3 ${state.ok ? 'text-success-600' : 'text-error-500'}`}
+        >
           {state.message}
         </p>
       )}
@@ -233,41 +229,38 @@ function IgnoreRulesCard({ rules }: { rules: IgnoreRules }) {
         </Button>
       }
     >
-      <p className="text-sm text-[var(--color-ink-muted)]">
-        OpenBackup only backs up your own files. Operating system files, installed programs and anything that can be
-        regenerated are skipped, which is why a backup is usually far smaller than the disk.
+      <p className="text-sm text-gray-500">
+        Only your files are kept. OS, apps, and regenerable folders are skipped.
       </p>
       {open && (
         <div className="mt-4 space-y-5">
           {Object.entries(rules.categories).map(([category, list]) => (
             <div key={category}>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-muted)]">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                 {categoryTitles[category] ?? category}
               </h3>
               <ul className="mt-2 space-y-1">
                 {list.map((rule) => (
                   <li key={rule.pattern} className="flex flex-wrap items-baseline gap-x-2 text-sm">
-                    <code className="rounded bg-[var(--color-surface-muted)] px-1.5 py-0.5 font-mono text-xs">
+                    <code className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs dark:bg-gray-800">
                       {rule.pattern}
                     </code>
-                    <span className="text-xs text-[var(--color-ink-muted)]">{rule.reason}</span>
+                    <span className="text-xs text-gray-500">{rule.reason}</span>
                   </li>
                 ))}
               </ul>
             </div>
           ))}
           <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-muted)]">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
               Project detection
             </h3>
-            <p className="mt-2 text-sm text-[var(--color-ink-muted)]">
-              Dependency and build folders are only skipped inside a folder that contains one of these files, so a
-              folder called <code className="font-mono text-xs">build</code> in your photo library is still backed up.
-              Source code is always backed up.
+            <p className="mt-2 text-sm text-gray-500">
+              Build folders are skipped only inside real projects (markers below). Source code is kept.
             </p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {rules.project_markers.map((marker) => (
-                <code key={marker} className="rounded bg-[var(--color-surface-muted)] px-1.5 py-0.5 font-mono text-xs">
+                <code key={marker} className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs dark:bg-gray-800">
                   {marker}
                 </code>
               ))}
@@ -275,11 +268,11 @@ function IgnoreRulesCard({ rules }: { rules: IgnoreRules }) {
           </div>
           {rules.max_file_size != null && rules.max_file_size > 0 && (
             <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-muted)]">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                 Large files
               </h3>
-              <p className="mt-2 text-sm text-[var(--color-ink-muted)]">
-                Files larger than {bytes(rules.max_file_size)} are skipped.
+              <p className="mt-2 text-sm text-gray-500">
+                Files over {bytes(rules.max_file_size)} are skipped.
               </p>
             </div>
           )}

@@ -10,7 +10,7 @@ export function OverviewSkeleton() {
       <Bone className="h-20 w-full rounded-2xl" />
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 4 }, (_, i) => (
-          <div key={i} className="panel space-y-3 p-4">
+          <div key={i} className="admin-card space-y-3 p-4">
             <Bone className="size-10 rounded-xl" />
             <Bone className="h-4 w-32 rounded" />
             <Bone className="h-3 w-24 rounded" />
@@ -19,7 +19,7 @@ export function OverviewSkeleton() {
       </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 4 }, (_, i) => (
-          <div key={i} className="panel px-5 py-4">
+          <div key={i} className="admin-card px-5 py-4">
             <Bone className="h-3 w-16 rounded" />
             <Bone className="mt-3 h-7 w-24 rounded" />
             <Bone className="mt-2 h-3 w-28 rounded" />
@@ -53,15 +53,11 @@ export function DevicesSkeleton() {
 
 export function BackupsSkeleton() {
   return (
-    <div
-      className="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface)]"
-      role="status"
-      aria-label="Loading backups"
-    >
-      <div className="border-b border-[var(--color-border-subtle)] px-5 py-3.5">
+    <div className="admin-card" role="status" aria-label="Loading files">
+      <div className="border-b border-gray-200 px-5 py-3.5 dark:border-gray-800">
         <Bone className="h-4 w-24 rounded" />
       </div>
-      <div className="divide-y divide-[var(--color-border-subtle)] px-5">
+      <div className="divide-y divide-gray-100 px-5 dark:divide-gray-800">
         {Array.from({ length: 5 }, (_, i) => (
           <div key={i} className="flex flex-wrap items-center justify-between gap-3 py-3">
             <div className="min-w-0 flex-1 space-y-2">
@@ -71,7 +67,6 @@ export function BackupsSkeleton() {
             <div className="flex gap-2">
               <Bone className="h-8 w-16 rounded-lg" />
               <Bone className="h-8 w-24 rounded-lg" />
-              <Bone className="h-8 w-16 rounded-lg" />
             </div>
           </div>
         ))}
@@ -88,13 +83,10 @@ export function BrowseSkeleton() {
           <Bone className="h-4 w-56 rounded" />
           <Bone className="h-3 w-36 rounded" />
         </div>
-        <div className="flex gap-2">
-          <Bone className="h-8 w-40 rounded-lg" />
-          <Bone className="h-8 w-24 rounded-lg" />
-        </div>
+        <Bone className="h-8 w-40 rounded-lg" />
       </div>
       <Bone className="h-4 w-64 max-w-full rounded" />
-      <div className="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-5 py-2">
+      <div className="admin-card px-5 py-2">
         {Array.from({ length: 8 }, (_, i) => (
           <div key={i} className="flex items-center justify-between gap-3 py-2.5">
             <div className="flex items-center gap-2">
@@ -111,17 +103,13 @@ export function BrowseSkeleton() {
 
 export function ActivitySkeleton() {
   return (
-    <div
-      className="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface)]"
-      role="status"
-      aria-label="Loading activity"
-    >
-      <div className="border-b border-[var(--color-border-subtle)] px-5 py-3.5">
+    <div className="admin-card" role="status" aria-label="Loading logs">
+      <div className="border-b border-gray-200 px-5 py-3.5 dark:border-gray-800">
         <Bone className="h-4 w-20 rounded" />
       </div>
       <div className="space-y-0 px-5">
         {Array.from({ length: 8 }, (_, i) => (
-          <div key={i} className="flex gap-3 border-b border-[var(--color-border-subtle)] py-3 last:border-0">
+          <div key={i} className="flex gap-3 border-b border-gray-100 py-3 last:border-0 dark:border-gray-800">
             <Bone className="mt-1.5 size-2 shrink-0 rounded-full" />
             <div className="min-w-0 flex-1 space-y-2">
               <Bone className="h-4 w-64 max-w-full rounded" />
@@ -138,8 +126,8 @@ export function ActivitySkeleton() {
 export function SettingsSkeleton() {
   return (
     <div className="space-y-6" role="status" aria-label="Loading settings">
-      <div className="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface)]">
-        <div className="border-b border-[var(--color-border-subtle)] px-5 py-3.5">
+      <div className="admin-card">
+        <div className="border-b border-gray-200 px-5 py-3.5 dark:border-gray-800">
           <Bone className="h-4 w-20 rounded" />
         </div>
         <div className="space-y-4 px-5 py-4">
@@ -151,60 +139,35 @@ export function SettingsSkeleton() {
           </div>
         </div>
       </div>
-      <div className="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface)]">
-        <div className="border-b border-[var(--color-border-subtle)] px-5 py-3.5">
-          <Bone className="h-4 w-28 rounded" />
-        </div>
-        <div className="grid gap-5 px-5 py-4 sm:grid-cols-2">
-          {Array.from({ length: 4 }, (_, i) => (
-            <div key={i} className="space-y-2">
-              <Bone className="h-4 w-32 rounded" />
-              <Bone className="h-10 w-full rounded-lg" />
-              <Bone className="h-3 w-48 max-w-full rounded" />
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface)]">
-        <div className="border-b border-[var(--color-border-subtle)] px-5 py-3.5">
-          <Bone className="h-4 w-40 rounded" />
-        </div>
-        <div className="space-y-3 px-5 py-4">
-          <Bone className="h-4 w-full rounded" />
-          <Bone className="h-4 w-11/12 max-w-xl rounded" />
-          <Bone className="h-4 w-72 max-w-full rounded" />
-        </div>
-      </div>
     </div>
   )
 }
 
-/** Compact shell placeholder while bootstrap runs. */
 export function ShellSkeleton() {
   return (
-    <div className="app-shell" role="status" aria-label="Starting">
-      <aside className="app-sidebar">
+    <div className="admin-shell admin-main flex h-dvh" role="status" aria-label="Starting">
+      <aside className="hidden w-[260px] flex-col border-r border-gray-200 bg-white p-4 lg:flex dark:border-gray-800 dark:bg-gray-900">
         <div className="flex items-center gap-3 px-2">
-          <Bone className="size-10 rounded-2xl" />
+          <Bone className="size-10 rounded-xl" />
           <div className="space-y-2">
             <Bone className="h-4 w-28 rounded" />
             <Bone className="h-3 w-14 rounded" />
           </div>
         </div>
-        <div className="space-y-2">
+        <div className="mt-8 space-y-2">
           {Array.from({ length: 5 }, (_, i) => (
-            <Bone key={i} className="h-10 w-full rounded-xl" />
+            <Bone key={i} className="h-11 w-full rounded-xl" />
           ))}
         </div>
       </aside>
-      <div className="app-main">
-        <div className="app-topbar">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="admin-topbar flex items-center px-6">
           <div className="space-y-2">
-            <Bone className="h-7 w-40 rounded" />
-            <Bone className="h-4 w-56 rounded" />
+            <Bone className="h-6 w-40 rounded" />
+            <Bone className="h-3 w-56 rounded" />
           </div>
         </div>
-        <div className="app-content">
+        <div className="flex-1 p-6">
           <OverviewSkeleton />
         </div>
       </div>

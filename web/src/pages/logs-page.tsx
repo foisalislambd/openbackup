@@ -21,7 +21,7 @@ function isLiveDevice(device: Device, now: number): boolean {
   return Boolean(device.current_path) || device.state === 'uploading' || device.state === 'scanning'
 }
 
-export default function ActivityPage() {
+export default function LogsPage() {
   const { data, error, loading } = useLoader<LogsData>(
     async () => {
       const [devices, events] = await Promise.all([api.devices(), api.events(250)])
@@ -49,7 +49,7 @@ export default function ActivityPage() {
     <div className="space-y-4">
       {live.length > 0 && (
         <Card title="Happening now">
-          <ul className="divide-y divide-[var(--color-border-subtle)]">
+          <ul className="divide-y divide-gray-100 dark:divide-gray-800">
             {live.map((device) => {
               const progress =
                 device.files_total && device.files_total > 0
@@ -62,18 +62,18 @@ export default function ActivityPage() {
                     <Badge>{device.state}</Badge>
                   </div>
                   {device.current_path ? (
-                    <p className="mt-1 truncate font-mono text-xs text-[var(--color-ink-muted)]" title={device.current_path}>
+                    <p className="mt-1 truncate font-mono text-xs text-gray-500" title={device.current_path}>
                       {device.current_path}
                     </p>
                   ) : (
-                    <p className="mt-1 text-xs text-[var(--color-ink-muted)]">
+                    <p className="mt-1 text-xs text-gray-500">
                       {device.state_reason || 'Working…'}
                     </p>
                   )}
                   {progress !== null && (
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-surface-muted)]">
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
                       <div
-                        className="h-full rounded-full bg-[var(--color-brand)] transition-all"
+                        className="h-full rounded-full bg-brand-500 transition-all"
                         style={{ width: `${progress}%` }}
                       />
                     </div>
@@ -95,8 +95,8 @@ export default function ActivityPage() {
                 onClick={() => setFilter(option)}
                 className={`rounded-md px-2 py-1 font-medium ${
                   filter === option
-                    ? 'bg-[var(--color-brand-soft)] text-[var(--color-brand)]'
-                    : 'text-[var(--color-ink-muted)]'
+                    ? 'bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300'
+                    : 'text-gray-500'
                 }`}
               >
                 {option === 'all' ? 'Everything' : option === 'files' ? 'Files' : 'Problems'}
@@ -108,10 +108,10 @@ export default function ActivityPage() {
         {shown.length === 0 ? (
           <Empty
             title={filter === 'problems' ? 'No problems reported' : 'Nothing logged yet'}
-            hint="File activity appears here while devices back up."
+            hint="Activity shows up while devices back up."
           />
         ) : (
-          <ul className="divide-y divide-[var(--color-border-subtle)]">
+          <ul className="divide-y divide-gray-100 dark:divide-gray-800">
             {shown.map((event, index) => (
               <li key={event.id ?? index} className="flex gap-3 py-3 first:pt-0 last:pb-0">
                 <LevelDot level={event.level} />
@@ -121,14 +121,14 @@ export default function ActivityPage() {
                     {event.device_name && <Badge>{event.device_name}</Badge>}
                   </div>
                   {(event.reason || event.path) && (
-                    <div className="mt-0.5 truncate font-mono text-xs text-[var(--color-ink-muted)]" title={event.path}>
+                    <div className="mt-0.5 truncate font-mono text-xs text-gray-500" title={event.path}>
                       {event.reason ? `Reason: ${event.reason}` : null}
                       {event.reason && event.path ? ' — ' : null}
                       {event.path ?? null}
                     </div>
                   )}
                 </div>
-                <time className="shrink-0 text-xs text-[var(--color-ink-muted)]" title={absolute(event.at)}>
+                <time className="shrink-0 text-xs text-gray-500" title={absolute(event.at)}>
                   {relative(event.at)}
                 </time>
               </li>
@@ -142,6 +142,6 @@ export default function ActivityPage() {
 
 function LevelDot({ level }: { level: string }) {
   const color =
-    level === 'error' ? 'var(--color-bad)' : level === 'warn' ? 'var(--color-warn)' : 'var(--color-ink-muted)'
-  return <span className="mt-1.5 size-2 shrink-0 rounded-full" style={{ background: color }} aria-label={level} />
+    level === 'error' ? 'bg-error-500' : level === 'warn' ? 'bg-warning-500' : 'bg-gray-400'
+  return <span className={`mt-1.5 size-2 shrink-0 rounded-full ${color}`} aria-label={level} />
 }

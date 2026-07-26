@@ -1,54 +1,81 @@
 @import 'tailwindcss';
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 /*
- * Cloud-canvas palette: calm cool neutrals with a clear sky accent.
- * Resting state feels open and roomy (like a file library); problems still
- * use warm colour so they are the only loud signal.
+ * ZenPanel-inspired admin palette for the OpenBackup dashboard.
  */
 @theme {
-  --color-canvas: oklch(96.5% 0.008 240);
-  --color-surface: oklch(99.5% 0.004 240);
-  --color-surface-muted: oklch(94.5% 0.01 240);
-  --color-sidebar: oklch(98.2% 0.01 235);
-  --color-border-subtle: oklch(90% 0.012 240);
-  --color-ink: oklch(28% 0.03 250);
-  --color-ink-muted: oklch(50% 0.02 250);
-  --color-brand: oklch(55% 0.14 235);
-  --color-brand-soft: oklch(94% 0.04 235);
-  --color-brand-strong: oklch(45% 0.14 235);
-  --color-good: oklch(58% 0.13 155);
-  --color-warn: oklch(70% 0.14 75);
-  --color-bad: oklch(55% 0.18 25);
-  --color-folder: oklch(72% 0.12 85);
-  --color-file: oklch(62% 0.08 235);
-
-  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Outfit', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 
-  --shadow-panel: 0 1px 0 oklch(28% 0.03 250 / 0.04), 0 8px 24px oklch(28% 0.03 250 / 0.04);
-  --shadow-lift: 0 4px 20px oklch(45% 0.08 235 / 0.1);
+  --color-brand-50: #ecf3ff;
+  --color-brand-100: #dde9ff;
+  --color-brand-300: #9cb9ff;
+  --color-brand-400: #7592ff;
+  --color-brand-500: #465fff;
+  --color-brand-600: #3641f5;
+  --color-brand-700: #2a31d8;
+  --color-brand-800: #252dae;
+
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f2f4f7;
+  --color-gray-200: #e4e7ec;
+  --color-gray-300: #d0d5dd;
+  --color-gray-400: #98a2b3;
+  --color-gray-500: #667085;
+  --color-gray-600: #475467;
+  --color-gray-700: #344054;
+  --color-gray-800: #1d2939;
+  --color-gray-900: #101828;
+
+  --color-success-50: #ecfdf3;
+  --color-success-500: #12b76a;
+  --color-success-600: #039855;
+  --color-warning-50: #fffaeb;
+  --color-warning-500: #f79009;
+  --color-error-50: #fef3f2;
+  --color-error-500: #f04438;
+
+  /* Legacy aliases used across pages during migration */
+  --color-canvas: #f9fafb;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f2f4f7;
+  --color-sidebar: #ffffff;
+  --color-border-subtle: #e4e7ec;
+  --color-ink: #101828;
+  --color-ink-muted: #667085;
+  --color-brand: #465fff;
+  --color-brand-soft: #ecf3ff;
+  --color-brand-strong: #3641f5;
+  --color-good: #12b76a;
+  --color-warn: #f79009;
+  --color-bad: #f04438;
+  --color-folder: #fdb022;
+  --color-file: #7592ff;
+
+  --shadow-panel: 0 1px 2px 0 rgba(16, 24, 40, 0.05);
+  --shadow-lift: 0 8px 24px rgba(70, 95, 255, 0.12);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-canvas: oklch(18% 0.02 250);
-    --color-surface: oklch(22% 0.02 250);
-    --color-surface-muted: oklch(26% 0.02 250);
-    --color-sidebar: oklch(20% 0.022 250);
-    --color-border-subtle: oklch(32% 0.02 250);
-    --color-ink: oklch(96% 0.01 240);
-    --color-ink-muted: oklch(72% 0.02 240);
-    --color-brand: oklch(72% 0.12 230);
-    --color-brand-soft: oklch(30% 0.05 230);
-    --color-brand-strong: oklch(78% 0.12 230);
-    --color-good: oklch(70% 0.13 155);
-    --color-warn: oklch(78% 0.14 75);
-    --color-bad: oklch(68% 0.16 25);
-    --color-folder: oklch(78% 0.1 85);
-    --color-file: oklch(72% 0.08 235);
-    --shadow-panel: 0 1px 0 oklch(100% 0 0 / 0.04), 0 10px 28px oklch(0% 0 0 / 0.35);
-    --shadow-lift: 0 8px 28px oklch(0% 0 0 / 0.4);
-  }
+.dark {
+  --color-canvas: #0c111d;
+  --color-surface: #101828;
+  --color-surface-muted: #1d2939;
+  --color-sidebar: #101828;
+  --color-border-subtle: #1d2939;
+  --color-ink: #f9fafb;
+  --color-ink-muted: #98a2b3;
+  --color-brand: #7592ff;
+  --color-brand-soft: rgba(70, 95, 255, 0.15);
+  --color-brand-strong: #9cb9ff;
+  --color-good: #12b76a;
+  --color-warn: #f79009;
+  --color-bad: #f04438;
+  --color-folder: #fdb022;
+  --color-file: #9cb9ff;
+  --shadow-panel: none;
+  --shadow-lift: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
 html,
@@ -59,112 +86,117 @@ body,
 
 html,
 body {
-  background:
-    radial-gradient(1200px 600px at 0% -10%, color-mix(in oklch, var(--color-brand) 12%, transparent), transparent 55%),
-    radial-gradient(900px 500px at 100% 0%, color-mix(in oklch, var(--color-brand) 8%, transparent), transparent 50%),
-    var(--color-canvas);
-  background-attachment: fixed;
+  background-color: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+}
+
+.dark body {
+  background-color: #0c111d;
 }
 
 .tabular {
   font-variant-numeric: tabular-nums;
 }
 
-.app-shell {
-  display: grid;
-  grid-template-columns: 17rem 1fr;
-  min-height: 100vh;
+.admin-shell {
+  font-family: var(--font-sans);
+  background-color: #f9fafb;
 }
 
-@media (max-width: 900px) {
-  .app-shell {
-    grid-template-columns: 1fr;
-  }
-
-  .app-sidebar {
-    position: sticky;
-    top: 0;
-    z-index: 20;
-    border-right: none !important;
-    border-bottom: 1px solid var(--color-border-subtle);
-  }
-
-  .app-sidebar-nav {
-    display: flex !important;
-    flex-direction: row !important;
-    gap: 0.25rem;
-    overflow-x: auto;
-    padding-bottom: 0.25rem;
-  }
-
-  .app-sidebar-nav a {
-    white-space: nowrap;
-  }
-
-  .app-sidebar-foot {
-    display: none !important;
-  }
+.dark .admin-shell {
+  background-color: #0c111d;
 }
 
-.app-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-  padding: 1.25rem 1rem;
-  background: color-mix(in oklch, var(--color-sidebar) 92%, transparent);
-  backdrop-filter: blur(12px);
-  border-right: 1px solid var(--color-border-subtle);
+.admin-main {
+  height: 100dvh;
+  width: 100%;
+  overflow: hidden;
+  background-color: #f9fafb;
 }
 
-.app-main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 100vh;
+.dark .admin-main {
+  background-color: #101828;
 }
 
-.app-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1.15rem 1.75rem 0.85rem;
-  animation: rise-in 0.45s ease both;
+.admin-topbar {
+  min-height: 4rem;
+  flex-shrink: 0;
+  border-bottom: 1px solid #e4e7ec;
 }
 
-.app-content {
-  flex: 1;
-  padding: 0.5rem 1.75rem 2rem;
-  animation: rise-in 0.55s ease both;
+.dark .admin-topbar {
+  border-bottom-color: #1d2939;
 }
 
+.admin-card,
 .panel {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid #e4e7ec;
+  background-color: #ffffff;
   box-shadow: var(--shadow-panel);
+}
+
+.dark .admin-card,
+.dark .panel {
+  border-color: #1d2939;
+  background-color: rgba(255, 255, 255, 0.03);
+  box-shadow: none;
+}
+
+.admin-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.admin-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background-color: #d0d5dd;
+}
+
+.dark .admin-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #344054;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 .file-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 7rem 8rem 9rem;
   align-items: center;
-  gap: 1rem;
-  padding: 0.7rem 1rem;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
   border-radius: 0.75rem;
-  transition: background 0.15s ease, transform 0.15s ease;
+  transition: background 0.15s ease;
 }
 
 .file-row:hover {
   background: var(--color-surface-muted);
 }
 
-@media (max-width: 720px) {
+@media (max-width: 900px) {
+  .file-row {
+    grid-template-columns: minmax(0, 1fr) 6.5rem auto;
+  }
+
+  .file-row-meta:nth-of-type(2) {
+    display: none !important;
+  }
+}
+
+@media (max-width: 640px) {
   .file-row {
     grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    padding: 0.65rem 0.75rem;
   }
 
   .file-row-meta {
@@ -177,40 +209,32 @@ body {
   flex-direction: column;
   gap: 0.85rem;
   padding: 1.1rem;
-  border-radius: 1rem;
+  border-radius: 0.75rem;
   border: 1px solid var(--color-border-subtle);
   background: var(--color-surface);
   box-shadow: var(--shadow-panel);
   text-align: left;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
 }
 
 .content-tile:hover {
-  border-color: color-mix(in oklch, var(--color-brand) 35%, var(--color-border-subtle));
+  border-color: color-mix(in srgb, var(--color-brand) 40%, var(--color-border-subtle));
   box-shadow: var(--shadow-lift);
-  transform: translateY(-2px);
-}
-
-@keyframes rise-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  transform: translateY(-1px);
 }
 
 .skeleton-bone {
-  background: linear-gradient(
-    90deg,
-    var(--color-border-subtle) 0%,
-    color-mix(in oklch, var(--color-surface) 70%, var(--color-border-subtle)) 50%,
-    var(--color-border-subtle) 100%
-  );
+  background: linear-gradient(90deg, #e4e7ec 0%, #f2f4f7 50%, #e4e7ec 100%);
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.dark .skeleton-bone {
+  background: linear-gradient(90deg, #1d2939 0%, #344054 50%, #1d2939 100%);
+  background-size: 200% 100%;
 }
 
 @keyframes skeleton-shimmer {
@@ -231,7 +255,6 @@ body {
   }
 
   .skeleton-bone {
-    background: var(--color-border-subtle);
     animation: none;
   }
 

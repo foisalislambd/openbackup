@@ -1,12 +1,17 @@
-/** Presentational building blocks for the dashboard. */
+/** Presentational building blocks for the admin dashboard. */
 
 import type { ReactNode } from 'react'
+import { cn } from '@/lib/cn'
 
 export function PageTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div className="min-w-0">
-      <h1 className="truncate text-2xl font-semibold tracking-tight text-[var(--color-ink)]">{title}</h1>
-      {subtitle && <p className="mt-0.5 truncate text-sm text-[var(--color-ink-muted)]">{subtitle}</p>}
+      <h1 className="truncate text-lg font-semibold tracking-tight text-gray-900 dark:text-white sm:text-xl">
+        {title}
+      </h1>
+      {subtitle && (
+        <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400 sm:text-sm">{subtitle}</p>
+      )}
     </div>
   )
 }
@@ -23,14 +28,16 @@ export function Card({
   className?: string
 }) {
   return (
-    <section className={`panel ${className}`}>
+    <section className={cn('admin-card overflow-hidden', className)}>
       {(title || action) && (
-        <header className="flex items-center justify-between gap-3 border-b border-[var(--color-border-subtle)] px-5 py-3.5">
-          {title && <h2 className="text-sm font-semibold tracking-tight">{title}</h2>}
-          {action}
+        <header className="flex flex-col gap-3 border-b border-gray-200 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5 dark:border-gray-800">
+          {title && (
+            <h2 className="shrink-0 text-sm font-semibold tracking-tight text-gray-900 dark:text-white">{title}</h2>
+          )}
+          {action && <div className="flex flex-wrap items-center gap-2 sm:justify-end">{action}</div>}
         </header>
       )}
-      <div className="px-5 py-4">{children}</div>
+      <div className="px-4 py-4 sm:px-5">{children}</div>
     </section>
   )
 }
@@ -46,22 +53,18 @@ export function Stat({
   hint?: string
   tone?: 'neutral' | 'good' | 'warn' | 'bad'
 }) {
-  const toneColor = {
-    neutral: 'var(--color-ink)',
-    good: 'var(--color-good)',
-    warn: 'var(--color-warn)',
-    bad: 'var(--color-bad)',
+  const toneClass = {
+    neutral: 'text-gray-900 dark:text-white',
+    good: 'text-success-600 dark:text-success-500',
+    warn: 'text-warning-500',
+    bad: 'text-error-500',
   }[tone]
 
   return (
-    <div className="panel px-5 py-4">
-      <div className="text-[0.7rem] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-muted)]">
-        {label}
-      </div>
-      <div className="tabular mt-2 text-[1.65rem] font-semibold tracking-tight" style={{ color: toneColor }}>
-        {value}
-      </div>
-      {hint && <div className="mt-1 text-xs text-[var(--color-ink-muted)]">{hint}</div>}
+    <div className="admin-card px-4 py-4 sm:px-5">
+      <div className="text-[0.7rem] font-semibold uppercase tracking-[0.08em] text-gray-500">{label}</div>
+      <div className={cn('tabular mt-2 text-xl font-semibold tracking-tight sm:text-[1.65rem]', toneClass)}>{value}</div>
+      {hint && <div className="mt-1 text-xs text-gray-500">{hint}</div>}
     </div>
   )
 }
@@ -74,14 +77,14 @@ export function Badge({
   tone?: 'neutral' | 'good' | 'warn' | 'bad' | 'brand'
 }) {
   const styles: Record<string, string> = {
-    neutral: 'bg-[var(--color-surface-muted)] text-[var(--color-ink-muted)]',
-    good: 'bg-[color-mix(in_oklch,var(--color-good)_14%,transparent)] text-[var(--color-good)]',
-    warn: 'bg-[color-mix(in_oklch,var(--color-warn)_16%,transparent)] text-[var(--color-warn)]',
-    bad: 'bg-[color-mix(in_oklch,var(--color-bad)_14%,transparent)] text-[var(--color-bad)]',
-    brand: 'bg-[var(--color-brand-soft)] text-[var(--color-brand-strong)]',
+    neutral: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300',
+    good: 'bg-success-50 text-success-600 dark:bg-success-500/15 dark:text-success-500',
+    warn: 'bg-warning-50 text-warning-500 dark:bg-warning-500/15',
+    bad: 'bg-error-50 text-error-500 dark:bg-error-500/15',
+    brand: 'bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300',
   }
   return (
-    <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[0.7rem] font-semibold ${styles[tone]}`}>
+    <span className={cn('inline-flex items-center rounded-md px-2 py-0.5 text-[0.7rem] font-semibold', styles[tone])}>
       {children}
     </span>
   )
@@ -105,14 +108,17 @@ export function Button({
   className?: string
 }) {
   const styles: Record<string, string> = {
-    primary: 'bg-[var(--color-brand)] text-white hover:bg-[var(--color-brand-strong)]',
+    primary: 'bg-brand-500 text-white hover:bg-brand-600 shadow-sm shadow-brand-500/20',
     secondary:
-      'border border-[var(--color-border-subtle)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-muted)]',
-    danger:
-      'border border-[var(--color-bad)] text-[var(--color-bad)] hover:bg-[color-mix(in_oklch,var(--color-bad)_10%,transparent)]',
-    ghost: 'text-[var(--color-ink-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-ink)]',
+      'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-transparent dark:text-gray-200 dark:hover:bg-white/5',
+    danger: 'border border-error-500 text-error-500 hover:bg-error-50 dark:hover:bg-error-500/10',
+    ghost: 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-white/5 dark:hover:text-white',
   }
-  const base = `inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${styles[variant]} ${className}`
+  const base = cn(
+    'inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
+    styles[variant],
+    className,
+  )
 
   if (href) {
     return (
@@ -128,44 +134,36 @@ export function Button({
   )
 }
 
-export function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string
-  hint?: string
-  children: ReactNode
-}) {
+export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <label className="block">
-      <span className="text-sm font-semibold">{label}</span>
+      <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-xs text-[var(--color-ink-muted)]">{hint}</span>}
+      {hint && <span className="mt-1 block text-xs text-gray-500">{hint}</span>}
     </label>
   )
 }
 
 export const inputClass =
-  'mt-1.5 w-full rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3.5 py-2.5 text-sm outline-none transition focus:border-[var(--color-brand)] focus:ring-2 focus:ring-[var(--color-brand-soft)]'
+  'mt-1.5 h-11 w-full rounded-lg border border-gray-200 bg-white px-3.5 text-sm text-gray-900 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-brand-400 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white'
 
 export function Empty({ title, hint }: { title: string; hint?: string }) {
   return (
     <div className="px-4 py-14 text-center">
-      <div className="mx-auto mb-3 grid size-14 place-items-center rounded-2xl bg-[var(--color-brand-soft)] text-[var(--color-brand)]">
+      <div className="mx-auto mb-3 grid size-14 place-items-center rounded-2xl bg-brand-50 text-brand-500 dark:bg-brand-500/15">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
           <path d="M4 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
         </svg>
       </div>
-      <p className="text-sm font-semibold">{title}</p>
-      {hint && <p className="mx-auto mt-1 max-w-sm text-sm text-[var(--color-ink-muted)]">{hint}</p>}
+      <p className="text-sm font-semibold text-gray-900 dark:text-white">{title}</p>
+      {hint && <p className="mx-auto mt-1 max-w-sm text-sm text-gray-500">{hint}</p>}
     </div>
   )
 }
 
 export function ErrorNote({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-[var(--color-bad)] bg-[color-mix(in_oklch,var(--color-bad)_8%,transparent)] px-3.5 py-2.5 text-sm text-[var(--color-bad)]">
+    <div className="rounded-xl border border-error-500/30 bg-error-50 px-3.5 py-2.5 text-sm text-error-500 dark:bg-error-500/10">
       {children}
     </div>
   )
@@ -174,10 +172,14 @@ export function ErrorNote({ children }: { children: ReactNode }) {
 export function Meter({ value, max, tone }: { value: number; max: number; tone?: 'good' | 'warn' | 'bad' }) {
   const ratio = max > 0 ? Math.min(value / max, 1) : 0
   const auto = ratio > 0.9 ? 'bad' : ratio > 0.75 ? 'warn' : 'good'
-  const color = `var(--color-${tone ?? auto})`
+  const color = {
+    good: 'bg-success-500',
+    warn: 'bg-warning-500',
+    bad: 'bg-error-500',
+  }[tone ?? auto]
   return (
-    <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--color-surface-muted)]">
-      <div className="h-full rounded-full transition-all" style={{ width: `${ratio * 100}%`, background: color }} />
+    <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+      <div className={cn('h-full rounded-full transition-all', color)} style={{ width: `${ratio * 100}%` }} />
     </div>
   )
 }
@@ -199,7 +201,7 @@ export function FileGlyph() {
         fill="var(--color-file)"
         opacity="0.9"
       />
-      <path d="M14 3.5V8h4.5" fill="color-mix(in oklch, var(--color-surface) 40%, var(--color-file))" />
+      <path d="M14 3.5V8h4.5" fill="#dde9ff" />
     </svg>
   )
 }
