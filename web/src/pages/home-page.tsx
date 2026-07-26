@@ -182,13 +182,47 @@ export default function HomePage() {
 function HealthBanner({ devices, newest }: { devices: Device[]; newest?: Snapshot }) {
   if (devices.length === 0) {
     return (
-      <Banner tone="brand" title="Ready when you are">
-        Get a code on{' '}
-        <Link className="font-semibold underline" to="/devices">
-          Devices
-        </Link>
-        , then run <code className="rounded-md bg-white px-1.5 py-0.5 font-mono text-xs dark:bg-gray-900">openbackup connect</code>.
-      </Banner>
+      <div className="relative overflow-hidden rounded-2xl border border-brand-200/60 bg-gradient-to-br from-brand-500 via-brand-600 to-brand-800 p-5 sm:p-6 lg:p-8 dark:border-brand-500/20">
+        <div
+          className="pointer-events-none absolute -top-16 -right-16 h-48 w-48 rounded-full bg-white/10 blur-2xl"
+          aria-hidden
+        />
+        <div
+          className="pointer-events-none absolute -bottom-20 -left-10 h-40 w-40 rounded-full bg-brand-300/20 blur-2xl"
+          aria-hidden
+        />
+
+        <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-brand-100">Get started</p>
+            <h2 className="mt-1 text-2xl font-bold tracking-tight text-white sm:text-3xl">
+              Ready when you are
+            </h2>
+            <p className="mt-2 max-w-xl text-sm text-brand-100/90">
+              Create a connection code, then run{' '}
+              <code className="rounded-md bg-white/15 px-1.5 py-0.5 font-mono text-[11px] text-white">
+                openbackup connect
+              </code>{' '}
+              on the computer you want to protect.
+            </p>
+          </div>
+
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Link
+              to="/devices"
+              className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-brand-600 shadow-sm transition hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+            >
+              Add a device
+            </Link>
+            <Link
+              to="/settings"
+              className="inline-flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+            >
+              Settings
+            </Link>
+          </div>
+        </div>
+      </div>
     )
   }
 
@@ -231,35 +265,43 @@ function Banner({
   title,
   children,
 }: {
-  tone: 'good' | 'warn' | 'bad' | 'brand'
+  tone: 'good' | 'warn' | 'bad'
   title: string
   children: ReactNode
 }) {
   const styles = {
     good: {
-      box: 'border-success-500/30 bg-gradient-to-br from-success-50 to-white dark:from-success-500/10 dark:to-transparent',
-      dot: 'bg-success-500',
+      box: 'border-success-200 bg-success-50 dark:border-success-500/20 dark:bg-success-500/10',
+      accent: 'bg-success-500',
+      iconWrap: 'bg-success-500 text-white',
+      path: 'M20 6 9 17l-5-5',
     },
     warn: {
-      box: 'border-warning-500/30 bg-gradient-to-br from-warning-50 to-white dark:from-warning-500/10 dark:to-transparent',
-      dot: 'bg-warning-500',
+      box: 'border-warning-200 bg-warning-50 dark:border-warning-500/20 dark:bg-warning-500/10',
+      accent: 'bg-warning-500',
+      iconWrap: 'bg-warning-500 text-white',
+      path: 'M12 9v4m0 4h.01M10.3 4.3 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0Z',
     },
     bad: {
-      box: 'border-error-500/30 bg-gradient-to-br from-error-50 to-white dark:from-error-500/10 dark:to-transparent',
-      dot: 'bg-error-500',
-    },
-    brand: {
-      box: 'border-brand-500/30 bg-gradient-to-br from-brand-50 to-white dark:from-brand-500/10 dark:to-transparent',
-      dot: 'bg-brand-500',
+      box: 'border-error-200 bg-error-50 dark:border-error-500/20 dark:bg-error-500/10',
+      accent: 'bg-error-500',
+      iconWrap: 'bg-error-500 text-white',
+      path: 'M18 6 6 18M6 6l12 12',
     },
   }[tone]
+
   return (
-    <div className={`rounded-2xl border px-5 py-4 ${styles.box}`}>
-      <div className="flex items-start gap-3">
-        <span className={`mt-1.5 size-2.5 shrink-0 rounded-full ${styles.dot}`} />
-        <div>
-          <p className="text-sm font-semibold tracking-tight text-gray-900 dark:text-white">{title}</p>
-          <p className="mt-0.5 text-sm text-gray-500">{children}</p>
+    <div className={`relative overflow-hidden rounded-2xl border ${styles.box}`}>
+      <div className={`absolute inset-y-0 left-0 w-1.5 ${styles.accent}`} aria-hidden />
+      <div className="flex items-start gap-3 px-5 py-4 sm:px-6">
+        <span className={`mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl ${styles.iconWrap}`}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path d={styles.path} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{title}</p>
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{children}</p>
         </div>
       </div>
     </div>

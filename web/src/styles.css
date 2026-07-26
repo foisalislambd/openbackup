@@ -33,7 +33,11 @@
   --color-gray-950: #0c111d;
   --color-gray-dark: #1a2231;
 
-  --color-success-25: #f6fef9;
+  --color-blue-light-50: #f0f9ff;
+  --color-blue-light-100: #e0f2fe;
+  --color-blue-light-500: #0ba5ec;
+  --color-blue-light-600: #0086c9;
+
   --color-success-50: #ecfdf3;
   --color-success-100: #d1fadf;
   --color-success-200: #a6f4c5;

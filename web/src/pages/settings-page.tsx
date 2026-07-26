@@ -184,7 +184,7 @@ function PasswordChange() {
           required
         />
       </Field>
-      <Field label="New password" hint="At least 10 characters.">
+      <Field label="New password">
         <input
           className={inputClass}
           type="password"
