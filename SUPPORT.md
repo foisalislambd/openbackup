@@ -16,8 +16,8 @@
 
 | What | Where |
 | --- | --- |
-| A question, or "am I doing this right" | [GitHub Discussions](https://github.com/openbackup/openbackup/discussions) |
-| A bug, a wrong result, a crash | [Open an issue](https://github.com/openbackup/openbackup/issues/new/choose) |
+| A question, or "am I doing this right" | [GitHub Discussions](https://github.com/foisalislambd/openbackup/discussions) |
+| A bug, a wrong result, a crash | [Open an issue](https://github.com/foisalislambd/openbackup/issues/new/choose) |
 | A security problem | Privately — see [SECURITY.md](SECURITY.md) |
 
 This is a volunteer project, so answers come when someone has time. A question

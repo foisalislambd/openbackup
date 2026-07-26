@@ -52,7 +52,7 @@ $commit = try { (git rev-parse --short HEAD 2>$null) } catch { 'unknown' }
 if (-not $commit) { $commit = 'unknown' }
 $date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 
-$pkg = 'github.com/openbackup/openbackup/internal/version'
+$pkg = 'github.com/foisalislambd/openbackup/internal/version'
 $ldflags = "-s -w -X $pkg.Version=$version -X $pkg.Commit=$commit -X $pkg.Date=$date"
 
 $webOut = Join-Path $root 'web\out'

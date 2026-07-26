@@ -6,8 +6,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/openbackup/openbackup/internal/api"
-	"github.com/openbackup/openbackup/internal/idgen"
+	"github.com/foisalislambd/openbackup/internal/api"
+	"github.com/foisalislambd/openbackup/internal/idgen"
 )
 
 // Device is an enrolled agent.

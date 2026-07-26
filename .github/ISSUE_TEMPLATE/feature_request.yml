@@ -42,7 +42,7 @@ body:
       label: Does it fit the project's constraints
       description: >
         Not a test — just so the discussion starts in the right place. See
-        [CONTRIBUTING.md](https://github.com/openbackup/openbackup/blob/main/CONTRIBUTING.md).
+        [CONTRIBUTING.md](https://github.com/foisalislambd/openbackup/blob/main/CONTRIBUTING.md).
       options:
         - label: It does not require the agent to touch files outside the user's own data.
         - label: It does not add a decision most users would have to make.

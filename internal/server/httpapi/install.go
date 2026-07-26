@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/openbackup/openbackup/internal/version"
+	"github.com/foisalislambd/openbackup/internal/version"
 )
 
 // installScript is served at /install.sh so a new machine can be set up with one

@@ -22,9 +22,9 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"github.com/openbackup/openbackup/internal/agent/config"
-	"github.com/openbackup/openbackup/internal/logx"
-	"github.com/openbackup/openbackup/internal/version"
+	"github.com/foisalislambd/openbackup/internal/agent/config"
+	"github.com/foisalislambd/openbackup/internal/logx"
+	"github.com/foisalislambd/openbackup/internal/version"
 )
 
 //go:embed all:frontend/dist

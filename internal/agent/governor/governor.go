@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openbackup/openbackup/internal/agent/config"
+	"github.com/foisalislambd/openbackup/internal/agent/config"
 )
 
 // State is the governor's verdict.

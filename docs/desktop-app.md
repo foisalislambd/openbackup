@@ -6,7 +6,7 @@ restores backups, changes limits and encryption, and runs the same diagnostics a
 `openbackup doctor`.
 
 Available for Windows, macOS and Linux; on Windows it comes with the installer from
-the [releases page](https://github.com/openbackup/openbackup/releases).
+the [releases page](https://github.com/foisalislambd/openbackup/releases).
 
 ## It is a client, not the backup
 

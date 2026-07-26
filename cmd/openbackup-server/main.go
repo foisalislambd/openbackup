@@ -16,15 +16,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/openbackup/openbackup/internal/idgen"
-	"github.com/openbackup/openbackup/internal/logx"
-	"github.com/openbackup/openbackup/internal/server/auth"
-	"github.com/openbackup/openbackup/internal/server/config"
-	"github.com/openbackup/openbackup/internal/server/httpapi"
-	"github.com/openbackup/openbackup/internal/server/maintenance"
-	"github.com/openbackup/openbackup/internal/server/store"
-	"github.com/openbackup/openbackup/internal/server/web"
-	"github.com/openbackup/openbackup/internal/version"
+	"github.com/foisalislambd/openbackup/internal/idgen"
+	"github.com/foisalislambd/openbackup/internal/logx"
+	"github.com/foisalislambd/openbackup/internal/server/auth"
+	"github.com/foisalislambd/openbackup/internal/server/config"
+	"github.com/foisalislambd/openbackup/internal/server/httpapi"
+	"github.com/foisalislambd/openbackup/internal/server/maintenance"
+	"github.com/foisalislambd/openbackup/internal/server/store"
+	"github.com/foisalislambd/openbackup/internal/server/web"
+	"github.com/foisalislambd/openbackup/internal/version"
 )
 
 func main() {

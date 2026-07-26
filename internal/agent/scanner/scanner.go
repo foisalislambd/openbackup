@@ -20,9 +20,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openbackup/openbackup/internal/agent/config"
-	"github.com/openbackup/openbackup/internal/api"
-	"github.com/openbackup/openbackup/internal/ignore"
+	"github.com/foisalislambd/openbackup/internal/agent/config"
+	"github.com/foisalislambd/openbackup/internal/api"
+	"github.com/foisalislambd/openbackup/internal/ignore"
 )
 
 // Item is one entry found by the walk.

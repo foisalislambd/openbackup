@@ -10,7 +10,7 @@ plenty — and enough disk for the data you intend to keep.
 ## The one-command install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/openbackup/openbackup/main/scripts/install-server.sh | sh
+curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-server.sh | sh
 ```
 
 It writes a Compose file and an `.env` to `/opt/openbackup`, generates an admin

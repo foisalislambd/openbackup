@@ -13,7 +13,7 @@ import (
 
 	"github.com/gen2brain/beeep"
 
-	"github.com/openbackup/openbackup/internal/agent/config"
+	"github.com/foisalislambd/openbackup/internal/agent/config"
 )
 
 // agentCommand locates the openbackup command line tool.

@@ -1,7 +1,7 @@
 #!/bin/sh
 # OpenBackup server installer for a VPS.
 #
-#   curl -fsSL https://raw.githubusercontent.com/openbackup/openbackup/main/scripts/install-server.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-server.sh | sh
 #
 # It writes a docker compose file to /opt/openbackup, generates an admin password,
 # starts the server, and prints how to reach it. Nothing else on the machine is

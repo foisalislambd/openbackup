@@ -11,7 +11,7 @@ import (
 	"github.com/energye/systray"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"github.com/openbackup/openbackup/internal/agent/control"
+	"github.com/foisalislambd/openbackup/internal/agent/control"
 )
 
 //go:embed all:build/tray

@@ -3,13 +3,13 @@
 blank_issues_enabled: false
 contact_links:
   - name: Question, or help with a setup
-    url: https://github.com/openbackup/openbackup/discussions
+    url: https://github.com/foisalislambd/openbackup/discussions
     about: Ask here. Include `openbackup doctor` output and you will get a better answer.
 
   - name: Documentation
-    url: https://github.com/openbackup/openbackup/tree/main/docs
+    url: https://github.com/foisalislambd/openbackup/tree/main/docs
     about: Installing, restoring, encryption, troubleshooting and the FAQ.
 
   - name: Security vulnerability
-    url: https://github.com/openbackup/openbackup/security/advisories/new
+    url: https://github.com/foisalislambd/openbackup/security/advisories/new
     about: Report privately. Please do not open a public issue for a security problem.

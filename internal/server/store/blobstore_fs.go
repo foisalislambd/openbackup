@@ -17,7 +17,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/openbackup/openbackup/internal/hash"
+	"github.com/foisalislambd/openbackup/internal/hash"
 )
 
 // FSBlobs stores blobs on the local filesystem.

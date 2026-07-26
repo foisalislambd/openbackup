@@ -10,9 +10,9 @@ DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 # Version metadata is injected at link time, so the binary can report exactly
 # what it is without a generated source file in the tree.
 LDFLAGS := -s -w \
-	-X github.com/openbackup/openbackup/internal/version.Version=$(VERSION) \
-	-X github.com/openbackup/openbackup/internal/version.Commit=$(COMMIT) \
-	-X github.com/openbackup/openbackup/internal/version.Date=$(DATE)
+	-X github.com/foisalislambd/openbackup/internal/version.Version=$(VERSION) \
+	-X github.com/foisalislambd/openbackup/internal/version.Commit=$(COMMIT) \
+	-X github.com/foisalislambd/openbackup/internal/version.Date=$(DATE)
 
 BIN     := bin
 WEB_OUT := web/out

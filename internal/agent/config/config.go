@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openbackup/openbackup/internal/ignore"
-	"github.com/openbackup/openbackup/internal/userdirs"
+	"github.com/foisalislambd/openbackup/internal/ignore"
+	"github.com/foisalislambd/openbackup/internal/userdirs"
 )
 
 // FileName is the configuration file name.

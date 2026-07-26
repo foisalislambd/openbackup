@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/openbackup/openbackup/internal/hash"
+	"github.com/foisalislambd/openbackup/internal/hash"
 )
 
 // sqliteMaxParams keeps generated IN clauses inside SQLite's variable limit.

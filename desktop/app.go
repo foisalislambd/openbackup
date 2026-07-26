@@ -13,9 +13,9 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"github.com/openbackup/openbackup/internal/agent/control"
-	"github.com/openbackup/openbackup/internal/agent/restore"
-	"github.com/openbackup/openbackup/internal/api"
+	"github.com/foisalislambd/openbackup/internal/agent/control"
+	"github.com/foisalislambd/openbackup/internal/agent/restore"
+	"github.com/foisalislambd/openbackup/internal/api"
 )
 
 // App is the bridge between the window and the agent.

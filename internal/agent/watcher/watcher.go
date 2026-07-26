@@ -24,8 +24,8 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/openbackup/openbackup/internal/agent/config"
-	"github.com/openbackup/openbackup/internal/ignore"
+	"github.com/foisalislambd/openbackup/internal/agent/config"
+	"github.com/foisalislambd/openbackup/internal/ignore"
 )
 
 // Change is a debounced filesystem change.

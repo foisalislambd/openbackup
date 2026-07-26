@@ -12,7 +12,7 @@ with a desktop app for people who would rather not use a terminal.
 
 ```bash
 # On your server
-curl -fsSL https://raw.githubusercontent.com/openbackup/openbackup/main/scripts/install-server.sh | sh
+curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-server.sh | sh
 
 # On each computer, using the code the dashboard gives you
 curl -fsSL https://backup.example.com/install.sh | sh
@@ -77,7 +77,7 @@ volume and the dashboard is embedded in the binary, so there is no second servic
 to run.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/openbackup/openbackup/main/scripts/install-server.sh | sh
+curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-server.sh | sh
 ```
 
 It writes a Compose file to `/opt/openbackup`, generates an admin password, waits
@@ -97,7 +97,7 @@ openbackup connect --server https://backup.example.com --code ABCD-EFGH-JKLM
 ```
 
 On Windows, download the installer from the
-[releases page](https://github.com/openbackup/openbackup/releases) and let the app
+[releases page](https://github.com/foisalislambd/openbackup/releases) and let the app
 walk you through it.
 
 **4. Check it.** `openbackup status` says whether your files are safe;
@@ -326,7 +326,7 @@ Android is not built yet. See [CHANGELOG.md](CHANGELOG.md) for what changed.
 Bug reports, restore stories from unusual setups, and wording fixes are all
 welcome — [CONTRIBUTING.md](CONTRIBUTING.md) explains the house style and what a
 good pull request looks like. Questions belong in
-[Discussions](https://github.com/openbackup/openbackup/discussions); see
+[Discussions](https://github.com/foisalislambd/openbackup/discussions); see
 [SUPPORT.md](SUPPORT.md).
 
 Found a security problem? Report it privately: [SECURITY.md](SECURITY.md).

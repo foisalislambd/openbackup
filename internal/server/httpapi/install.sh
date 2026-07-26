@@ -13,7 +13,7 @@ set -eu
 
 SERVER_URL="${OPENBACKUP_SERVER:-__SERVER_URL__}"
 VERSION="${OPENBACKUP_VERSION:-__VERSION__}"
-RELEASES="${OPENBACKUP_RELEASES:-https://github.com/openbackup/openbackup/releases}"
+RELEASES="${OPENBACKUP_RELEASES:-https://github.com/foisalislambd/openbackup/releases}"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }

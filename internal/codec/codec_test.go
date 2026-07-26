@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openbackup/openbackup/internal/hash"
+	"github.com/foisalislambd/openbackup/internal/hash"
 )
 
 func mustCodec(t *testing.T, key *Key) *Codec {

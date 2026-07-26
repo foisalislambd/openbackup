@@ -4,14 +4,14 @@
 // Linux), and a single module would force every server and agent build to carry
 // them: "go build ./..." on a headless Linux box would fail on missing GTK
 // headers. Keeping it separate lets the agent stay a pure-Go cross-compile.
-module github.com/openbackup/openbackup/desktop
+module github.com/foisalislambd/openbackup/desktop
 
 go 1.26.5
 
 require (
 	github.com/energye/systray v1.0.3
 	github.com/gen2brain/beeep v0.11.2
-	github.com/openbackup/openbackup v0.0.0
+	github.com/foisalislambd/openbackup v0.0.0
 	github.com/wailsapp/wails/v2 v2.13.0
 	golang.org/x/sys v0.47.0
 )
@@ -73,4 +73,4 @@ require (
 
 // The desktop app always builds against the agent code in this repository, not a
 // published version of it.
-replace github.com/openbackup/openbackup => ../
+replace github.com/foisalislambd/openbackup => ../

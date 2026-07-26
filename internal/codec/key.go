@@ -13,7 +13,7 @@ import (
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/chacha20poly1305"
 
-	"github.com/openbackup/openbackup/internal/hash"
+	"github.com/foisalislambd/openbackup/internal/hash"
 )
 
 // Key sizes and derivation contexts. The context strings are part of the

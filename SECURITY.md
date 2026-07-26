@@ -7,7 +7,7 @@ inconvenience, so reports are welcome and taken seriously.
 
 **Do not open a public issue.** Use GitHub's private vulnerability reporting:
 
-> [Report a vulnerability](https://github.com/openbackup/openbackup/security/advisories/new)
+> [Report a vulnerability](https://github.com/foisalislambd/openbackup/security/advisories/new)
 
 That opens a private advisory visible only to you and the maintainers. If you
 cannot use it, contact a maintainer through their GitHub profile and ask for a

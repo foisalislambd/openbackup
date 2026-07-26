@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openbackup/openbackup/internal/api"
-	"github.com/openbackup/openbackup/internal/idgen"
+	"github.com/foisalislambd/openbackup/internal/api"
+	"github.com/foisalislambd/openbackup/internal/idgen"
 )
 
 // maxChainLength bounds how many delta snapshots may build on one full

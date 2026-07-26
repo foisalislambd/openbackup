@@ -24,7 +24,7 @@ You need **Go 1.26+** and **Node 22+**. Nothing else — no database server, no
 CGO, no toolchain beyond that.
 
 ```bash
-git clone https://github.com/openbackup/openbackup
+git clone https://github.com/foisalislambd/openbackup
 cd openbackup
 make            # build the dashboard, embed it, build the binaries
 make test       # run the tests

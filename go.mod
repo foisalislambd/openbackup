@@ -1,4 +1,4 @@
-module github.com/openbackup/openbackup
+module github.com/foisalislambd/openbackup
 
 go 1.26.5
 

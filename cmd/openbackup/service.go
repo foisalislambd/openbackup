@@ -12,10 +12,10 @@ import (
 
 	"github.com/kardianos/service"
 
-	"github.com/openbackup/openbackup/internal/agent/config"
-	"github.com/openbackup/openbackup/internal/agent/engine"
-	"github.com/openbackup/openbackup/internal/agent/ipc"
-	"github.com/openbackup/openbackup/internal/logx"
+	"github.com/foisalislambd/openbackup/internal/agent/config"
+	"github.com/foisalislambd/openbackup/internal/agent/engine"
+	"github.com/foisalislambd/openbackup/internal/agent/ipc"
+	"github.com/foisalislambd/openbackup/internal/logx"
 )
 
 // serviceName must be stable: it is the identity of the installed Windows

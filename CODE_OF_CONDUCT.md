@@ -61,7 +61,7 @@ representative at an online or offline event.
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the project maintainers privately. Because this project publishes no
 role address, use GitHub to reach the maintainers out of public view: open a
-[private report](https://github.com/openbackup/openbackup/security/advisories/new)
+[private report](https://github.com/foisalislambd/openbackup/security/advisories/new)
 and mark it as a conduct report rather than a vulnerability, or contact a
 maintainer directly through their GitHub profile. If a maintainer is the subject
 of the report, contact any other maintainer.

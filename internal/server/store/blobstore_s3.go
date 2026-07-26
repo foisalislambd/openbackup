@@ -12,7 +12,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
-	"github.com/openbackup/openbackup/internal/hash"
+	"github.com/foisalislambd/openbackup/internal/hash"
 )
 
 // S3Config configures the object storage backend.

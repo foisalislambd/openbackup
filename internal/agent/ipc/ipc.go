@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openbackup/openbackup/internal/idgen"
+	"github.com/foisalislambd/openbackup/internal/idgen"
 )
 
 // controlFile holds the endpoint the CLI should connect to.

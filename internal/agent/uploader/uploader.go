@@ -17,11 +17,11 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/openbackup/openbackup/internal/api"
-	"github.com/openbackup/openbackup/internal/chunk"
-	"github.com/openbackup/openbackup/internal/codec"
-	"github.com/openbackup/openbackup/internal/hash"
-	"github.com/openbackup/openbackup/internal/throttle"
+	"github.com/foisalislambd/openbackup/internal/api"
+	"github.com/foisalislambd/openbackup/internal/chunk"
+	"github.com/foisalislambd/openbackup/internal/codec"
+	"github.com/foisalislambd/openbackup/internal/hash"
+	"github.com/foisalislambd/openbackup/internal/throttle"
 )
 
 // batch limits bound how much unwritten data is held in memory at once.

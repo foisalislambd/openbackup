@@ -36,9 +36,9 @@ ARG DATE=unknown
 ENV CGO_ENABLED=0
 RUN go build -trimpath \
 	-ldflags "-s -w \
-	-X github.com/openbackup/openbackup/internal/version.Version=${VERSION} \
-	-X github.com/openbackup/openbackup/internal/version.Commit=${COMMIT} \
-	-X github.com/openbackup/openbackup/internal/version.Date=${DATE}" \
+	-X github.com/foisalislambd/openbackup/internal/version.Version=${VERSION} \
+	-X github.com/foisalislambd/openbackup/internal/version.Commit=${COMMIT} \
+	-X github.com/foisalislambd/openbackup/internal/version.Date=${DATE}" \
 	-o /out/openbackup-server ./cmd/openbackup-server
 
 # --- 3. Runtime -------------------------------------------------------------

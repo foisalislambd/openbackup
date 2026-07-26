@@ -33,7 +33,7 @@ add.
 ## Windows
 
 Download the installer from the
-[releases page](https://github.com/openbackup/openbackup/releases) and run it, then
+[releases page](https://github.com/foisalislambd/openbackup/releases) and run it, then
 let the desktop app walk you through connecting the device — there is nothing to
 type.
 
