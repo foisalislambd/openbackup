@@ -6,6 +6,10 @@
 #
 #   curl -fsSL https://backup.example.com/install.sh | sh
 #
+# Prefers a published GitHub release binary. If none exists yet (or the download
+# fails), it clones the repo and builds the agent locally — same idea as the
+# server installer falling back to a source build.
+#
 # The script installs one static binary, registers a background service, and does
 # nothing else. It never touches system files, and it backs up nothing until you
 # connect the device with a one-time code from the dashboard.
@@ -14,14 +18,20 @@ set -eu
 SERVER_URL="${OPENBACKUP_SERVER:-__SERVER_URL__}"
 VERSION="${OPENBACKUP_VERSION:-__VERSION__}"
 RELEASES="${OPENBACKUP_RELEASES:-https://github.com/foisalislambd/openbackup/releases}"
+REPO="${OPENBACKUP_REPO:-https://github.com/foisalislambd/openbackup.git}"
+REF="${OPENBACKUP_REF:-main}"
+# Pin a Go toolchain for source builds when `go` is not already installed.
+GO_VERSION="${OPENBACKUP_GO_VERSION:-1.26.5}"
+FORCE_BUILD="${OPENBACKUP_FORCE_BUILD:-0}"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed"; }
+have() { command -v "$1" >/dev/null 2>&1; }
 
 # ---------------------------------------------------------------------------
-# Work out what to download
+# Work out what to download / build for
 # ---------------------------------------------------------------------------
 
 os=$(uname -s)
@@ -56,15 +66,15 @@ mkdir -p "$bindir"
 
 need uname
 need mkdir
-if command -v curl >/dev/null 2>&1; then
+if have curl; then
 	fetch() { curl -fsSL "$1" -o "$2"; }
-elif command -v wget >/dev/null 2>&1; then
+elif have wget; then
 	fetch() { wget -qO "$2" "$1"; }
 else
 	die "curl or wget is required"
 fi
 
-if [ "$VERSION" = "dev" ] || [ -z "$VERSION" ]; then
+if [ "$VERSION" = "dev" ] || [ -z "$VERSION" ] || [ "$VERSION" = "__VERSION__" ]; then
 	url="${RELEASES}/latest/download/openbackup-${goos}-${goarch}"
 else
 	url="${RELEASES}/download/${VERSION}/openbackup-${goos}-${goarch}"
@@ -73,18 +83,81 @@ fi
 tmp=$(mktemp -d)
 # shellcheck disable=SC2064
 trap "rm -rf '$tmp'" EXIT INT TERM
+bin="$tmp/openbackup"
 
-say "Downloading the OpenBackup agent (${goos}/${goarch})..."
-fetch "$url" "$tmp/openbackup" || die "could not download $url"
-chmod +x "$tmp/openbackup"
+# ---------------------------------------------------------------------------
+# Obtain the binary: release download, else build from git
+# ---------------------------------------------------------------------------
 
-# Verify it runs before replacing anything that is already installed.
-"$tmp/openbackup" version >/dev/null 2>&1 || die "the downloaded binary does not run on this machine"
+try_download() {
+	say "Downloading the OpenBackup agent (${goos}/${goarch})..."
+	if ! fetch "$url" "$bin"; then
+		say "Release binary not available at $url"
+		return 1
+	fi
+	chmod +x "$bin"
+	if ! "$bin" version >/dev/null 2>&1; then
+		say "Downloaded file is not a working agent binary"
+		rm -f "$bin"
+		return 1
+	fi
+	return 0
+}
+
+# Download an official Go toolchain into $tmp so a machine without Go can still
+# build from source. Prefer a system Go when present.
+ensure_go() {
+	if have go; then
+		return 0
+	fi
+
+	need tar
+	gotar="go${GO_VERSION}.${goos}-${goarch}.tar.gz"
+	gourl="https://go.dev/dl/${gotar}"
+	say "Go not found; downloading a temporary Go ${GO_VERSION} toolchain..."
+	fetch "$gourl" "$tmp/${gotar}" || die "could not download Go from $gourl — install Go ${GO_VERSION}+ and re-run"
+	tar -C "$tmp" -xzf "$tmp/${gotar}"
+	export PATH="$tmp/go/bin:$PATH"
+	export GOTOOLCHAIN=local
+	have go || die "temporary Go toolchain failed to install"
+	say "Using temporary Go $(go env GOVERSION)"
+}
+
+build_from_git() {
+	need git
+	ensure_go
+
+	say "Cloning ${REPO} (${REF})..."
+	# --branch accepts branch or tag names. Depth 1 keeps the clone small.
+	if ! git clone --depth 1 --branch "$REF" "$REPO" "$tmp/src" 2>/dev/null; then
+		# Some refs need a full fetch (e.g. a commit SHA). Fall back.
+		git clone --depth 1 "$REPO" "$tmp/src" || die "could not clone $REPO"
+		git -C "$tmp/src" fetch --depth 1 origin "$REF" 2>/dev/null || true
+		git -C "$tmp/src" checkout "$REF" || die "could not check out $REF"
+	fi
+
+	say "Building the agent (first time can take a minute)..."
+	(
+		cd "$tmp/src"
+		CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o "$bin" ./cmd/openbackup
+	) || die "go build failed — need network access to module proxies, or install Go ${GO_VERSION}+ yourself"
+	chmod +x "$bin"
+	"$bin" version >/dev/null 2>&1 || die "the built binary does not run on this machine"
+	say "Built from source"
+}
+
+if [ "$FORCE_BUILD" = "1" ]; then
+	say "OPENBACKUP_FORCE_BUILD=1 — skipping release download"
+	build_from_git
+elif ! try_download; then
+	say "Falling back to building from git..."
+	build_from_git
+fi
 
 # mv across filesystems can fail, and an in-place overwrite of a running binary
 # fails on some systems, so copy to a temporary name next to the target and
 # rename: on the same filesystem that swap is atomic.
-cp "$tmp/openbackup" "$bindir/.openbackup.new"
+cp "$bin" "$bindir/.openbackup.new"
 chmod 755 "$bindir/.openbackup.new"
 mv "$bindir/.openbackup.new" "$bindir/openbackup"
 say "Installed $bindir/openbackup"

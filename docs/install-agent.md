@@ -16,8 +16,13 @@ openbackup connect --server https://backup.example.com --code ABCD-EFGH-JKLM
 ```
 
 The script is served by your own server, so the download and the address the agent
-will talk to are the same host you already trust. It installs one static binary,
-registers a background service, and stops there.
+will talk to are the same host you already trust. It prefers a published release
+binary from GitHub; if no release exists yet, it clones the repository and builds
+the agent (downloading a temporary Go toolchain if needed). Then it registers a
+background service and stops.
+
+Optional overrides: `OPENBACKUP_FORCE_BUILD=1`, `OPENBACKUP_REPO`, `OPENBACKUP_REF`
+(default `main`), `OPENBACKUP_GO_VERSION`.
 
 Where it installs depends on how you run it:
 
