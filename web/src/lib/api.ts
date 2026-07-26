@@ -168,11 +168,14 @@ export const api = {
     ),
   snapshot: (id: string) => request<Snapshot>(`/snapshots/${id}`),
   deleteSnapshot: (id: string) => request<void>(`/snapshots/${id}`, { method: 'DELETE' }),
+  // children=1 keeps this a folder-at-a-time listing; without it the server
+  // returns the whole subtree, which is what a restore wants and a file browser
+  // does not.
   browse: (id: string, prefix = '', cursor = '', limit = 200) =>
     request<{ entries: Entry[]; next_cursor: string }>(
-      `/snapshots/${id}/browse?prefix=${encodeURIComponent(prefix)}&cursor=${encodeURIComponent(
-        cursor,
-      )}&limit=${limit}`,
+      `/snapshots/${id}/browse?children=1&prefix=${encodeURIComponent(
+        prefix,
+      )}&cursor=${encodeURIComponent(cursor)}&limit=${limit}`,
     ),
 
   events: (limit = 100) => request<{ events: ActivityEvent[] }>(`/events?limit=${limit}`).then((r) => r.events ?? []),

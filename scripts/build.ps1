@@ -11,17 +11,27 @@
 .PARAMETER SkipWeb
     Build only the Go binaries, reusing whatever dashboard is already embedded.
 
+.PARAMETER Desktop
+    Also build the Windows desktop app. Needs the Wails CLI and, for an
+    installer, NSIS on PATH.
+
+.PARAMETER Installer
+    Package the desktop app as an NSIS installer. Implies -Desktop.
+
 .PARAMETER Test
     Run the test suite after building.
 
 .EXAMPLE
     ./scripts/build.ps1
     ./scripts/build.ps1 -SkipWeb -Test
+    ./scripts/build.ps1 -Installer
 #>
 
 [CmdletBinding()]
 param(
     [switch]$SkipWeb,
+    [switch]$Desktop,
+    [switch]$Installer,
     [switch]$Test
 )
 
@@ -98,12 +108,45 @@ Get-ChildItem (Join-Path $root 'bin') -File | ForEach-Object {
     Write-Host ("  {0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB))
 }
 
+if ($Desktop -or $Installer) {
+    Step "Building the desktop app"
+    if (-not (Get-Command wails -ErrorAction SilentlyContinue)) {
+        throw "wails is not on PATH. Install it with: go install github.com/wailsapp/wails/v2/cmd/wails@latest"
+    }
+    Push-Location (Join-Path $root 'desktop')
+    try {
+        # Wails runs the frontend build itself, per desktop/wails.json.
+        $wailsArgs = @('build', '-trimpath', '-ldflags', $ldflags)
+        if ($Installer) {
+            if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+                throw "makensis is not on PATH. Install NSIS (winget install NSIS.NSIS) or drop -Installer."
+            }
+            $wailsArgs += '-nsis'
+        }
+        & wails @wailsArgs
+        if ($LASTEXITCODE -ne 0) { throw "wails build failed" }
+    } finally {
+        Pop-Location
+    }
+    Get-ChildItem (Join-Path $root 'desktop\build\bin') -File | ForEach-Object {
+        Write-Host ("  {0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB))
+    }
+}
+
 if ($Test) {
     Step "Running tests"
     # Not ./... : the dashboard's node_modules can contain Go files from npm
     # packages, and those are not ours to test.
     go test ./cmd/... ./internal/...
     if ($LASTEXITCODE -ne 0) { throw "tests failed" }
+    # The desktop app is its own module, so ./... in the root never reaches it.
+    Push-Location (Join-Path $root 'desktop')
+    try {
+        go vet ./...
+        if ($LASTEXITCODE -ne 0) { throw "desktop vet failed" }
+    } finally {
+        Pop-Location
+    }
 }
 
 Step "Done"

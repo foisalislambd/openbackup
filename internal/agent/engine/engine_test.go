@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
@@ -117,7 +118,12 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("Enroll: %v", err)
 	}
 
-	cfg := config.Default()
+	// The config is loaded from a path inside the test's directory so the parts
+	// that save or reload it are exercised without touching the real one.
+	cfg, err := config.Load(filepath.Join(f.stateDir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg.ServerURL = ts.URL
 	cfg.DeviceID = enrolled.DeviceID
 	cfg.DeviceToken = enrolled.DeviceToken
@@ -175,7 +181,7 @@ func (f *fixture) latestTree() map[string]api.Entry {
 	out := map[string]api.Entry{}
 	cursor := ""
 	for {
-		entries, next, err := client.SnapshotEntries(ctx, snap.ID, "", cursor, 500)
+		entries, next, err := client.SnapshotEntries(ctx, snap.ID, api.EntryQuery{Cursor: cursor, Limit: 500})
 		if err != nil {
 			f.t.Fatal(err)
 		}
@@ -540,6 +546,108 @@ func TestMissingFolderIsReportedNotFatal(t *testing.T) {
 	if _, ok := f.latestTree()["home/Documents/a.txt"]; !ok {
 		t.Error("a missing folder must not prevent the rest of the backup")
 	}
+}
+
+// TestReloadPicksUpANewFolder covers the promise the desktop app and the CLI
+// both make: adding a folder takes effect on the running agent, without a
+// restart and without waiting for the next scheduled scan.
+func TestReloadPicksUpANewFolder(t *testing.T) {
+	f := newFixture(t)
+	f.write("Documents/first.txt", "first")
+	if err := f.cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	eng, err := engine.New(ctx, engine.Options{
+		Config: f.cfg, Logger: slog.New(slog.DiscardHandler), StateDir: f.stateDir,
+	})
+	if err != nil {
+		t.Fatalf("engine.New: %v", err)
+	}
+	defer eng.Close()
+	if err := eng.RunOnce(ctx); err != nil {
+		t.Fatalf("first backup: %v", err)
+	}
+
+	// Another process (the app, or the command line) adds a folder and saves.
+	extra := filepath.Join(t.TempDir(), "Projects")
+	if err := os.MkdirAll(extra, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(extra, "notes.txt"), []byte("notes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	onDisk, err := config.Load(f.cfg.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := onDisk.Update(func(c *config.Config) error { return c.AddRoot(extra) }); err != nil {
+		t.Fatalf("add folder: %v", err)
+	}
+
+	if err := eng.Reload(ctx); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if err := eng.RunOnce(ctx); err != nil {
+		t.Fatalf("second backup: %v", err)
+	}
+
+	tree := f.latestTree()
+	if _, ok := tree["projects/notes.txt"]; !ok {
+		t.Errorf("the folder added after start was not backed up; snapshot holds %v", keysOf(tree))
+	}
+	if _, ok := tree["home/Documents/first.txt"]; !ok {
+		t.Error("reloading must not drop the folders that were already configured")
+	}
+}
+
+// TestReloadRefusesAnEncryptionChange documents a deliberate limit: the running
+// agent holds one key, so a key change has to wait for a restart rather than
+// produce a snapshot that is half readable.
+func TestReloadRefusesAnEncryptionChange(t *testing.T) {
+	f := newFixture(t)
+	f.write("Documents/a.txt", "content")
+	if err := f.cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	eng, err := engine.New(ctx, engine.Options{
+		Config: f.cfg, Logger: slog.New(slog.DiscardHandler), StateDir: f.stateDir,
+	})
+	if err != nil {
+		t.Fatalf("engine.New: %v", err)
+	}
+	defer eng.Close()
+
+	key, err := codec.NewRandomKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	onDisk, err := config.Load(f.cfg.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := onDisk.Update(func(c *config.Config) error {
+		c.Encryption = config.Encryption{Enabled: true, KeyID: key.ID(), RecoveryCode: key.RecoveryCode()}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := eng.Reload(ctx); err == nil {
+		t.Fatal("reload accepted a new encryption key; it must ask for a restart instead")
+	}
+}
+
+func keysOf(tree map[string]api.Entry) []string {
+	out := make([]string, 0, len(tree))
+	for k := range tree {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // storedBytes reports how much the server has physically stored.

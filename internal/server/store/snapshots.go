@@ -342,6 +342,19 @@ func (db *DB) snapshotChain(ctx context.Context, id string) ([]string, error) {
 	return nil, fmt.Errorf("store: snapshot chain for %s exceeds %d links", id, maxChainLength)
 }
 
+// TreeQuery selects part of a snapshot's file list.
+type TreeQuery struct {
+	// Prefix limits the result to one path and everything under it.
+	Prefix string
+	// Cursor continues a previous page: pass the next cursor it returned.
+	Cursor string
+	Limit  int
+	// DirectOnly returns just the immediate children of Prefix, the way a file
+	// browser shows one folder at a time. A restore needs the whole subtree, so
+	// this stays off unless a browser asks for it.
+	DirectOnly bool
+}
+
 // Tree resolves the effective file list of a snapshot.
 //
 // Delta snapshots only store what changed, so the tree is the union of the
@@ -349,7 +362,94 @@ func (db *DB) snapshotChain(ctx context.Context, id string) ([]string, error) {
 // and a newer deletion removes it. Resolving at read time keeps a daily backup
 // cheap: storing a materialised copy of a million-file tree per snapshot would
 // cost more than the file data.
-func (db *DB) Tree(ctx context.Context, snapshotID, prefix, cursor string, limit int) ([]api.Entry, string, error) {
+func (db *DB) Tree(ctx context.Context, snapshotID string, q TreeQuery) ([]api.Entry, string, error) {
+	if q.DirectOnly {
+		return db.treeChildren(ctx, snapshotID, q)
+	}
+	return db.treeRange(ctx, snapshotID, q)
+}
+
+// treeChildren collapses a subtree into the one level below the prefix.
+//
+// The rows arrive in path order, so everything under a child is contiguous and a
+// single pass can fold it away. Folders that were never stored as entries of
+// their own - a client may only send files - are synthesised from the paths, so
+// browsing works either way.
+func (db *DB) treeChildren(ctx context.Context, snapshotID string, q TreeQuery) ([]api.Entry, string, error) {
+	limit := q.Limit
+	if limit <= 0 || limit > 5000 {
+		limit = 1000
+	}
+	prefix := normalizePath(q.Prefix)
+	// Reading more rows than children keeps the number of queries down when the
+	// folder holds deep subtrees, which is the common case.
+	fetch := min(limit*8, 5000)
+
+	out := make([]api.Entry, 0, limit)
+	cursor := q.Cursor
+	lastChild := ""
+	for len(out) < limit {
+		rows, _, err := db.treeRange(ctx, snapshotID,
+			TreeQuery{Prefix: prefix, Cursor: cursor, Limit: fetch})
+		if err != nil {
+			return nil, "", err
+		}
+		for _, row := range rows {
+			cursor = row.Path
+			name, nested := childOf(prefix, row.Path)
+			if name == "" || name == lastChild {
+				continue // the prefix itself, or another row under the child just emitted
+			}
+			lastChild = name
+			if nested {
+				// Only descendants were stored, so stand in for the folder.
+				out = append(out, api.Entry{Path: name, Type: api.EntryDir})
+			} else {
+				out = append(out, row)
+			}
+			if len(out) == limit {
+				break
+			}
+		}
+		if len(rows) < fetch {
+			// The subtree is exhausted, so whatever was collected is the last page.
+			return out, "", nil
+		}
+		if len(out) == limit {
+			// '/' sorts below '0', so this cursor skips the rest of the last
+			// child's subtree instead of paging through files nobody asked for.
+			return out, lastChild + "0", nil
+		}
+	}
+	return out, lastChild + "0", nil
+}
+
+// childOf reduces a path to the name of the entry directly below prefix. It
+// reports whether that name was reached through deeper path segments, meaning no
+// entry of its own was stored for it.
+func childOf(prefix, path string) (name string, nested bool) {
+	rest := path
+	if prefix != "" {
+		if !strings.HasPrefix(path, prefix+"/") {
+			return "", false // the prefix row itself
+		}
+		rest = path[len(prefix)+1:]
+	}
+	if rest == "" {
+		return "", false
+	}
+	if cut := strings.Index(rest, "/"); cut >= 0 {
+		rest = rest[:cut]
+		nested = true
+	}
+	if prefix == "" {
+		return rest, nested
+	}
+	return prefix + "/" + rest, nested
+}
+
+func (db *DB) treeRange(ctx context.Context, snapshotID string, q TreeQuery) ([]api.Entry, string, error) {
+	limit := q.Limit
 	if limit <= 0 || limit > 5000 {
 		limit = 1000
 	}
@@ -368,7 +468,7 @@ func (db *DB) Tree(ctx context.Context, snapshotID, prefix, cursor string, limit
 		args = append(args, sid, i)
 	}
 
-	prefix = normalizePath(prefix)
+	prefix := normalizePath(q.Prefix)
 	pathFilter := ""
 	if prefix != "" {
 		// Range comparisons instead of LIKE: they use the primary key index and
@@ -395,7 +495,7 @@ func (db *DB) Tree(ctx context.Context, snapshotID, prefix, cursor string, limit
 	ORDER BY l.path
 	LIMIT ?`
 
-	args = append(args, cursor)
+	args = append(args, q.Cursor)
 	if prefix != "" {
 		args = append(args, prefix, prefix+"/", prefix+"0")
 	}
@@ -440,7 +540,7 @@ func (db *DB) Tree(ctx context.Context, snapshotID, prefix, cursor string, limit
 // TreeEntry resolves a single path within a snapshot, used to serve a file
 // download.
 func (db *DB) TreeEntry(ctx context.Context, snapshotID, path string) (*api.Entry, error) {
-	entries, _, err := db.Tree(ctx, snapshotID, normalizePath(path), "", 2)
+	entries, _, err := db.Tree(ctx, snapshotID, TreeQuery{Prefix: normalizePath(path), Limit: 2})
 	if err != nil {
 		return nil, err
 	}

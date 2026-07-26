@@ -141,6 +141,32 @@ openbackup service install                    # run in the background at login
 openbackup doctor                             # diagnose problems
 ```
 
+## Desktop app
+
+A window for people who would rather not use a terminal. It connects a device,
+shows what is protected, browses and restores files, and changes the same
+settings the CLI does — the two share one control layer, so a change made in
+either applies to the running background service immediately.
+
+It is a thin client: the backups are still done by the agent service, and the
+window can be closed without stopping anything. Closing it hides it to the
+notification area, where the tray icon shows the current state and offers Back up
+now, Pause and Resume. Idle, it costs about 10 MB of RAM and no measurable CPU.
+
+Built with [Wails](https://wails.io): Go for the logic, React and Tailwind for
+the window. It is a separate module (`desktop/`) because Wails links against the
+platform's webview, and the server and agent must stay pure-Go cross-compiles.
+
+```bash
+make desktop        # build for this machine, into desktop/build/bin
+make desktop-dev    # live-reloading development window
+```
+
+On Windows, `./scripts/build.ps1 -Desktop` does the same, and
+`./scripts/build.ps1 -Installer` packages it with NSIS. There is no
+cross-compiling a native webview, so each platform's app is built on that
+platform; CI does this for Windows and Linux.
+
 ## Building from source
 
 Needs Go 1.26+ and Node 22+.
@@ -171,13 +197,15 @@ internal/codec/          Zstandard + XChaCha20-Poly1305
 internal/ignore/         exclusion rules and project detection
 internal/userdirs/       per-platform personal folder detection
 web/                     dashboard
+desktop/                 Wails desktop app (its own module)
 ```
 
 ## Status
 
-The server, the agent and the dashboard work end to end: enrolment, full and
-incremental backups, deduplication, quotas, retention, garbage collection,
-integrity checking, browser restore and device restore. Android is not built yet.
+The server, the agent, the dashboard and the desktop app work end to end:
+enrolment, full and incremental backups, deduplication, quotas, retention,
+garbage collection, integrity checking, browser restore and device restore.
+Android is not built yet.
 
 ## License
 

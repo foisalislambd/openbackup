@@ -14,10 +14,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/openbackup/openbackup/internal/idgen"
@@ -43,6 +45,10 @@ type Handler interface {
 	Pause(d time.Duration)
 	// Resume restarts work.
 	Resume()
+	// Reload re-reads the configuration file and applies it. It is how the
+	// desktop app and the command line make a settings change take effect on the
+	// running agent instead of at the next restart.
+	Reload(ctx context.Context) error
 }
 
 // Server exposes a Handler on loopback.
@@ -95,6 +101,7 @@ func Listen(stateDir string, handler Handler) (*Server, error) {
 	mux.HandleFunc("POST /backup", s.auth(s.handleBackup))
 	mux.HandleFunc("POST /pause", s.auth(s.handlePause))
 	mux.HandleFunc("POST /resume", s.auth(s.handleResume))
+	mux.HandleFunc("POST /reload", s.auth(s.handleReload))
 
 	s.http = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = s.http.Serve(ln) }()
@@ -147,6 +154,16 @@ func (s *Server) handlePause(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleResume(w http.ResponseWriter, _ *http.Request) {
 	s.handler.Resume()
 	writeJSON(w, map[string]string{"status": "resumed"})
+}
+
+func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
+	if err := s.handler.Reload(r.Context()); err != nil {
+		// The message is written as the body so the caller can show the agent's
+		// own explanation rather than "reload failed".
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "reloaded"})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -208,6 +225,11 @@ func (c *Client) Resume(ctx context.Context) error {
 	return c.call(ctx, http.MethodPost, "/resume", nil)
 }
 
+// Reload asks the agent to re-read its configuration.
+func (c *Client) Reload(ctx context.Context) error {
+	return c.call(ctx, http.MethodPost, "/reload", nil)
+}
+
 func (c *Client) call(ctx context.Context, method, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, nil)
 	if err != nil {
@@ -221,6 +243,11 @@ func (c *Client) call(ctx context.Context, method, path string, out any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// Carry the agent's explanation through, so a refused reload says why.
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		if msg := strings.TrimSpace(string(body)); msg != "" {
+			return errors.New(msg)
+		}
 		return fmt.Errorf("agent returned %s", resp.Status)
 	}
 	if out != nil {

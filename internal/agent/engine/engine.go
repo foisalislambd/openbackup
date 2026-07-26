@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/openbackup/openbackup/internal/api"
 	"github.com/openbackup/openbackup/internal/chunk"
 	"github.com/openbackup/openbackup/internal/codec"
+	"github.com/openbackup/openbackup/internal/ignore"
 	"github.com/openbackup/openbackup/internal/throttle"
 	"github.com/openbackup/openbackup/internal/version"
 )
@@ -51,6 +53,17 @@ type Engine struct {
 	// policy is the server-provided policy, refreshed by each heartbeat.
 	policyMu sync.RWMutex
 	policy   api.Policy
+
+	// set holds the settings the engine is actually running with: the file's
+	// settings with the server's policy applied on top. Reload replaces it, so
+	// changing a folder or a limit takes effect without restarting the service.
+	setMu sync.RWMutex
+	set   config.Settings
+
+	// watch is the live watcher, kept here so Reload can adjust which folders are
+	// being watched. It is nil when real-time watching is unavailable.
+	watchMu sync.Mutex
+	watch   *watcher.Watcher
 
 	mu       sync.Mutex
 	state    api.AgentState
@@ -115,9 +128,10 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		return nil, err
 	}
 
+	set := cfg.Settings()
 	codecOpts := codec.Options{}
-	if cfg.Encryption.Enabled {
-		key, err := codec.KeyFromRecoveryCode(cfg.Encryption.RecoveryCode)
+	if set.Encryption.Enabled {
+		key, err := codec.KeyFromRecoveryCode(set.Encryption.RecoveryCode)
 		if err != nil {
 			return nil, fmt.Errorf("engine: encryption is enabled but the key is unusable: %w", err)
 		}
@@ -141,13 +155,13 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		return nil, err
 	}
 
-	bucket := throttle.NewBucket(cfg.Limits.UploadBytesPerSec)
+	bucket := throttle.NewBucket(set.Limits.UploadBytesPerSec)
 	up, err := uploader.New(uploader.Options{
 		Client:      client,
 		Codec:       c,
 		Bucket:      bucket,
 		ChunkConfig: chunk.DefaultConfig(),
-		Concurrency: cfg.Limits.UploadConcurrency,
+		Concurrency: set.Limits.UploadConcurrency,
 	})
 	if err != nil {
 		_ = idx.Close()
@@ -161,14 +175,15 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		client:  client,
 		codec:   c,
 		idx:     idx,
-		gov:     governor.New(cfg.Limits),
+		gov:     governor.New(set.Limits),
 		bucket:  bucket,
 		up:      up,
 		trigger: make(chan trigger, 4),
 		events:  newEventBuffer(),
 		state:   api.StateIdle,
+		set:     set,
 	}
-	if cfg.Paused {
+	if set.Paused {
 		e.gov.Pause()
 	}
 	up.Progress = e.onProgress
@@ -199,9 +214,10 @@ func (e *Engine) Status() Status {
 
 // Run starts the agent loop and blocks until ctx is cancelled.
 func (e *Engine) Run(ctx context.Context) error {
+	set := e.settings()
 	e.log.Info("agent starting",
 		"version", version.Version, "server", e.cfg.ServerURL, "device", e.cfg.DeviceName,
-		"encrypted", e.cfg.Encryption.Enabled)
+		"encrypted", set.Encryption.Enabled)
 
 	// The first heartbeat also confirms the credentials still work, so a revoked
 	// device fails immediately with a clear message instead of after a scan.
@@ -213,8 +229,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		e.log.Warn("initial heartbeat failed; continuing offline", "error", err)
 	}
 
-	scan := scanner.New(e.cfg)
-	w, err := watcher.New(scan.Matcher(), e.cfg.Schedule.Debounce, e.log)
+	w, err := watcher.New(ignore.New(set.IgnoreConfig()), set.Schedule.Debounce, e.log)
 	if err != nil {
 		e.log.Warn("real-time watching is unavailable; falling back to periodic scans", "error", err)
 	}
@@ -222,7 +237,9 @@ func (e *Engine) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
 	if w != nil {
 		defer w.Close()
-		if err := w.AddRoots(ctx, e.cfg.EnabledRoots()); err != nil {
+		e.setWatcher(w)
+		defer e.setWatcher(nil)
+		if err := w.AddRoots(ctx, set.EnabledRoots()); err != nil {
 			e.log.Warn("could not watch every folder", "error", err)
 		}
 		wg.Add(1)
@@ -241,7 +258,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	// Back up once at startup: the machine may have been off for a week.
 	e.Trigger(trigger{full: true, reason: "agent started"})
 
-	fullScan := time.NewTicker(e.cfg.Schedule.FullScanInterval)
+	fullScan := time.NewTicker(set.Schedule.FullScanInterval)
 	defer fullScan.Stop()
 
 	var changes <-chan []watcher.Change
@@ -314,8 +331,19 @@ func (e *Engine) Pause(d time.Duration) {
 		return
 	}
 	e.gov.Pause()
-	e.cfg.Paused = true
-	if err := e.cfg.Save(); err != nil {
+	e.setPaused(true)
+}
+
+// setPaused records a lasting pause in memory and on disk, so it survives a
+// restart of the service.
+func (e *Engine) setPaused(paused bool) {
+	e.setMu.Lock()
+	e.set.Paused = paused
+	e.setMu.Unlock()
+	if err := e.cfg.Update(func(c *config.Config) error {
+		c.Paused = paused
+		return nil
+	}); err != nil {
 		e.log.Error("save configuration", "error", err)
 	}
 }
@@ -323,15 +351,127 @@ func (e *Engine) Pause(d time.Duration) {
 // Resume restarts backup work and picks up whatever changed while paused.
 func (e *Engine) Resume() {
 	e.gov.Resume()
-	e.cfg.Paused = false
-	if err := e.cfg.Save(); err != nil {
-		e.log.Error("save configuration", "error", err)
-	}
+	e.setPaused(false)
 	e.BackupNow("resumed")
 }
 
-// Control adapts the Engine to the local control protocol used by the CLI and
-// the tray.
+// settings returns the settings the engine is running with.
+func (e *Engine) settings() config.Settings {
+	e.setMu.RLock()
+	defer e.setMu.RUnlock()
+	return e.set
+}
+
+func (e *Engine) setSettings(s config.Settings) {
+	e.setMu.Lock()
+	e.set = s
+	e.setMu.Unlock()
+}
+
+// Reload re-reads the configuration file and applies it to the running agent.
+//
+// This is what makes the desktop app and the command line feel immediate: adding
+// a folder or lowering the upload limit changes behaviour within a second,
+// without restarting the service and without losing an in-flight backup.
+//
+// Two things cannot be changed this way, and are reported rather than half-done:
+// turning encryption on or off, and moving to another server. Both would mean the
+// data already in flight no longer matches the configuration, so they need a
+// restart.
+func (e *Engine) Reload(ctx context.Context) error {
+	// Without a file there is nothing to re-read, and resolving the default path
+	// here would read some other installation's configuration.
+	if e.cfg.Path() == "" {
+		return errors.New("this agent's configuration was not loaded from a file, so it cannot be reloaded")
+	}
+	fresh, err := config.Load(e.cfg.Path())
+	if err != nil {
+		return err
+	}
+	next := fresh.Settings()
+	current := e.settings()
+
+	if next.Encryption.KeyID != current.Encryption.KeyID {
+		return errors.New("encryption settings changed; restart the OpenBackup service to apply them")
+	}
+
+	// The server's policy outranks the file, so re-apply it on top of what was
+	// just read; otherwise a reload would quietly undo an administrator's cap.
+	e.policyMu.RLock()
+	policy := e.policy
+	e.policyMu.RUnlock()
+	if policy.MaxUploadBytesPerSec > 0 {
+		next.Limits.UploadBytesPerSec = policy.MaxUploadBytesPerSec
+	}
+
+	e.setSettings(next)
+	e.bucket.SetRate(next.Limits.UploadBytesPerSec)
+	e.gov.SetLimits(next.Limits)
+	if next.Paused {
+		e.gov.Pause()
+	} else if current.Paused {
+		e.gov.Resume()
+	}
+
+	// Watch the new folder set. Rebuilding the matcher matters as much as the
+	// roots: a changed exclude rule must not keep firing watcher events for files
+	// the user has just excluded.
+	//
+	// Registering watches walks the folder trees, which can take a while on a
+	// large home directory, so it happens in the background: the caller is a user
+	// interface waiting for a click to feel done, and the settings above are
+	// already live.
+	if w := e.watcher(); w != nil {
+		w.SetMatcher(ignore.New(next.IgnoreConfig()))
+		go func() {
+			if err := w.SetRoots(context.WithoutCancel(ctx), next.EnabledRoots()); err != nil {
+				e.log.Warn("could not watch every folder after reload", "error", err)
+			}
+		}()
+	}
+
+	added := newRoots(current.EnabledRoots(), next.EnabledRoots())
+	e.log.Info("configuration reloaded",
+		"folders", len(next.EnabledRoots()), "added", len(added),
+		"upload_limit", next.Limits.UploadBytesPerSec)
+
+	// A folder that was just added has never been backed up, so waiting for the
+	// next scheduled scan would leave it unprotected for hours.
+	if len(added) > 0 && !next.Paused {
+		e.BackupNow("a folder was added")
+	}
+	return nil
+}
+
+// newRoots reports which enabled roots are in next but not in current.
+func newRoots(current, next []config.Root) []config.Root {
+	have := make(map[string]bool, len(current))
+	for _, r := range current {
+		have[strings.ToLower(r.Path)] = true
+	}
+	var out []config.Root
+	for _, r := range next {
+		if !have[strings.ToLower(r.Path)] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func (e *Engine) watcher() *watcher.Watcher {
+	e.watchMu.Lock()
+	defer e.watchMu.Unlock()
+	return e.watch
+}
+
+func (e *Engine) setWatcher(w *watcher.Watcher) {
+	e.watchMu.Lock()
+	e.watch = w
+	e.watchMu.Unlock()
+}
+
+// Control adapts the Engine to the local control protocol used by the CLI, the
+// desktop app and the tray.
 func (e *Engine) Control() ipc.Handler { return controlAdapter{e} }
 
 type controlAdapter struct{ e *Engine }
@@ -340,6 +480,8 @@ func (c controlAdapter) Status() any             { return c.e.Status() }
 func (c controlAdapter) BackupNow(reason string) { c.e.BackupNow(reason) }
 func (c controlAdapter) Pause(d time.Duration)   { c.e.Pause(d) }
 func (c controlAdapter) Resume()                 { c.e.Resume() }
+
+func (c controlAdapter) Reload(ctx context.Context) error { return c.e.Reload(ctx) }
 
 // runBackup performs one backup pass with all the guards around it.
 func (e *Engine) runBackup(ctx context.Context, t trigger) {
@@ -399,12 +541,15 @@ func (e *Engine) runBackup(ctx context.Context, t trigger) {
 
 // backup runs a single snapshot.
 func (e *Engine) backup(ctx context.Context, t trigger) error {
-	roots := e.cfg.EnabledRoots()
+	// One snapshot of the settings for the whole run: a folder added midway
+	// through would otherwise appear in the walk but not in the snapshot's roots.
+	set := e.settings()
+	roots := set.EnabledRoots()
 	if len(roots) == 0 {
 		e.log.Warn("no folders are configured for backup")
 		return nil
 	}
-	for _, missing := range e.cfg.MissingRoots() {
+	for _, missing := range set.MissingRoots() {
 		e.event("warn", fmt.Sprintf("Folder %q is not available right now, so it was not backed up.", missing.Path),
 			missing.Path, "the folder or drive is missing")
 	}
@@ -416,7 +561,7 @@ func (e *Engine) backup(ctx context.Context, t trigger) error {
 	chainLength := e.chainLength(ctx)
 
 	kind := api.SnapshotDelta
-	full := t.full || parentID == "" || chainLength >= e.cfg.Schedule.MaxDeltaChainLength
+	full := t.full || parentID == "" || chainLength >= set.Schedule.MaxDeltaChainLength
 	if full {
 		kind = api.SnapshotFull
 		parentID = ""
@@ -448,7 +593,7 @@ func (e *Engine) backup(ctx context.Context, t trigger) error {
 		// The key id tells the server which key sealed this snapshot's data, so a
 		// device holding a different key cannot silently mix unreadable blobs
 		// into the same repository.
-		KeyID: e.cfg.Encryption.KeyID,
+		KeyID: set.Encryption.KeyID,
 	})
 	if err != nil {
 		return err
@@ -459,9 +604,9 @@ func (e *Engine) backup(ctx context.Context, t trigger) error {
 	var stats runStats
 
 	if len(t.paths) > 0 {
-		err = e.backupChanges(ctx, t.paths, sender, &stats)
+		err = e.backupChanges(ctx, set, t.paths, sender, &stats)
 	} else {
-		err = e.backupFullTree(ctx, roots, kind, sender, &stats)
+		err = e.backupFullTree(ctx, set, roots, kind, sender, &stats)
 	}
 	if err != nil {
 		// Leave the snapshot incomplete: the server marks it failed rather than
@@ -515,7 +660,7 @@ type runStats struct {
 }
 
 // backupFullTree walks every root.
-func (e *Engine) backupFullTree(ctx context.Context, roots []config.Root, kind api.SnapshotKind,
+func (e *Engine) backupFullTree(ctx context.Context, set config.Settings, roots []config.Root, kind api.SnapshotKind,
 	sender *entrySender, stats *runStats) error {
 
 	generation, err := e.idx.NextGeneration(ctx)
@@ -523,7 +668,7 @@ func (e *Engine) backupFullTree(ctx context.Context, roots []config.Root, kind a
 		return err
 	}
 
-	scan := scanner.New(e.cfg)
+	scan := scanner.New(set)
 	scan.Emit = func(item scanner.Item) error {
 		return e.processItem(ctx, item, kind, generation, sender, stats)
 	}
@@ -575,14 +720,14 @@ func (e *Engine) backupFullTree(ctx context.Context, roots []config.Root, kind a
 }
 
 // backupChanges handles a watcher-driven incremental run.
-func (e *Engine) backupChanges(ctx context.Context, changes []watcher.Change,
+func (e *Engine) backupChanges(ctx context.Context, set config.Settings, changes []watcher.Change,
 	sender *entrySender, stats *runStats) error {
 
 	generation, err := e.idx.Generation(ctx)
 	if err != nil {
 		return err
 	}
-	scan := scanner.New(e.cfg)
+	scan := scanner.New(set)
 
 	for _, change := range changes {
 		if err := ctx.Err(); err != nil {
@@ -791,7 +936,7 @@ func (s *entrySender) flush(ctx context.Context) error {
 
 // heartbeatLoop reports status and collects commands.
 func (e *Engine) heartbeatLoop(ctx context.Context) {
-	ticker := time.NewTicker(e.cfg.Schedule.HeartbeatInterval)
+	ticker := time.NewTicker(e.settings().Schedule.HeartbeatInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -855,12 +1000,14 @@ func (e *Engine) heartbeat(ctx context.Context) error {
 // user's own, so a policy change never silently rewrites what they set on the
 // machine.
 func (e *Engine) applyPolicy(policy api.Policy) {
-	if policy.MaxUploadBytesPerSec != e.cfg.Limits.UploadBytesPerSec {
-		e.cfg.Limits.UploadBytesPerSec = policy.MaxUploadBytesPerSec
+	set := e.settings()
+	if policy.MaxUploadBytesPerSec != set.Limits.UploadBytesPerSec {
+		set.Limits.UploadBytesPerSec = policy.MaxUploadBytesPerSec
+		e.setSettings(set)
 		e.bucket.SetRate(policy.MaxUploadBytesPerSec)
-		e.gov.SetLimits(e.cfg.Limits)
+		e.gov.SetLimits(set.Limits)
 	}
-	if policy.RequireEncryption && !e.cfg.Encryption.Enabled {
+	if policy.RequireEncryption && !set.Encryption.Enabled {
 		// Refusing to upload plaintext into a repository that demands encryption
 		// is better than having the server reject every chunk.
 		e.event("error", "This server requires end-to-end encryption, but this device has it turned off. "+
@@ -875,14 +1022,9 @@ func (e *Engine) handleCommand(ctx context.Context, cmd api.Command) {
 	case api.CommandBackupNow:
 		e.BackupNow("requested from the dashboard")
 	case api.CommandPause:
-		e.gov.Pause()
-		e.cfg.Paused = true
-		_ = e.cfg.Save()
+		e.Pause(0)
 	case api.CommandResume:
-		e.gov.Resume()
-		e.cfg.Paused = false
-		_ = e.cfg.Save()
-		e.BackupNow("resumed")
+		e.Resume()
 	case api.CommandRescan:
 		// Forget the local cache so everything is re-read and re-verified. This
 		// is the repair path when the index and the server disagree.
@@ -892,15 +1034,18 @@ func (e *Engine) handleCommand(ctx context.Context, cmd api.Command) {
 		}
 		e.BackupNow("full rescan requested")
 	case api.CommandReloadConf:
-		// The policy travels with the heartbeat and has already been applied; the
-		// local file is re-read on the next start.
+		if err := e.Reload(ctx); err != nil {
+			e.log.Error("reload configuration", "error", err)
+		}
 	case api.CommandForget:
 		// The device was removed in the dashboard. Wipe the credentials so the
 		// agent stops trying and the user is prompted to reconnect.
 		e.log.Warn("this device was removed from the account; clearing local credentials")
-		e.cfg.DeviceToken = ""
-		e.cfg.DeviceID = ""
-		if err := e.cfg.Save(); err != nil {
+		if err := e.cfg.Update(func(c *config.Config) error {
+			c.DeviceToken = ""
+			c.DeviceID = ""
+			return nil
+		}); err != nil {
 			e.log.Error("clear credentials", "error", err)
 		}
 	default:

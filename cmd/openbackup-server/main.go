@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -342,7 +343,7 @@ func runInvite(args []string) error {
 	}
 	serverURL := d.cfg.PublicURL
 	if serverURL == "" {
-		serverURL = "http://localhost" + d.cfg.Addr
+		serverURL = localURL(d.cfg.Addr)
 	}
 	fmt.Printf(`Enrolment code for %s (valid until %s):
 
@@ -354,6 +355,22 @@ Run this on the device you want to back up:
 
 `, user.Email, token.ExpiresAt.Local().Format(time.RFC1123), code, serverURL, code)
 	return nil
+}
+
+// localURL turns a listen address into an address a device can dial.
+//
+// The listen address may be ":8080", "0.0.0.0:8080" or "127.0.0.1:18099", and
+// only the last is a usable host. Printing a URL that cannot be dialled is worse
+// than printing none, because the first thing a new user does is copy it.
+func localURL(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "http://localhost" + addr
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "localhost"
+	}
+	return "http://" + net.JoinHostPort(host, port)
 }
 
 func runUser(args []string) error {

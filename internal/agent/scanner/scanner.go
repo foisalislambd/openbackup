@@ -78,9 +78,11 @@ type Scanner struct {
 	Emit func(Item) error
 }
 
-// New builds a Scanner from the agent configuration.
-func New(cfg *config.Config) *Scanner {
-	return &Scanner{matcher: ignore.New(cfg.IgnoreConfig())}
+// New builds a Scanner from a settings snapshot. A snapshot rather than the live
+// configuration keeps one walk consistent: the rules cannot change halfway
+// through a scan and leave part of a folder judged by different criteria.
+func New(set config.Settings) *Scanner {
+	return &Scanner{matcher: ignore.New(set.IgnoreConfig())}
 }
 
 // Matcher exposes the compiled rules so the watcher can apply the same policy.

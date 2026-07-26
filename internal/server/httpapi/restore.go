@@ -102,7 +102,8 @@ func (s *Server) handleDownloadArchive(w http.ResponseWriter, r *http.Request, u
 	var written int64
 	cursor := ""
 	for {
-		entries, next, err := s.db.Tree(r.Context(), snapshotID, prefix, cursor, 500)
+		entries, next, err := s.db.Tree(r.Context(), snapshotID,
+			store.TreeQuery{Prefix: prefix, Cursor: cursor, Limit: 500})
 		if err != nil {
 			s.log.Error("archive tree read", "snapshot", snapshotID, "error", err)
 			break
@@ -220,7 +221,7 @@ func (s *Server) probeEntry(r *http.Request, entry *api.Entry) error {
 // probeRestorable checks the first file in the range so archive downloads fail
 // early and cleanly.
 func (s *Server) probeRestorable(r *http.Request, snapshotID, prefix string) error {
-	entries, _, err := s.db.Tree(r.Context(), snapshotID, prefix, "", 50)
+	entries, _, err := s.db.Tree(r.Context(), snapshotID, store.TreeQuery{Prefix: prefix, Limit: 50})
 	if err != nil {
 		return err
 	}

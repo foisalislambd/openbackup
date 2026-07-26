@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/openbackup/openbackup/internal/agent/config"
+	"github.com/openbackup/openbackup/internal/agent/control"
 	"github.com/openbackup/openbackup/internal/agent/engine"
 	"github.com/openbackup/openbackup/internal/agent/ipc"
 	"github.com/openbackup/openbackup/internal/agent/restore"
@@ -123,6 +124,8 @@ Folders:
   openbackup folders                Show what is backed up
   openbackup folders add <path>     Back up another folder
   openbackup folders remove <path>  Stop backing up a folder
+  openbackup folders off <path>     Pause one folder, keeping its backups
+  openbackup folders on <path>      Back up a paused folder again
   openbackup rules                  Explain what is excluded, and why
 
 Other:
@@ -183,6 +186,8 @@ func cmdConnect(args []string) error {
 	code := fs.String("code", "", "enrolment code from the dashboard")
 	name := fs.String("name", "", "name for this device (defaults to its hostname)")
 	encrypt := fs.Bool("encrypt", false, "turn on end-to-end encryption for this account")
+	recovery := fs.String("recovery-code", "",
+		"join an account that is already encrypted, using its recovery code")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -191,74 +196,29 @@ func cmdConnect(args []string) error {
 			"Create a code in the dashboard under Devices, or run 'openbackup-server invite' on the server")
 	}
 
-	cfg, err := loadConfig()
+	agent, err := openAgent()
 	if err != nil {
 		return err
-	}
-	if cfg.Enrolled() {
-		return fmt.Errorf("this device is already connected to %s; "+
-			"remove it in the dashboard first if you want to reconnect", cfg.ServerURL)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	client, err := api.NewClient(*server, "")
-	if err != nil {
-		return err
-	}
-	// Check the server first so a typo in the URL produces a clear message
-	// instead of a failed enrolment.
-	if err := client.Health(ctx); err != nil {
-		return fmt.Errorf("cannot reach %s: %w", *server, err)
-	}
-
-	deviceName := *name
-	if deviceName == "" {
-		deviceName = config.DefaultDeviceName()
-	}
-
-	// Encryption keys are generated on the device, before enrolment, so the
-	// server never sees the material.
-	var recoveryCode, keyID string
-	if *encrypt {
-		key, err := codec.NewRandomKey()
-		if err != nil {
-			return err
-		}
-		recoveryCode = key.RecoveryCode()
-		keyID = key.ID()
-	}
-
-	hostname, _ := os.Hostname()
-	resp, err := client.Enroll(ctx, api.EnrollRequest{
-		JoinToken:    *code,
-		DeviceName:   deviceName,
-		Hostname:     hostname,
-		Platform:     currentPlatform(),
-		OSVersion:    runtime.GOOS + " " + runtime.GOARCH,
-		AgentVersion: version.Version,
-		KeyID:        keyID,
+	result, err := agent.Connect(ctx, control.ConnectRequest{
+		ServerURL:    *server,
+		Code:         *code,
+		DeviceName:   *name,
+		Encrypt:      *encrypt,
+		RecoveryCode: *recovery,
 	})
 	if err != nil {
-		return fmt.Errorf("could not connect: %w", err)
-	}
-
-	cfg.ServerURL = client.BaseURL()
-	cfg.DeviceID = resp.DeviceID
-	cfg.DeviceToken = resp.DeviceToken
-	cfg.DeviceName = deviceName
-	cfg.RefreshDetectedRoots()
-	if *encrypt {
-		cfg.Encryption = config.Encryption{Enabled: true, KeyID: keyID, RecoveryCode: recoveryCode}
-	}
-	if err := cfg.Save(); err != nil {
 		return err
 	}
+	recoveryCode := result.RecoveryCode
 
-	fmt.Printf("Connected to %s as %q.\n\n", cfg.ServerURL, deviceName)
-	printRoots(cfg)
-	if *encrypt {
+	fmt.Printf("Connected to %s as %q.\n\n", result.ServerURL, result.DeviceName)
+	printFolders(result.Folders)
+	if *encrypt && *recovery == "" {
 		fmt.Printf(`
 End-to-end encryption is on. Write this recovery code down and keep it somewhere
 safe - it is the only way to read your backups if this device is lost, and the
@@ -436,26 +396,17 @@ func cmdPause(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := requireEnrolled()
+	if _, err := requireEnrolled(); err != nil {
+		return err
+	}
+	agent, err := openAgent()
 	if err != nil {
 		return err
 	}
-	stateDir, err := config.StateDir()
-	if err != nil {
+	// A pause with no agent running is still recorded, so it takes effect when one
+	// starts instead of being silently forgotten.
+	if err := agent.Pause(context.Background(), *duration); err != nil {
 		return err
-	}
-	ctx := context.Background()
-
-	if client, err := ipc.Dial(stateDir); err == nil {
-		if err := client.Pause(ctx, *duration); err != nil {
-			return err
-		}
-	} else {
-		// No agent running: record the pause so it takes effect when one starts.
-		cfg.Paused = true
-		if err := cfg.Save(); err != nil {
-			return err
-		}
 	}
 	if *duration > 0 {
 		fmt.Printf("Paused for %s.\n", *duration)
@@ -466,21 +417,14 @@ func cmdPause(args []string) error {
 }
 
 func cmdResume(args []string) error {
-	cfg, err := requireEnrolled()
+	if _, err := requireEnrolled(); err != nil {
+		return err
+	}
+	agent, err := openAgent()
 	if err != nil {
 		return err
 	}
-	stateDir, err := config.StateDir()
-	if err != nil {
-		return err
-	}
-	if client, err := ipc.Dial(stateDir); err == nil {
-		if err := client.Resume(context.Background()); err != nil {
-			return err
-		}
-	}
-	cfg.Paused = false
-	if err := cfg.Save(); err != nil {
+	if err := agent.Resume(context.Background()); err != nil {
 		return err
 	}
 	fmt.Println("Resumed.")
@@ -681,12 +625,14 @@ func cmdRestore(args []string) error {
 }
 
 func cmdFolders(args []string) error {
-	cfg, err := loadConfig()
+	agent, err := openAgent()
 	if err != nil {
 		return err
 	}
+	ctx := context.Background()
+
 	if len(args) == 0 {
-		printRoots(cfg)
+		printFolders(agent.Folders())
 		return nil
 	}
 	switch args[0] {
@@ -694,31 +640,45 @@ func cmdFolders(args []string) error {
 		if len(args) < 2 {
 			return errors.New("usage: openbackup folders add <path>")
 		}
-		if err := cfg.AddRoot(args[1]); err != nil {
+		if err := agent.AddFolder(ctx, args[1]); err != nil {
 			return err
 		}
-		if err := cfg.Save(); err != nil {
-			return err
-		}
-		fmt.Printf("Added %s.\n", args[1])
-		return requestRescan()
+		fmt.Printf("Added %s. It will be backed up from now on.\n", args[1])
+		return nil
 
 	case "remove", "rm":
 		if len(args) < 2 {
 			return errors.New("usage: openbackup folders remove <path>")
 		}
-		if err := cfg.RemoveRoot(args[1]); err != nil {
-			return err
-		}
-		if err := cfg.Save(); err != nil {
+		if err := agent.RemoveFolder(ctx, args[1]); err != nil {
 			return err
 		}
 		fmt.Printf("Stopped backing up %s. Existing backups are kept.\n", args[1])
 		return nil
 
+	case "on", "off":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: openbackup folders %s <path>", args[0])
+		}
+		if err := agent.SetFolderEnabled(ctx, args[1], args[0] == "on"); err != nil {
+			return err
+		}
+		if args[0] == "on" {
+			fmt.Printf("%s is being backed up again.\n", args[1])
+		} else {
+			fmt.Printf("Paused backups for %s. Existing backups are kept.\n", args[1])
+		}
+		return nil
+
 	default:
-		return fmt.Errorf("unknown folders subcommand %q (try add or remove)", args[0])
+		return fmt.Errorf("unknown folders subcommand %q (try add, remove, on or off)", args[0])
 	}
+}
+
+// openAgent loads the operations layer the GUI also uses, so both agree on what
+// each action does.
+func openAgent() (*control.Agent, error) {
+	return control.Open(configPath)
 }
 
 func cmdEncrypt(args []string) error {
@@ -731,32 +691,19 @@ func cmdEncrypt(args []string) error {
 	if err != nil {
 		return err
 	}
-	if cfg.Encryption.Enabled && *recovery == "" {
+	if cfg.Settings().Encryption.Enabled {
 		fmt.Println("End-to-end encryption is already on for this device.")
 		return nil
 	}
-
-	var key *codec.Key
-	if *recovery != "" {
-		// Joining an existing encrypted account: the key must match the one the
-		// other devices use, or their data would be unreadable here.
-		key, err = codec.KeyFromRecoveryCode(*recovery)
-		if err != nil {
-			return fmt.Errorf("that recovery code is not valid: %w", err)
-		}
-	} else {
-		key, err = codec.NewRandomKey()
-		if err != nil {
-			return err
-		}
+	agent, err := openAgent()
+	if err != nil {
+		return err
 	}
 
-	cfg.Encryption = config.Encryption{
-		Enabled:      true,
-		KeyID:        key.ID(),
-		RecoveryCode: key.RecoveryCode(),
-	}
-	if err := cfg.Save(); err != nil {
+	// A supplied recovery code joins an account that is already encrypted: every
+	// device must hold the same key, or each could read only its own backups.
+	code, err := agent.EnableEncryption(context.Background(), *recovery)
+	if code == "" && err != nil {
 		return err
 	}
 
@@ -768,10 +715,14 @@ backups if this device is lost, and the server does not have a copy:
 
     %s
 
-`, cfg.Encryption.RecoveryCode)
+`, code)
 	}
-	fmt.Println("Data that was already uploaded stays unencrypted until the next full backup.")
-	return requestRescan()
+	// A running agent holds the old key, so it has to restart; EnableEncryption
+	// reports that as an error alongside the code, and it is a warning here.
+	if err != nil {
+		fmt.Println("Note:", err)
+	}
+	return nil
 }
 
 func cmdLimit(args []string) error {
@@ -781,35 +732,39 @@ func cmdLimit(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := loadConfig()
+	agent, err := openAgent()
 	if err != nil {
 		return err
 	}
+	settings := agent.Settings()
+
 	changed := false
 	if *upload != "" {
 		n, err := parseBytes(*upload)
 		if err != nil {
 			return err
 		}
-		cfg.Limits.UploadBytesPerSec = n
+		settings.UploadBytesPerSec = n
 		changed = true
 	}
 	if *cpu >= 0 {
-		cfg.Limits.MaxCPUPercent = *cpu
+		settings.MaxCPUPercent = *cpu
 		changed = true
 	}
 	if !changed {
-		fmt.Printf("Upload limit: %s\n", rateSummary(cfg.Limits.UploadBytesPerSec))
-		fmt.Printf("Pause above:  %.0f%% CPU\n", cfg.Limits.MaxCPUPercent)
-		fmt.Printf("On battery:   %s\n", batterySummary(cfg))
-		fmt.Printf("On metered:   %s\n", pauseSummary(cfg.Limits.PauseOnMetered))
+		fmt.Printf("Upload limit: %s\n", rateSummary(settings.UploadBytesPerSec))
+		fmt.Printf("Pause above:  %.0f%% CPU\n", settings.MaxCPUPercent)
+		fmt.Printf("On battery:   %s\n", batterySummary(agent.Config()))
+		fmt.Printf("On metered:   %s\n", pauseSummary(settings.PauseOnMetered))
 		return nil
 	}
-	if err := cfg.Save(); err != nil {
+
+	updated, err := agent.UpdateSettings(context.Background(), settings)
+	if err != nil {
 		return err
 	}
-	fmt.Printf("Upload limit is now %s.\n", rateSummary(cfg.Limits.UploadBytesPerSec))
-	fmt.Println("Restart the agent, or wait for the next backup, for this to take effect.")
+	fmt.Printf("Upload limit is now %s, and backups pause above %.0f%% CPU.\n",
+		rateSummary(updated.UploadBytesPerSec), updated.MaxCPUPercent)
 	return nil
 }
 
@@ -935,38 +890,22 @@ func cmdDoctor(args []string) error {
 	return errors.New("some checks failed; see above")
 }
 
-// requestRescan asks a running agent to pick up a configuration change.
-func requestRescan() error {
-	stateDir, err := config.StateDir()
-	if err != nil {
-		return nil
-	}
-	client, err := ipc.Dial(stateDir)
-	if err != nil {
-		return nil
-	}
-	if err := client.BackupNow(context.Background()); err == nil {
-		fmt.Println("The running agent will pick this up on its next pass.")
-	}
-	return nil
-}
-
-func printRoots(cfg *config.Config) {
-	if len(cfg.Roots) == 0 {
+func printFolders(folders []control.Folder) {
+	if len(folders) == 0 {
 		fmt.Println("No folders are configured.")
 		return
 	}
 	fmt.Println("Folders:")
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	for _, root := range cfg.Roots {
+	for _, folder := range folders {
 		state := "backed up"
-		if !root.Enabled {
+		switch {
+		case !folder.Enabled:
 			state = "off"
-		}
-		if _, err := os.Stat(root.Path); err != nil {
+		case !folder.Exists:
 			state = "missing"
 		}
-		fmt.Fprintf(tw, "  %s\t%s\t%s\n", root.Name, state, root.Path)
+		fmt.Fprintf(tw, "  %s\t%s\t%s\n", folder.Label, state, folder.Path)
 	}
 	_ = tw.Flush()
 }
@@ -1030,19 +969,6 @@ func shortID(id string) string {
 		return id[:14]
 	}
 	return id
-}
-
-func currentPlatform() api.Platform {
-	switch runtime.GOOS {
-	case "windows":
-		return api.PlatformWindows
-	case "darwin":
-		return api.PlatformDarwin
-	case "android":
-		return api.PlatformAndroid
-	default:
-		return api.PlatformLinux
-	}
 }
 
 // parseBytes accepts sizes such as "5MB", "500KB" or a plain byte count.

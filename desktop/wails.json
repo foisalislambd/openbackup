@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "OpenBackup",
+  "outputfilename": "openbackup-desktop",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "OpenBackup"
+  },
+  "info": {
+    "companyName": "OpenBackup",
+    "productName": "OpenBackup",
+    "comments": "Automatic backup for your files"
+  }
+}

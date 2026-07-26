@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,9 +51,9 @@ type Watcher struct {
 	mu      sync.Mutex
 	pending map[string]Change
 	roots   []config.Root
-	// watched counts registered directories, for diagnostics and to enforce a
-	// sane ceiling.
-	watched int
+	// watched is the set of registered directories, for diagnostics, to enforce a
+	// sane ceiling, and so re-registering a folder is free rather than a leak.
+	watched map[string]bool
 
 	changes chan []Change
 	// overflow signals that the watch could not keep up and a full rescan is
@@ -87,6 +88,7 @@ func New(matcher *ignore.Matcher, debounce time.Duration, log *slog.Logger) (*Wa
 		log:      log,
 		debounce: debounce,
 		pending:  make(map[string]Change),
+		watched:  make(map[string]bool),
 		changes:  make(chan []Change, 8),
 		overflow: make(chan struct{}, 1),
 	}, nil
@@ -105,7 +107,85 @@ func (w *Watcher) Overflow() <-chan struct{} { return w.overflow }
 func (w *Watcher) WatchedDirs() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.watched
+	return len(w.watched)
+}
+
+// SetMatcher replaces the ignore rules. It is called when the user changes what
+// to exclude, so the watcher stops waking up for files that are no longer backed
+// up.
+func (w *Watcher) SetMatcher(m *ignore.Matcher) {
+	if m == nil {
+		return
+	}
+	w.mu.Lock()
+	w.matcher = m
+	w.mu.Unlock()
+}
+
+// rules returns the current ignore rules.
+func (w *Watcher) rules() *ignore.Matcher {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.matcher
+}
+
+// SetRoots makes the live watch match this exact set of roots, adding folders
+// that are new and releasing the kernel handles for folders that are gone.
+//
+// Dropping the old watches matters: without it, removing a folder in the app
+// would keep costing watch handles for the life of the process, and events from
+// an unconfigured folder would still wake the agent up.
+func (w *Watcher) SetRoots(ctx context.Context, roots []config.Root) error {
+	for _, dir := range w.watchList() {
+		if !underAnyRoot(dir, roots) {
+			w.removeDir(dir)
+		}
+	}
+	return w.AddRoots(ctx, roots)
+}
+
+func (w *Watcher) watchList() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := make([]string, 0, len(w.watched))
+	for dir := range w.watched {
+		out = append(out, dir)
+	}
+	return out
+}
+
+func (w *Watcher) removeDir(abs string) {
+	// fsnotify already dropped the watch for a directory that was deleted, so an
+	// error here is expected and not worth reporting.
+	_ = w.fsw.Remove(abs)
+	w.mu.Lock()
+	delete(w.watched, abs)
+	w.mu.Unlock()
+}
+
+// underAnyRoot reports whether a directory belongs to one of the roots.
+func underAnyRoot(dir string, roots []config.Root) bool {
+	for _, root := range roots {
+		abs, err := filepath.Abs(root.Path)
+		if err != nil {
+			continue
+		}
+		if _, ok := ignore.RelPath(abs, dir); ok {
+			return true
+		}
+		if samePath(abs, dir) {
+			return true
+		}
+	}
+	return false
+}
+
+func samePath(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 // AddRoots registers every directory under each root, skipping anything the
@@ -116,6 +196,7 @@ func (w *Watcher) AddRoots(ctx context.Context, roots []config.Root) error {
 	w.roots = append([]config.Root(nil), roots...)
 	w.mu.Unlock()
 
+	matcher := w.rules()
 	for _, root := range roots {
 		absRoot, err := filepath.Abs(root.Path)
 		if err != nil {
@@ -134,7 +215,7 @@ func (w *Watcher) AddRoots(ctx context.Context, roots []config.Root) error {
 			if !entry.IsDir() {
 				return nil
 			}
-			if d := w.matcher.IsSystemPath(abs); d.Skip {
+			if d := matcher.IsSystemPath(abs); d.Skip {
 				return fs.SkipDir
 			}
 			if abs != absRoot {
@@ -142,7 +223,7 @@ func (w *Watcher) AddRoots(ctx context.Context, roots []config.Root) error {
 				if !ok {
 					return fs.SkipDir
 				}
-				if d := w.matcher.Match(rel, true); d.Skip {
+				if d := matcher.Match(rel, true); d.Skip {
 					return fs.SkipDir
 				}
 			}
@@ -159,11 +240,15 @@ func (w *Watcher) AddRoots(ctx context.Context, roots []config.Root) error {
 // addDir registers one directory.
 func (w *Watcher) addDir(abs string) error {
 	w.mu.Lock()
-	if w.watched >= maxWatchedDirs {
-		w.mu.Unlock()
+	already := w.watched[abs]
+	full := len(w.watched) >= maxWatchedDirs
+	w.mu.Unlock()
+	if already {
+		return nil
+	}
+	if full {
 		return fs.SkipDir
 	}
-	w.mu.Unlock()
 
 	if err := w.fsw.Add(abs); err != nil {
 		// A directory that vanished between the walk and the registration is
@@ -175,7 +260,7 @@ func (w *Watcher) addDir(abs string) error {
 		return nil
 	}
 	w.mu.Lock()
-	w.watched++
+	w.watched[abs] = true
 	w.mu.Unlock()
 	return nil
 }
@@ -253,7 +338,8 @@ func (w *Watcher) handleEvent(ctx context.Context, event fsnotify.Event) bool {
 	if err != nil {
 		return false
 	}
-	if d := w.matcher.IsSystemPath(event.Name); d.Skip {
+	matcher := w.rules()
+	if d := matcher.IsSystemPath(event.Name); d.Skip {
 		return false
 	}
 	rel, ok := ignore.RelPath(absRoot, event.Name)
@@ -270,7 +356,7 @@ func (w *Watcher) handleEvent(ctx context.Context, event fsnotify.Event) bool {
 
 	// Ignore rules apply to watcher events exactly as they do to a scan, so a
 	// build that writes ten thousand files into dist/ causes no work.
-	if d := w.matcher.Match(rel, isDir); d.Skip {
+	if d := matcher.Match(rel, isDir); d.Skip {
 		return false
 	}
 
@@ -314,7 +400,7 @@ func (w *Watcher) addNewTree(ctx context.Context, root config.Root, dir string) 
 		if !ok {
 			return nil
 		}
-		if d := w.matcher.Match(rel, entry.IsDir()); d.Skip {
+		if d := w.rules().Match(rel, entry.IsDir()); d.Skip {
 			if entry.IsDir() {
 				return fs.SkipDir
 			}
@@ -386,7 +472,7 @@ func (w *Watcher) restore(batch []Change) {
 func (w *Watcher) AtWatchLimit() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.watched >= maxWatchedDirs
+	return len(w.watched) >= maxWatchedDirs
 }
 
 // Describe returns a short status string for the CLI.

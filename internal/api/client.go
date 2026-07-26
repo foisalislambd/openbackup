@@ -351,18 +351,33 @@ func (c *Client) ListSnapshots(ctx context.Context) ([]Snapshot, error) {
 	return out.Snapshots, nil
 }
 
+// EntryQuery selects a page of snapshot entries.
+type EntryQuery struct {
+	// Prefix limits the result to one path and everything under it.
+	Prefix string
+	// Cursor continues a previous page.
+	Cursor string
+	Limit  int
+	// DirectOnly asks for the immediate children of Prefix only, which is what a
+	// folder-by-folder browser wants. Restores need the full subtree.
+	DirectOnly bool
+}
+
 // SnapshotEntries fetches a page of entries for restore. An empty nextCursor in
 // the response means the tree is complete.
-func (c *Client) SnapshotEntries(ctx context.Context, snapshotID, prefix, cursor string, limit int) ([]Entry, string, error) {
+func (c *Client) SnapshotEntries(ctx context.Context, snapshotID string, query EntryQuery) ([]Entry, string, error) {
 	q := url.Values{}
-	if prefix != "" {
-		q.Set("prefix", prefix)
+	if query.Prefix != "" {
+		q.Set("prefix", query.Prefix)
 	}
-	if cursor != "" {
-		q.Set("cursor", cursor)
+	if query.Cursor != "" {
+		q.Set("cursor", query.Cursor)
 	}
-	if limit > 0 {
-		q.Set("limit", strconv.Itoa(limit))
+	if query.Limit > 0 {
+		q.Set("limit", strconv.Itoa(query.Limit))
+	}
+	if query.DirectOnly {
+		q.Set("children", "1")
 	}
 	path := PathSnapshots + "/" + snapshotID + PathSnapshotEntry
 	if len(q) > 0 {

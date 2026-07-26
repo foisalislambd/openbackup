@@ -13,6 +13,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -337,7 +338,7 @@ func TestDeltaSnapshotResolvesAgainstParent(t *testing.T) {
 		"Documents/new.txt":    []byte("brand new"),
 	}, []string{"Documents/delete.txt"})
 
-	entries, _, err := h.db.Tree(context.Background(), delta, "", "", 100)
+	entries, _, err := h.db.Tree(context.Background(), delta, store.TreeQuery{Limit: 100})
 	if err != nil {
 		t.Fatalf("Tree: %v", err)
 	}
@@ -359,7 +360,7 @@ func TestDeltaSnapshotResolvesAgainstParent(t *testing.T) {
 	}
 
 	// The parent snapshot must still show the world as it was.
-	parentEntries, _, err := h.db.Tree(context.Background(), full, "", "", 100)
+	parentEntries, _, err := h.db.Tree(context.Background(), full, store.TreeQuery{Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -835,6 +836,48 @@ func TestEncryptedRepositoryRefusesServerSideRestore(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "end-to-end encrypted") {
 		t.Fatalf("expected an explanation mentioning encryption, got %s", body)
+	}
+}
+
+// A restore browser walks one folder at a time, so a listing must not spill the
+// whole subtree into the current level: that made every nested file look like it
+// lived at the root.
+func TestBrowsingListsOneFolderAtATime(t *testing.T) {
+	h := newHarness(t)
+	h.setupAccount()
+	client := h.enroll("laptop")
+
+	id := h.backup(client, api.SnapshotFull, "", map[string][]byte{
+		"home/Documents/report.txt":  []byte("report"),
+		"home/Documents/tax/2026.md": []byte("taxes"),
+		"home/Pictures/holiday.jpg":  []byte("photo"),
+	}, nil)
+
+	list := func(prefix string, directOnly bool) []string {
+		entries, _, err := h.db.Tree(context.Background(), id,
+			store.TreeQuery{Prefix: prefix, Limit: 100, DirectOnly: directOnly})
+		if err != nil {
+			t.Fatalf("Tree(%q): %v", prefix, err)
+		}
+		paths := make([]string, 0, len(entries))
+		for _, e := range entries {
+			paths = append(paths, e.Path)
+		}
+		return paths
+	}
+
+	if got := list("", true); !slices.Equal(got, []string{"home"}) {
+		t.Errorf("root listing = %v, want just the backed-up root", got)
+	}
+	if got := list("home/Documents", true); !slices.Equal(got,
+		[]string{"home/Documents/report.txt", "home/Documents/tax"}) {
+		t.Errorf("folder listing = %v, want its direct children only", got)
+	}
+
+	// A restore of the same folder still needs everything underneath it.
+	if got := list("home/Documents", false); !slices.Equal(got,
+		[]string{"home/Documents/report.txt", "home/Documents/tax/2026.md"}) {
+		t.Errorf("subtree listing = %v, want every file below the folder", got)
 	}
 }
 

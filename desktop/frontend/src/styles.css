@@ -1,0 +1,140 @@
+@import 'tailwindcss';
+
+/*
+ * The same palette as the web dashboard, so the app and the browser feel like one
+ * product. The tokens are duplicated rather than imported because the two builds
+ * are independent: the dashboard ships inside the server binary, this ships inside
+ * the desktop binary, and neither should be able to break the other's build.
+ */
+@theme {
+  --color-surface: oklch(100% 0 0);
+  --color-surface-muted: oklch(98% 0.004 250);
+  --color-border-subtle: oklch(92% 0.006 250);
+  --color-ink: oklch(24% 0.02 260);
+  --color-ink-muted: oklch(52% 0.015 260);
+  --color-brand: oklch(56% 0.16 250);
+  --color-brand-soft: oklch(96% 0.03 250);
+  --color-good: oklch(62% 0.14 155);
+  --color-warn: oklch(72% 0.15 75);
+  --color-bad: oklch(58% 0.19 25);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, monospace;
+}
+
+:root {
+  /* Scrollbar tokens live here rather than in @theme: they are only ever used by
+     the rules below, and there is no point generating utility classes for them. */
+  --scrollbar-size: 12px;
+  --scrollbar-inset: 3px;
+  --scrollbar-thumb: oklch(24% 0.02 260 / 0.22);
+  --scrollbar-thumb-hover: oklch(24% 0.02 260 / 0.4);
+  --scrollbar-thumb-active: var(--color-brand);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --scrollbar-thumb: oklch(96% 0.005 260 / 0.18);
+    --scrollbar-thumb-hover: oklch(96% 0.005 260 / 0.32);
+
+    --color-surface: oklch(21% 0.015 265);
+    --color-surface-muted: oklch(17% 0.012 265);
+    --color-border-subtle: oklch(32% 0.015 265);
+    --color-ink: oklch(96% 0.005 260);
+    --color-ink-muted: oklch(72% 0.015 260);
+    --color-brand: oklch(70% 0.14 250);
+    --color-brand-soft: oklch(30% 0.05 250);
+    --color-good: oklch(70% 0.14 155);
+    --color-warn: oklch(78% 0.15 75);
+    --color-bad: oklch(66% 0.18 25);
+  }
+}
+
+html,
+body {
+  background: var(--color-surface-muted);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  /* A desktop window is not a web page: text selection and rubber-band scrolling
+     make it feel like one. */
+  user-select: none;
+  overscroll-behavior: none;
+}
+
+/* Anything a user might need to copy - a recovery code, a path, an error - opts
+   back in. */
+.selectable {
+  user-select: text;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Scrollbars.
+ *
+ * Windows draws a wide grey bar with arrow buttons, which in a small window is
+ * both loud and a waste of the space the content needs. This is the same
+ * scrollbar the rest of the interface implies: no track, no buttons, a rounded
+ * thumb tinted from the ink colour so it works in either theme.
+ *
+ * The thumb is drawn inside a transparent border and clipped to the content box,
+ * which is how you inset a webkit scrollbar - padding is ignored there. So the
+ * bar reserves 12px, of which 6px is visible thumb, and the gap keeps it off the
+ * edge of a card.
+ */
+* {
+  /* Honoured by the standard implementation; the webkit rules below win where
+     both apply, and this covers anything they miss. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+::-webkit-scrollbar {
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
+
+/* The track stays invisible so a scrollable panel does not grow a grey stripe
+   down its side. */
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  background-clip: content-box;
+  border: var(--scrollbar-inset) solid transparent;
+  border-radius: 999px;
+  /* A long list otherwise ends up with a thumb too small to aim at. */
+  min-height: 2.5rem;
+  transition: background-color 120ms ease;
+}
+
+/* Hovering the bar itself is a small target, so the thumb also brightens while
+   the pointer is anywhere in the panel that scrolls. */
+:hover::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--scrollbar-thumb-active);
+}
+
+/* Windows puts arrows at both ends; nothing in this window scrolls a line at a
+   time, and they only make the bar look like a relic. */
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

@@ -104,11 +104,15 @@ type Encryption struct {
 
 // Config is the agent configuration.
 type Config struct {
-	ServerURL   string     `json:"server_url"`
-	DeviceID    string     `json:"device_id,omitempty"`
-	DeviceToken string     `json:"device_token,omitempty"`
-	DeviceName  string     `json:"device_name,omitempty"`
-	Roots       []Root     `json:"roots"`
+	ServerURL   string `json:"server_url"`
+	DeviceID    string `json:"device_id,omitempty"`
+	DeviceToken string `json:"device_token,omitempty"`
+	DeviceName  string `json:"device_name,omitempty"`
+	Roots       []Root `json:"roots"`
+	// RootsChosen records that the folder list is the user's own, so an empty
+	// list stays empty. Without it, removing the last folder would look like a
+	// fresh install and every detected folder would come back.
+	RootsChosen bool       `json:"roots_chosen,omitempty"`
 	Ignore      Ignore     `json:"ignore"`
 	Limits      Limits     `json:"limits"`
 	Schedule    Schedule   `json:"schedule"`
@@ -227,7 +231,7 @@ func (c *Config) normalize() {
 	if c.LogLevel == "" {
 		c.LogLevel = def.LogLevel
 	}
-	if len(c.Roots) == 0 {
+	if len(c.Roots) == 0 && !c.RootsChosen {
 		c.Roots = DetectRoots()
 	}
 }
@@ -235,13 +239,71 @@ func (c *Config) normalize() {
 // Path returns where the configuration lives.
 func (c *Config) Path() string { return c.path }
 
+// Settings is a consistent copy of everything that can change while the agent is
+// running.
+//
+// The running agent reads its settings from copies rather than from the live
+// struct: the desktop app and the command line can both change folders or limits
+// at any moment, and a scan that read half of an update would back up the wrong
+// set of files.
+type Settings struct {
+	Roots      []Root
+	Ignore     Ignore
+	Limits     Limits
+	Schedule   Schedule
+	Encryption Encryption
+	Paused     bool
+}
+
+// Settings returns a snapshot of the mutable settings.
+func (c *Config) Settings() Settings {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	roots := make([]Root, len(c.Roots))
+	copy(roots, c.Roots)
+	s := Settings{
+		Roots:      roots,
+		Ignore:     c.Ignore,
+		Limits:     c.Limits,
+		Schedule:   c.Schedule,
+		Encryption: c.Encryption,
+		Paused:     c.Paused,
+	}
+	// The slices inside Ignore are shared with the config otherwise, and a
+	// caller appending to one would mutate the live configuration.
+	s.Ignore.Exclude = append([]string(nil), c.Ignore.Exclude...)
+	s.Ignore.Include = append([]string(nil), c.Ignore.Include...)
+	s.Ignore.DisabledCategories = append([]string(nil), c.Ignore.DisabledCategories...)
+	return s
+}
+
+// Update mutates the configuration under the lock and writes it to disk, so a
+// change is never half-applied and never lost.
+func (c *Config) Update(fn func(*Config) error) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if fn != nil {
+		if err := fn(c); err != nil {
+			return err
+		}
+	}
+	return c.saveLocked()
+}
+
 // Save writes the configuration atomically with owner-only permissions.
 func (c *Config) Save() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.saveLocked()
+}
+
+func (c *Config) saveLocked() error {
 	if c.path == "" {
 		return errors.New("config: no path set")
 	}
+	// Anything written to disk is a deliberate configuration, folder list
+	// included.
+	c.RootsChosen = true
 	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
 		return err
 	}
@@ -266,14 +328,21 @@ func (c *Config) Save() error {
 
 // Enrolled reports whether this agent has device credentials.
 func (c *Config) Enrolled() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.ServerURL != "" && c.DeviceToken != "" && c.DeviceID != ""
 }
 
 // EnabledRoots returns the folders that should be backed up, skipping any that
 // no longer exist so a detached external drive is not treated as a deletion.
 func (c *Config) EnabledRoots() []Root {
-	out := make([]Root, 0, len(c.Roots))
-	for _, r := range c.Roots {
+	return c.Settings().EnabledRoots()
+}
+
+// EnabledRoots filters a settings snapshot to the folders worth walking.
+func (s Settings) EnabledRoots() []Root {
+	out := make([]Root, 0, len(s.Roots))
+	for _, r := range s.Roots {
 		if !r.Enabled {
 			continue
 		}
@@ -289,8 +358,13 @@ func (c *Config) EnabledRoots() []Root {
 // MissingRoots returns configured folders that are currently unavailable, so the
 // agent can report them instead of silently backing up less than the user thinks.
 func (c *Config) MissingRoots() []Root {
+	return c.Settings().MissingRoots()
+}
+
+// MissingRoots lists the enabled folders in a snapshot that are not there.
+func (s Settings) MissingRoots() []Root {
 	var out []Root
-	for _, r := range c.Roots {
+	for _, r := range s.Roots {
 		if !r.Enabled {
 			continue
 		}
@@ -302,6 +376,9 @@ func (c *Config) MissingRoots() []Root {
 }
 
 // AddRoot adds a folder, refusing paths that are protected or already covered.
+//
+// AddRoot and the other plain mutators do not take the lock themselves: pass them
+// to Update when the agent is running, so the change is atomic and persisted.
 func (c *Config) AddRoot(path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -372,17 +449,20 @@ func (c *Config) RefreshDetectedRoots() {
 }
 
 // IgnoreConfig converts the stored settings into the ignore engine's config.
-func (c *Config) IgnoreConfig() ignore.Config {
-	categories := make([]ignore.Category, 0, len(c.Ignore.DisabledCategories))
-	for _, name := range c.Ignore.DisabledCategories {
+func (c *Config) IgnoreConfig() ignore.Config { return c.Settings().IgnoreConfig() }
+
+// IgnoreConfig converts a settings snapshot into the ignore engine's config.
+func (s Settings) IgnoreConfig() ignore.Config {
+	categories := make([]ignore.Category, 0, len(s.Ignore.DisabledCategories))
+	for _, name := range s.Ignore.DisabledCategories {
 		categories = append(categories, ignore.Category(name))
 	}
 	return ignore.Config{
 		DisabledCategories: categories,
-		Exclude:            c.Ignore.Exclude,
-		Include:            c.Ignore.Include,
-		MaxFileSize:        c.Ignore.MaxFileSizeBytes,
-		SkipHidden:         c.Ignore.SkipHidden,
+		Exclude:            s.Ignore.Exclude,
+		Include:            s.Ignore.Include,
+		MaxFileSize:        s.Ignore.MaxFileSizeBytes,
+		SkipHidden:         s.Ignore.SkipHidden,
 	}
 }
 

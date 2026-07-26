@@ -332,9 +332,7 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request, user *stor
 		writeStoreError(w, err)
 		return
 	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	entries, next, err := s.db.Tree(r.Context(), snapshotID,
-		r.URL.Query().Get("prefix"), r.URL.Query().Get("cursor"), limit)
+	entries, next, err := s.db.Tree(r.Context(), snapshotID, treeQuery(r))
 	if err != nil {
 		writeStoreError(w, err)
 		return

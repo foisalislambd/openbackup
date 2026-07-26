@@ -112,7 +112,8 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	cursor := ""
 
 	for {
-		entries, next, err := opts.Client.SnapshotEntries(ctx, opts.SnapshotID, opts.Prefix, cursor, 500)
+		entries, next, err := opts.Client.SnapshotEntries(ctx, opts.SnapshotID,
+			api.EntryQuery{Prefix: opts.Prefix, Cursor: cursor, Limit: 500})
 		if err != nil {
 			return result, err
 		}
@@ -417,7 +418,8 @@ func Search(ctx context.Context, client *api.Client, snapshotID, query string, l
 	var out []api.Entry
 	cursor := ""
 	for {
-		entries, next, err := client.SnapshotEntries(ctx, snapshotID, "", cursor, 500)
+		entries, next, err := client.SnapshotEntries(ctx, snapshotID,
+			api.EntryQuery{Cursor: cursor, Limit: 500})
 		if err != nil {
 			return nil, err
 		}

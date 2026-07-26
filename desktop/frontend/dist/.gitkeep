@@ -1,0 +1,3 @@
+# The window is built here by `wails build`, which runs `npm run build`.
+# This file only exists so //go:embed has a directory to embed in a fresh
+# checkout; the build output itself is not committed.

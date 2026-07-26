@@ -30,6 +30,7 @@ all: web build
 help:
 	@echo "make build        Build the server and agent for this machine"
 	@echo "make web          Build the dashboard and embed it in the server"
+	@echo "make desktop      Build the desktop app for this machine (needs wails)"
 	@echo "make test         Run every test"
 	@echo "make check        Format check, vet and test (what CI runs)"
 	@echo "make run-server   Run the server against ./data"
@@ -101,6 +102,30 @@ web:
 web-check:
 	cd web && npm run typecheck && npm run lint
 
+# ---------------------------------------------------------------------------
+# Desktop app
+# ---------------------------------------------------------------------------
+
+# The desktop app is a separate module because Wails needs native webview
+# headers, and the server and agent must stay pure-Go cross-compiles. It also
+# only builds for the machine it runs on: there is no cross-compiling a native
+# webview. Windows installers are produced by the release workflow.
+.PHONY: desktop
+desktop:
+	@command -v wails >/dev/null || \
+		(echo "install the Wails CLI: go install github.com/wailsapp/wails/v2/cmd/wails@latest" && exit 1)
+	cd desktop && wails build -trimpath -ldflags '$(LDFLAGS)'
+	@echo "desktop app in desktop/build/bin"
+
+.PHONY: desktop-dev
+desktop-dev:
+	cd desktop && wails dev
+
+.PHONY: desktop-check
+desktop-check:
+	cd desktop && go vet ./...
+	cd desktop/frontend && npm run typecheck
+
 .PHONY: dev
 dev:
 	@echo "server on :8080, dashboard on :3000 (proxying /api to the server)"
@@ -136,6 +161,7 @@ docker:
 .PHONY: clean
 clean:
 	rm -rf $(BIN) dist web/out web/.next
+	rm -rf desktop/build/bin desktop/frontend/dist
 	rm -rf $(WEB_DIST)
 	mkdir -p $(WEB_DIST)
 	git checkout -- $(WEB_DIST)/.gitkeep 2>/dev/null || true

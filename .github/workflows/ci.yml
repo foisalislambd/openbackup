@@ -139,6 +139,68 @@ jobs:
           cp -r web/out/. internal/server/web/dist/
           go build ./cmd/openbackup-server
 
+  desktop:
+    name: Desktop app (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+          cache-dependency-path: desktop/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      # Wails links against the platform's webview, so the Linux runner needs the
+      # WebKitGTK headers. Windows builds against WebView2, which ships with the
+      # OS.
+      - name: Install the Linux webview dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Install the Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: desktop/frontend
+      - run: npm run typecheck
+        working-directory: desktop/frontend
+
+      - name: go vet
+        run: go vet ./...
+        working-directory: desktop
+
+      # Wails builds the frontend itself, so this also proves the embed works.
+      - name: Build
+        run: wails build
+        working-directory: desktop
+
+      # NSIS is preinstalled on the Windows runner, and the installer is what a
+      # user actually downloads, so a broken one must fail the build.
+      - name: Build the installer
+        if: matrix.os == 'windows-latest'
+        run: wails build -nsis
+        working-directory: desktop
+
+      - name: Upload the Windows build
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openbackup-desktop-windows
+          path: |
+            desktop/build/bin/*.exe
+          if-no-files-found: error
+
   docker:
     name: Container image
     runs-on: ubuntu-latest

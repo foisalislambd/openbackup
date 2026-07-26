@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -172,6 +173,20 @@ func (s *Server) handleNoUI(w http.ResponseWriter, r *http.Request) {
 		"message": "OpenBackup server is running, but this build has no bundled dashboard. " +
 			"Build the web UI with 'make web' or use the CLI.",
 	})
+}
+
+// treeQuery reads the paging options a snapshot listing accepts. Browsers pass
+// children=1 to walk one folder at a time; restores omit it and take the whole
+// subtree.
+func treeQuery(r *http.Request) store.TreeQuery {
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	return store.TreeQuery{
+		Prefix:     q.Get("prefix"),
+		Cursor:     q.Get("cursor"),
+		Limit:      limit,
+		DirectOnly: q.Get("children") == "1",
+	}
 }
 
 // decodeJSON reads a JSON body with a size limit already applied by middleware.
