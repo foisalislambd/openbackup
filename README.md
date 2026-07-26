@@ -210,7 +210,7 @@ Details: [Encryption](docs/encryption.md).
 | Short FAQ | [docs/faq.md](docs/faq.md) |
 | All docs | [docs/](docs/README.md) |
 
-For developers (build, architecture, API): see [docs/development.md](docs/development.md) and [docs/architecture.md](docs/architecture.md).
+For developers (build, architecture, with API): see [docs/development.md](docs/development.md) and [docs/architecture.md](docs/architecture.md).
 
 ---
 
