@@ -10,6 +10,11 @@ older agent keeps working against a newer server, so upgrade the server first.
 
 ## Unreleased
 
+### Changed
+
+- Published server image is `foisalislambd/openbackup` (Compose, docs, and
+  Makefile). Releases push `latest` plus the version tag to Docker Hub from CI.
+
 ### Added
 
 - Desktop app for Windows, macOS and Linux (`desktop/`): connect a device, see

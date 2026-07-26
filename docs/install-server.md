@@ -48,7 +48,7 @@ from this:
 ```yaml
 services:
   openbackup:
-    image: openbackup/server:latest
+    image: foisalislambd/openbackup:latest
     container_name: openbackup
     restart: unless-stopped
     ports:

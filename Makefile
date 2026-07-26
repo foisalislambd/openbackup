@@ -186,7 +186,7 @@ docker:
 		--build-arg VERSION=$(VERSION) \
 		--build-arg COMMIT=$(COMMIT) \
 		--build-arg DATE=$(DATE) \
-		-t openbackup/server:$(VERSION) -t openbackup/server:latest .
+		-t foisalislambd/openbackup:$(VERSION) -t foisalislambd/openbackup:latest .
 
 .PHONY: clean
 clean:

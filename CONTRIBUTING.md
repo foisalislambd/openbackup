@@ -114,6 +114,22 @@ every release target, the dashboard's types and lint, the desktop app on Windows
 and Linux, and a container smoke test. It is thorough, but it cannot tell you
 whether a restore produced the right bytes.
 
+## Docker Hub releases
+
+Pushes to `main` that create a GitHub Release also build and push
+`foisalislambd/openbackup` (`latest` plus the version tag) for
+`linux/amd64` and `linux/arm64`.
+
+Maintainers need these repository secrets (Settings → Secrets and variables →
+Actions):
+
+| Secret | Value |
+| --- | --- |
+| `DOCKERHUB_USERNAME` | Docker Hub username (e.g. `foisalislambd`) |
+| `DOCKERHUB_TOKEN` | Hub Access Token with read/write on the `openbackup` repo |
+
+Create the token at https://hub.docker.com/settings/security (Access Tokens).
+
 ## Pull request expectations
 
 - **Describe the problem first**, then the fix. If there is a reproduction, put

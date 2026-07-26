@@ -1,9 +1,12 @@
 # Auto-release: every push to main creates a version tag and a GitHub Release
-# with CLI binaries (cross-compiled) plus Windows and Linux desktop apps.
+# with CLI binaries (cross-compiled), Windows and Linux desktop apps, and a
+# Docker Hub image (foisalislambd/openbackup:latest + version tags).
 #
 # Skip a release for a docs-only / WIP commit by including [skip release] in the
 # commit message. You can also run this workflow manually (Actions → Release)
 # and optionally set an exact tag like v0.3.0.
+#
+# Docker Hub push needs repository secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN.
 name: Release
 
 on:
@@ -232,9 +235,50 @@ jobs:
           path: desktop/dist/*
           if-no-files-found: error
 
+  docker:
+    name: Publish Docker image
+    needs: version
+    if: needs.version.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Version metadata
+        id: meta
+        run: |
+          echo "version=${{ needs.version.outputs.tag }}" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            foisalislambd/openbackup:latest
+            foisalislambd/openbackup:${{ needs.version.outputs.tag }}
+            foisalislambd/openbackup:${{ needs.version.outputs.version }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ steps.meta.outputs.commit }}
+            DATE=${{ steps.meta.outputs.date }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   publish:
     name: Create GitHub Release
-    needs: [version, cli, desktop-windows, desktop-linux]
+    needs: [version, cli, desktop-windows, desktop-linux, docker]
     if: needs.version.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
@@ -278,6 +322,7 @@ jobs:
             "- **Windows desktop:** \`openbackup-desktop-windows-amd64-setup.exe\` (installer) or \`.exe\` (portable) — window + background agent in one binary" \
             "- **Linux desktop:** \`openbackup-desktop-linux-amd64\` (+ \`.desktop\` + \`openbackup.png\`) — same: GUI + agent in one binary" \
             "- **Agent / server CLI:** \`openbackup-<os>-<arch>\` and \`openbackup-server-<os>-<arch>\` (optional; for headless/servers or the terminal)" \
+            "- **Server container:** \`docker pull foisalislambd/openbackup:${TAG}\` (also tagged \`latest\`)" \
             "" \
             "### Notes" \
             "- Linux desktop needs WebKitGTK 4.1 at runtime (\`libwebkit2gtk-4.1-0\` on Debian/Ubuntu)." \

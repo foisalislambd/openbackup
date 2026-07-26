@@ -13,7 +13,7 @@
 
 services:
   openbackup:
-    image: openbackup/server:latest
+    image: foisalislambd/openbackup:latest
     # Uncomment to build from a checkout instead of pulling the published image.
     # build:
     #   context: .

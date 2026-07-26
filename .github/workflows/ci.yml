@@ -254,7 +254,7 @@ jobs:
           context: .
           push: false
           load: true
-          tags: openbackup/server:ci
+          tags: foisalislambd/openbackup:ci
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
             COMMIT=${{ steps.meta.outputs.commit }}
@@ -268,7 +268,7 @@ jobs:
           docker run -d --name ob -p 18200:18200 \
             -e OPENBACKUP_ADMIN_EMAIL=ci@example.com \
             -e OPENBACKUP_ADMIN_PASSWORD=a-long-enough-password \
-            openbackup/server:ci
+            foisalislambd/openbackup:ci
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:18200/api/v1/health >/dev/null; then break; fi
             echo "waiting for server ($i)..."
