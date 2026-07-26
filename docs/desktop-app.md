@@ -5,8 +5,18 @@ terminal. It connects a device, shows whether the files are safe, browses and
 restores backups, changes limits and encryption, and runs the same diagnostics as
 `openbackup doctor`.
 
-Available for Windows, macOS and Linux; on Windows it comes with the installer from
-the [releases page](https://github.com/foisalislambd/openbackup/releases).
+Available for Windows, macOS and Linux. Same screens and design on every platform.
+
+- **Windows:** download the installer from the
+  [releases page](https://github.com/foisalislambd/openbackup/releases).
+- **Linux:** install with one command (agent CLI + desktop window + app-menu entry):
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-desktop-linux.sh | sh
+  ```
+
+  Or build locally: `make desktop` then `./scripts/install-desktop-linux.sh`.
+- **macOS:** build with `make desktop` for now (same Wails app).
 
 ## It is a client, not the backup
 
@@ -54,13 +64,15 @@ nothing; the service does the work.
 ## Building it
 
 ```bash
-make desktop        # build for this machine
-make desktop-dev    # live-reloading development window
+make desktop                 # build for this machine
+make desktop-dev             # live-reloading development window
+make desktop-linux-package   # Linux only: release-named binary + .desktop + icon
 ```
 
 On Windows, `./scripts/build.ps1 -Desktop`, or `-Installer` to package it with
-NSIS. Each platform's app is built on that platform: there is no cross-compiling a
-native webview.
+NSIS. On Linux, `scripts/install-desktop-linux.sh` installs a built or released
+binary into `~/.local` and adds an app-menu entry. Each platform's app is built
+on that platform: there is no cross-compiling a native webview.
 
 Built with [Wails](https://wails.io) — Go for the logic, React and TypeScript for
 the window, sharing the dashboard's design system. It lives in

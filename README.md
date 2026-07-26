@@ -106,7 +106,14 @@ In the dashboard:
 
 **Windows:** download the installer from [Releases](https://github.com/foisalislambd/openbackup/releases) and follow the app.
 
-**Mac / Linux:**
+**Linux (desktop app, same as Windows):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-desktop-linux.sh | sh
+openbackup-desktop
+```
+
+**Mac / Linux (CLI only):**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
