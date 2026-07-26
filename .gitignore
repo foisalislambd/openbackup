@@ -43,6 +43,20 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 
-# Local environment
+# Local environment. Only .env.example is meant to be committed; every other
+# variant carries machine- or deployment-specific values (and often secrets).
 .env
-.env.local
+.env.*
+!.env.example
+*.local
+.envrc
+.direnv/
+
+# Local credentials and keys
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets.yaml
+secrets.yml
