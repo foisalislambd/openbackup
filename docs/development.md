@@ -128,8 +128,7 @@ change a file, back up again, restore elsewhere, `diff`.
 - cross-compilation for every release target with `CGO_ENABLED=0`
 - the dashboard's typecheck, lint and build, then a real embed into the server
 - the desktop app on Windows and Linux, including the NSIS installer
-- a container build with a smoke test that hits `/api/v1/health`, the dashboard and
-  `/install.sh`
+- a container build with a smoke test that hits `/api/v1/health` and the dashboard
 
 A green pipeline should mean a working local build, so if it diverges, that is a bug
 in the pipeline.

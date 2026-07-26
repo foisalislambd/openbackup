@@ -45,9 +45,10 @@ To report an actual flaw, see [SECURITY.md](../SECURITY.md).
   no exposure. It does mean an unattended agent's key is only as protected as the
   machine and its disk encryption.
 - **Root on the machine being backed up.** Same reasoning, without limits.
-- **A compromised server serving a malicious binary.** `install.sh` is served by
-  your own server and downloads a release from GitHub. If your server is
-  compromised, so is anything it hands you.
+- **A compromised GitHub release or install script.** The agent installer
+  (`scripts/install-agent.sh`) is fetched from GitHub and downloads a release
+  binary from the same place. Treat the repo and release assets as trust roots —
+  verify checksums when you need stronger assurance.
 - **Ransomware, on its own.** Version history helps a lot: encrypted-in-place files
   arrive as new versions, and older ones remain restorable within your retention
   window. But an attacker with your account credentials can delete backups from the

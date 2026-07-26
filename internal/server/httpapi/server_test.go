@@ -994,44 +994,6 @@ func TestBrowsePaginates(t *testing.T) {
 	}
 }
 
-// TestInstallScriptIsSelfContained guards the one-command install. The script is
-// served unauthenticated on purpose (it contains no secret, and the device still
-// needs a one-time code), but it must name this server, or the user ends up with
-// an agent pointing nowhere.
-func TestInstallScriptIsSelfContained(t *testing.T) {
-	h := newHarness(t)
-
-	resp, err := http.Get(h.server.URL + "/install.sh")
-	if err != nil {
-		t.Fatalf("GET /install.sh: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /install.sh returned %d", resp.StatusCode)
-	}
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	script := string(raw)
-
-	if !strings.HasPrefix(script, "#!/bin/sh") {
-		t.Error("the installer must start with a shebang so 'curl | sh' works")
-	}
-	if strings.Contains(script, "__SERVER_URL__") || strings.Contains(script, "__VERSION__") {
-		t.Error("placeholders were not substituted, so the printed instructions are wrong")
-	}
-	if !strings.Contains(script, h.server.Listener.Addr().String()) {
-		t.Errorf("the installer does not mention this server's address:\n%s", script)
-	}
-	if !strings.Contains(script, "openbackup connect") {
-		t.Error("the installer must tell the user how to connect the device")
-	}
-	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "shellscript") {
-		t.Errorf("Content-Type = %q, want a shell script type", ct)
-	}
-}
-
 // TestBootstrapReportsAuthState covers the one call the dashboard makes before it
 // renders anything. Getting it wrong shows a signed-in user the login form, or
 // worse, shows the dashboard to someone who is not signed in.

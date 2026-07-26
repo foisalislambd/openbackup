@@ -106,14 +106,14 @@ In the dashboard:
 
 **Windows:** download the installer from [Releases](https://github.com/foisalislambd/openbackup/releases) and follow the app.
 
-**Mac / Linux:** in a terminal (replace the URL and code with yours):
+**Mac / Linux:**
 
 ```bash
-curl -fsSL http://YOUR_IP:18200/install.sh | sh
-openbackup connect --server http://YOUR_IP:18200 --code ABCD-EFGH-JKLM
+curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
+openbackup connect --server https://backup.example.com --code ABCD-EFGH-JKLM
 ```
 
-Use `https://…` instead if you’ve set up a domain and HTTPS (recommended for real use — see [install-server.md](docs/install-server.md)).
+Use your real server URL (or `http://YOUR_IP:18200` for a quick test). Prefer HTTPS for real use — see [install-server.md](docs/install-server.md).
 
 ### Step 4 — Check that it worked
 

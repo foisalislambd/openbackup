@@ -47,7 +47,7 @@ Agents upgrade by re-running the installer, which replaces the binary and restar
 the service:
 
 ```bash
-curl -fsSL https://backup.example.com/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
 ```
 
 Take a copy of the volume before a major version upgrade. Rolling back an image is

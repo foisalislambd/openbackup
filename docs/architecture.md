@@ -118,7 +118,7 @@ than only editing a file that nothing has read yet.
 | Package | Responsibility |
 | --- | --- |
 | [`store`](../internal/server/store) | SQLite schema and queries, blob backends |
-| [`httpapi`](../internal/server/httpapi) | The agent protocol, the dashboard API, the embedded UI, the served installer |
+| [`httpapi`](../internal/server/httpapi) | The agent protocol, the dashboard API, the embedded UI |
 | [`auth`](../internal/server/auth) | Password hashing (Argon2id), token hashing, constant-time comparison |
 | [`maintenance`](../internal/server/maintenance) | Retention, garbage collection, stale snapshots, log pruning, expired sessions |
 

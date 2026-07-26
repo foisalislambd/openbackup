@@ -79,7 +79,7 @@ jobs:
       # text rather than compiled, so nothing else would catch a typo in them.
       - name: Check the shell scripts
         run: |
-          for f in scripts/*.sh internal/server/httpapi/install.sh; do
+          for f in scripts/*.sh; do
             sh -n "$f" || exit 1
             shellcheck -s sh "$f" || exit 1
           done
@@ -241,7 +241,5 @@ jobs:
           curl -fsS http://127.0.0.1:18200/api/v1/health
           # The dashboard must be embedded in the published image.
           curl -fsS http://127.0.0.1:18200/ | grep -q OpenBackup
-          # And the one-command agent install must be served.
-          curl -fsS http://127.0.0.1:18200/install.sh | head -1 | grep -q '#!/bin/sh'
           docker logs ob
           docker rm -f ob

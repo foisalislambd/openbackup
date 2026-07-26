@@ -1,26 +1,18 @@
 #!/bin/sh
 # OpenBackup agent installer for Linux and macOS.
 #
-# It is served by your own server, so the download URL and the address the agent
-# will talk to are the same host you already trust:
+#   curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
+#   openbackup connect --server https://YOUR-SERVER --code YOUR-CODE
 #
-#   curl -fsSL https://backup.example.com/install.sh | sh
-#
-# Prefers a published GitHub release binary. If none exists yet (or the download
-# fails), it clones the repo and builds the agent locally — same idea as the
-# server installer falling back to a source build.
-#
-# The script installs one static binary, registers a background service, and does
-# nothing else. It never touches system files, and it backs up nothing until you
-# connect the device with a one-time code from the dashboard.
+# Prefers a GitHub release binary; if none exists, builds from git (downloads a
+# temporary Go toolchain if needed). Installs one binary and a background
+# service. Nothing is backed up until you connect with a dashboard code.
 set -eu
 
-SERVER_URL="${OPENBACKUP_SERVER:-__SERVER_URL__}"
-VERSION="${OPENBACKUP_VERSION:-__VERSION__}"
+VERSION="${OPENBACKUP_VERSION:-}"
 RELEASES="${OPENBACKUP_RELEASES:-https://github.com/foisalislambd/openbackup/releases}"
 REPO="${OPENBACKUP_REPO:-https://github.com/foisalislambd/openbackup.git}"
 REF="${OPENBACKUP_REF:-main}"
-# Pin a Go toolchain for source builds when `go` is not already installed.
 GO_VERSION="${OPENBACKUP_GO_VERSION:-1.26.5}"
 FORCE_BUILD="${OPENBACKUP_FORCE_BUILD:-0}"
 
@@ -29,10 +21,6 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed"; }
 have() { command -v "$1" >/dev/null 2>&1; }
-
-# ---------------------------------------------------------------------------
-# Work out what to download / build for
-# ---------------------------------------------------------------------------
 
 os=$(uname -s)
 case "$os" in
@@ -48,13 +36,7 @@ case "$arch" in
 	*) die "unsupported architecture: $arch" ;;
 esac
 
-# ---------------------------------------------------------------------------
-# Decide where it goes
-# ---------------------------------------------------------------------------
-
-# Root installs system-wide and runs the agent as a system service. Without root
-# the agent installs per-user, which is the better fit anyway: it backs up your
-# files, so it only needs your permissions.
+# Root → system-wide. Otherwise → per-user (better for personal machines).
 if [ "$(id -u)" = "0" ]; then
 	bindir=/usr/local/bin
 	scope=system
@@ -74,10 +56,10 @@ else
 	die "curl or wget is required"
 fi
 
-if [ "$VERSION" = "dev" ] || [ -z "$VERSION" ] || [ "$VERSION" = "__VERSION__" ]; then
-	url="${RELEASES}/latest/download/openbackup-${goos}-${goarch}"
-else
+if [ -n "$VERSION" ]; then
 	url="${RELEASES}/download/${VERSION}/openbackup-${goos}-${goarch}"
+else
+	url="${RELEASES}/latest/download/openbackup-${goos}-${goarch}"
 fi
 
 tmp=$(mktemp -d)
@@ -85,14 +67,11 @@ tmp=$(mktemp -d)
 trap "rm -rf '$tmp'" EXIT INT TERM
 bin="$tmp/openbackup"
 
-# ---------------------------------------------------------------------------
-# Obtain the binary: release download, else build from git
-# ---------------------------------------------------------------------------
-
 try_download() {
 	say "Downloading the OpenBackup agent (${goos}/${goarch})..."
 	if ! fetch "$url" "$bin"; then
 		say "Release binary not available at $url"
+		rm -f "$bin"
 		return 1
 	fi
 	chmod +x "$bin"
@@ -104,8 +83,6 @@ try_download() {
 	return 0
 }
 
-# Download an official Go toolchain into $tmp so a machine without Go can still
-# build from source. Prefer a system Go when present.
 ensure_go() {
 	if have go; then
 		return 0
@@ -128,9 +105,8 @@ build_from_git() {
 	ensure_go
 
 	say "Cloning ${REPO} (${REF})..."
-	# --branch accepts branch or tag names. Depth 1 keeps the clone small.
 	if ! git clone --depth 1 --branch "$REF" "$REPO" "$tmp/src" 2>/dev/null; then
-		# Some refs need a full fetch (e.g. a commit SHA). Fall back.
+		rm -rf "$tmp/src"
 		git clone --depth 1 "$REPO" "$tmp/src" || die "could not clone $REPO"
 		git -C "$tmp/src" fetch --depth 1 origin "$REF" 2>/dev/null || true
 		git -C "$tmp/src" checkout "$REF" || die "could not check out $REF"
@@ -154,46 +130,33 @@ elif ! try_download; then
 	build_from_git
 fi
 
-# mv across filesystems can fail, and an in-place overwrite of a running binary
-# fails on some systems, so copy to a temporary name next to the target and
-# rename: on the same filesystem that swap is atomic.
 cp "$bin" "$bindir/.openbackup.new"
 chmod 755 "$bindir/.openbackup.new"
 mv "$bindir/.openbackup.new" "$bindir/openbackup"
-say "Installed $bindir/openbackup"
+ob="$bindir/openbackup"
+say "Installed $ob"
 
 case ":$PATH:" in
 	*":$bindir:"*) ;;
-	*) say ""; say "Note: $bindir is not in your PATH. Add this to your shell profile:"; say "  export PATH=\"$bindir:\$PATH\"" ;;
+	*)
+		say ""
+		say "Add $bindir to your PATH (run this now, and put it in your shell profile):"
+		say "  export PATH=\"$bindir:\$PATH\""
+		;;
 esac
 
-# ---------------------------------------------------------------------------
-# Background service
-# ---------------------------------------------------------------------------
-
-if "$bindir/openbackup" service install >/dev/null 2>&1; then
+if "$ob" service install >/dev/null 2>&1; then
 	say "Registered the background service ($scope)."
 else
 	say "Could not register the background service automatically."
-	say "Run '$bindir/openbackup service install' yourself, or start it manually with '$bindir/openbackup run'."
+	say "Run '$ob service install' yourself, or start it manually with '$ob run'."
 fi
-
-# ---------------------------------------------------------------------------
-# What to do next
-# ---------------------------------------------------------------------------
 
 say ""
 say "Installed. Nothing is being backed up yet."
 say ""
 say "Connect this device using the one-time code from your dashboard:"
-if [ -n "$SERVER_URL" ] && [ "$SERVER_URL" != "__SERVER_URL__" ]; then
-	say "  openbackup connect --server $SERVER_URL --code YOUR-CODE"
-	say ""
-	say "Get a code at $SERVER_URL (Devices > Create connection code)."
-else
-	say "  openbackup connect --server https://your-server --code YOUR-CODE"
-fi
+say "  $ob connect --server https://YOUR-SERVER --code YOUR-CODE"
 say ""
-say "Then 'openbackup status' shows what it is doing, and 'openbackup folders' shows"
-say "which folders it found. It backs up your personal folders only, and skips"
-say "system files, caches and build output."
+say "Then '$ob status' shows what it is doing, and '$ob folders' shows"
+say "which folders it found."

@@ -46,7 +46,7 @@ export default function DevicesPage() {
             <p className="text-xs text-[var(--color-ink-muted)]">
               Not installed yet? On Linux and macOS:{' '}
               <code className="rounded bg-[var(--color-surface-muted)] px-1 py-0.5">
-                curl -fsSL {code.server_url}/install.sh | sh
+                curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
               </code>
               . On Windows, download the installer from the releases page.
             </p>

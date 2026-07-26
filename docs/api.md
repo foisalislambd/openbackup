@@ -149,16 +149,6 @@ curl -s -b cookies.txt \
 snapshots: the server cannot decrypt them. The check happens before any response
 headers are written, so you get a clean JSON error rather than a truncated ZIP.
 
-## The served installer
-
-```
-GET /install.sh
-```
-
-The agent installer, with your server's URL and the running version substituted in.
-No authentication, because a shell script that installs an unconnected agent is not
-a secret — and because `curl https://your-server/install.sh | sh` should just work.
-
 ## Rate limiting
 
 Login and enrolment attempts are rate limited per address — the two places where

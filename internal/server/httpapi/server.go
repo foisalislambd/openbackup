@@ -139,9 +139,6 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /api/v1/ui/settings", s.userOnly(s.handleUpdateSettings))
 	mux.HandleFunc("GET /api/v1/ui/ignore-rules", s.handleIgnoreRules)
 
-	// The one-command agent install, served from the user's own server.
-	mux.HandleFunc("GET /install.sh", s.handleInstallScript)
-
 	if s.webFS != nil {
 		mux.Handle("/", s.webFS)
 	} else {

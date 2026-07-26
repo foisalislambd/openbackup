@@ -62,7 +62,7 @@ In scope, and interesting:
   accepted under a hash it does not match
 - remote crashes or resource exhaustion reachable without credentials
 - privilege escalation through the installers or the background service
-  definitions (`scripts/install-server.sh`, the served `install.sh`,
+  definitions (`scripts/install-server.sh`, `scripts/install-agent.sh`,
   `openbackup service install`)
 
 ## Not vulnerabilities
