@@ -182,7 +182,11 @@ release: web
 
 .PHONY: docker
 docker:
-	docker build -t openbackup/server:$(VERSION) -t openbackup/server:latest .
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg DATE=$(DATE) \
+		-t openbackup/server:$(VERSION) -t openbackup/server:latest .
 
 .PHONY: clean
 clean:

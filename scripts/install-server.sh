@@ -216,6 +216,9 @@ fi
 # ---------------------------------------------------------------------------
 
 use_build=0
+build_version=dev
+build_commit=unknown
+build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 say "Looking for ${IMAGE}..."
 if docker image inspect "$IMAGE" >/dev/null 2>&1; then
 	say "Using the image already on this machine."
@@ -237,6 +240,10 @@ else
 		}
 	fi
 	IMAGE="foisalislambd/openbackup:local"
+	# Bake the git revision into the binary so the dashboard does not show "vdev".
+	build_version=$(git -C src describe --tags --always 2>/dev/null || echo "$REF")
+	build_commit=$(git -C src rev-parse --short HEAD 2>/dev/null || echo unknown)
+	build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 fi
 
 # ---------------------------------------------------------------------------
@@ -253,6 +260,10 @@ services:
     build:
       context: ./src
       dockerfile: Dockerfile
+      args:
+        VERSION: "${build_version}"
+        COMMIT: "${build_commit}"
+        DATE: "${build_date}"
     container_name: openbackup
     restart: unless-stopped
     ports:
