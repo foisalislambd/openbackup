@@ -10,6 +10,7 @@ import type {
   ConnectRequest,
   ConnectResult,
   Entry,
+  FileVersion,
   Folder,
   Overview,
   Page,
@@ -80,6 +81,7 @@ export const api = {
   browse: (snapshot: string, prefix: string, cursor = '') =>
     call<Page>('Browse', snapshot, prefix, cursor),
   search: (snapshot: string, query: string) => call<Entry[]>('Search', snapshot, query),
+  fileVersions: (path: string) => call<FileVersion[]>('FileVersions', path),
   chooseRestoreTarget: () => call<string>('ChooseRestoreTarget'),
   startRestore: (req: RestoreRequest) => call<void>('StartRestore', req),
   cancelRestore: () => call<void>('CancelRestore'),

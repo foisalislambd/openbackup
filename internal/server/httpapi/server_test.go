@@ -1119,3 +1119,45 @@ func TestRequireEncryptionRejectsPlaintext(t *testing.T) {
 		t.Errorf("enabling encryption after a backup returned %d, want 409", resp.StatusCode)
 	}
 }
+
+func TestFileVersionsCollapsesUnchangedContent(t *testing.T) {
+	h := newHarness(t)
+	h.setupAccount()
+	client := h.enroll("laptop")
+
+	path := "Documents/notes.txt"
+	_ = h.backup(client, api.SnapshotFull, "", map[string][]byte{path: []byte("v1")}, nil)
+	time.Sleep(5 * time.Millisecond)
+	second := h.backup(client, api.SnapshotFull, "", map[string][]byte{path: []byte("v1")}, nil)
+	time.Sleep(5 * time.Millisecond)
+	third := h.backup(client, api.SnapshotFull, "", map[string][]byte{path: []byte("v2")}, nil)
+
+	var out struct {
+		Path     string `json:"path"`
+		Versions []struct {
+			Snapshot api.Snapshot `json:"snapshot"`
+			Entry    api.Entry    `json:"entry"`
+		} `json:"versions"`
+	}
+	resp := h.do(http.MethodGet, "/api/v1/ui/files/versions?path="+url.QueryEscape(path), nil, &out)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("file versions returned %d", resp.StatusCode)
+	}
+	if len(out.Versions) != 2 {
+		t.Fatalf("got %d versions, want 2 (unchanged content collapsed): %+v", len(out.Versions), out.Versions)
+	}
+	if out.Versions[0].Snapshot.ID != third {
+		t.Fatalf("newest version = %s, want %s", out.Versions[0].Snapshot.ID, third)
+	}
+	if out.Versions[1].Snapshot.ID != second {
+		t.Fatalf("older version = %s, want %s (first identical copy kept when scanning newest-first)", out.Versions[1].Snapshot.ID, second)
+	}
+	if out.Versions[0].Entry.Digest == "" && len(out.Versions[0].Entry.Chunks) == 0 {
+		t.Fatal("version entry missing content fingerprint")
+	}
+
+	resp = h.do(http.MethodGet, "/api/v1/ui/files/versions", nil, nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("missing path returned %d, want 400", resp.StatusCode)
+	}
+}

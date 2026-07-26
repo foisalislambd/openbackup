@@ -661,6 +661,77 @@ func (a *Agent) Search(ctx context.Context, snapshotRef, query string, limit int
 	return restore.Search(ctx, client, snap.ID, query, limit)
 }
 
+// FileVersion is one distinct appearance of a path across backups.
+type FileVersion struct {
+	Snapshot api.Snapshot `json:"snapshot"`
+	Entry    api.Entry    `json:"entry"`
+}
+
+// FileVersions lists how a path looked across completed backups, newest first.
+// Identical consecutive content is collapsed so the UI shows real changes.
+func (a *Agent) FileVersions(ctx context.Context, path string, limit int) ([]FileVersion, error) {
+	path = strings.Trim(strings.ReplaceAll(path, `\`, "/"), "/")
+	if path == "" {
+		return nil, errors.New("path is required")
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 40
+	}
+	client, err := a.client()
+	if err != nil {
+		return nil, err
+	}
+	snapshots, err := a.Snapshots(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]FileVersion, 0, limit)
+	var lastDigest string
+	haveDigest := false
+	scanned := 0
+	for _, snap := range snapshots {
+		if snap.Status != api.SnapshotStatusComplete {
+			continue
+		}
+		scanned++
+		if scanned > limit*3 {
+			break
+		}
+		entries, _, err := client.SnapshotEntries(ctx, snap.ID, api.EntryQuery{
+			Prefix: path, Limit: 4,
+		})
+		if err != nil {
+			return nil, err
+		}
+		var entry *api.Entry
+		for i := range entries {
+			if entries[i].Path == path && entries[i].Type != api.EntryDir {
+				entry = &entries[i]
+				break
+			}
+		}
+		if entry == nil {
+			continue
+		}
+		digest := entry.Digest
+		if digest == "" && len(entry.Chunks) > 0 {
+			digest = strings.Join(entry.Chunks, ",")
+		}
+		// Only collapse when we have a real content fingerprint. Empty digests
+		// (symlinks, legacy rows) must not merge distinct backups into one.
+		if haveDigest && digest != "" && digest == lastDigest {
+			continue
+		}
+		out = append(out, FileVersion{Snapshot: snap, Entry: *entry})
+		lastDigest = digest
+		haveDigest = digest != ""
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 func (a *Agent) resolveSnapshot(ctx context.Context, client *api.Client, ref string) (*api.Snapshot, error) {
 	if ref == "" {
 		ref = "latest"

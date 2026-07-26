@@ -1,137 +1,239 @@
 /**
- * My files: browse backups and walk folders like a cloud drive library.
+ * My files: browse the latest backup like a drive. Click a file to see older
+ * versions. Snapshot history is secondary, not the main list.
  */
 
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api, archiveUrl, downloadUrl, type Entry, type Snapshot } from '@/lib/api'
+import {
+  api,
+  archiveUrl,
+  downloadUrl,
+  type Device,
+  type Entry,
+  type FileVersion,
+  type Snapshot,
+} from '@/lib/api'
 import { absolute, baseName, bytes, count, parentPath, relative } from '@/lib/format'
 import { useAction, useLoader } from '@/lib/use-loader'
 import { Badge, Button, Empty, ErrorNote, FileGlyph, FolderGlyph } from '@/components/ui'
 import { BackupsSkeleton, BrowseSkeleton } from '@/components/skeleton'
 
+type Catalog = { devices: Device[]; snapshots: Snapshot[] }
+
 export default function BackupsPage() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
-  const selected = params.get('id') ?? ''
+  const view = params.get('view') === 'history' ? 'history' : 'files'
+  const deviceId = params.get('device') ?? ''
   const prefix = params.get('path') ?? ''
+  const versionsPath = params.get('file') ?? ''
+  const snapshotOverride = params.get('id') ?? ''
 
-  const { data: snapshots, error, loading, reload } = useLoader<Snapshot[]>(() => api.snapshots())
+  const { data, error, loading, reload } = useLoader<Catalog>(async () => {
+    const [devices, snapshots] = await Promise.all([api.devices(), api.snapshots()])
+    return { devices, snapshots }
+  })
   const { busy, error: actionError, run } = useAction()
 
-  if (selected) {
-    return (
-      <SnapshotBrowser
-        snapshotId={selected}
-        prefix={prefix}
-        onNavigate={(path) =>
-          navigate(`/backups?id=${selected}${path ? `&path=${encodeURIComponent(path)}` : ''}`)
-        }
-        onClose={() => navigate('/backups')}
-      />
-    )
+  const setQuery = (next: Record<string, string | undefined>) => {
+    const q = new URLSearchParams()
+    const merged = {
+      view: view === 'history' ? 'history' : undefined,
+      device: deviceId || undefined,
+      path: prefix || undefined,
+      file: versionsPath || undefined,
+      id: snapshotOverride || undefined,
+      ...next,
+    }
+    for (const [key, value] of Object.entries(merged)) {
+      if (value) q.set(key, value)
+    }
+    const qs = q.toString()
+    navigate(qs ? `/backups?${qs}` : '/backups')
   }
 
   if (error) return <ErrorNote>{error}</ErrorNote>
-  if (loading || !snapshots) return <BackupsSkeleton />
-  if (snapshots.length === 0) {
+  if (loading || !data) return <BackupsSkeleton />
+
+  const complete = data.snapshots.filter((s) => s.status === 'complete')
+  if (complete.length === 0) {
     return (
       <div className="panel">
-        <Empty title="No backups yet" hint="They will appear here after the first backup finishes." />
+        <Empty title="No files backed up yet" hint="Connect a device and let the first backup finish." />
       </div>
     )
   }
+
+  const deviceIds = new Set(complete.map((s) => s.device_id))
+  const deviceOptions = data.devices.filter((d) => deviceIds.has(d.id))
+  const activeDevice = deviceId || deviceOptions[0]?.id || ''
+  const deviceSnaps = complete.filter((s) => !activeDevice || s.device_id === activeDevice)
+  const latest = snapshotOverride
+    ? deviceSnaps.find((s) => s.id === snapshotOverride) || complete.find((s) => s.id === snapshotOverride)
+    : deviceSnaps[0]
 
   return (
     <div className="space-y-4">
       {actionError && <ErrorNote>{actionError}</ErrorNote>}
 
-      <div className="panel overflow-hidden">
-        <div className="file-row border-b border-[var(--color-border-subtle)] text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-[var(--color-ink-muted)]">
-          <span>Name</span>
-          <span className="file-row-meta">Files</span>
-          <span className="file-row-meta">Size</span>
-          <span className="text-right">Modified</span>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant={view === 'files' ? 'primary' : 'ghost'}
+            onClick={() => setQuery({ view: undefined, id: undefined, file: undefined })}
+          >
+            My files
+          </Button>
+          <Button
+            variant={view === 'history' ? 'primary' : 'ghost'}
+            onClick={() => setQuery({ view: 'history', path: undefined, file: undefined, id: undefined })}
+          >
+            Backup history
+          </Button>
         </div>
-
-        <ul>
-          {snapshots.map((snapshot) => (
-            <li key={snapshot.id}>
-              <div className="file-row group">
-                <button
-                  type="button"
-                  className="flex min-w-0 items-center gap-3 text-left"
-                  onClick={() => navigate(`/backups?id=${snapshot.id}`)}
-                >
-                  <FolderGlyph />
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-semibold group-hover:text-[var(--color-brand)]">
-                      {snapshot.device_name ?? 'device'}
-                    </span>
-                    <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-[var(--color-ink-muted)]">
-                      {absolute(snapshot.started_at)}
-                      {snapshot.status !== 'complete' && (
-                        <Badge tone={snapshot.status === 'failed' ? 'bad' : 'warn'}>{snapshot.status}</Badge>
-                      )}
-                      {snapshot.kind === 'delta' && <Badge>incremental</Badge>}
-                    </span>
-                  </span>
-                </button>
-                <span className="file-row-meta tabular text-sm text-[var(--color-ink-muted)]">
-                  {count(snapshot.file_count)}
-                </span>
-                <span className="file-row-meta tabular text-sm text-[var(--color-ink-muted)]">
-                  {bytes(snapshot.total_bytes)}
-                </span>
-                <div className="flex items-center justify-end gap-2">
-                  <span className="hidden text-xs text-[var(--color-ink-muted)] lg:inline">
-                    {relative(snapshot.started_at)}
-                  </span>
-                  <Button onClick={() => navigate(`/backups?id=${snapshot.id}`)}>Open</Button>
-                  <Button href={archiveUrl(snapshot.id, '')} className="hidden sm:inline-flex">
-                    ZIP
-                  </Button>
-                  <Button
-                    variant="danger"
-                    disabled={busy === snapshot.id}
-                    onClick={() => {
-                      if (!confirm('Delete this backup? Files it uniquely holds will be gone for good.')) return
-                      void run(snapshot.id, () => api.deleteSnapshot(snapshot.id), reload)
-                    }}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
+        {(view === 'files' || view === 'history') && deviceOptions.length > 1 && (
+          <select
+            className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+            value={activeDevice}
+            onChange={(e) =>
+              setQuery({ device: e.target.value, path: undefined, file: undefined, id: undefined })
+            }
+          >
+            {deviceOptions.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
+
+      {view === 'history' ? (
+        <HistoryList
+          snapshots={complete.filter((s) => !activeDevice || s.device_id === activeDevice)}
+          busy={busy}
+          onOpen={(snapshot) =>
+            setQuery({
+              view: undefined,
+              id: snapshot.id,
+              device: snapshot.device_id,
+              path: undefined,
+              file: undefined,
+            })
+          }
+          onDelete={(id) => {
+            if (!confirm('Delete this backup? Files it uniquely holds will be gone for good.')) return
+            void run(id, () => api.deleteSnapshot(id), reload)
+          }}
+        />
+      ) : !latest ? (
+        <div className="panel">
+          <Empty title="No completed backup for this device" />
+        </div>
+      ) : (
+        <FileBrowser
+          snapshot={latest}
+          prefix={prefix}
+          versionsPath={versionsPath}
+          viewingOlder={Boolean(snapshotOverride && snapshotOverride !== deviceSnaps[0]?.id)}
+          onNavigate={(path) => setQuery({ path: path || undefined, file: undefined })}
+          onOpenVersions={(path) => setQuery({ file: path })}
+          onCloseVersions={() => setQuery({ file: undefined })}
+          onUseLatest={() => setQuery({ id: undefined, file: undefined })}
+          deviceId={activeDevice}
+        />
+      )}
     </div>
   )
 }
 
-type Page = { snapshot: Snapshot; entries: Entry[]; cursor: string }
-
-function SnapshotBrowser({
-  snapshotId,
-  prefix,
-  onNavigate,
-  onClose,
+function HistoryList({
+  snapshots,
+  busy,
+  onOpen,
+  onDelete,
 }: {
-  snapshotId: string
-  prefix: string
-  onNavigate: (path: string) => void
-  onClose: () => void
+  snapshots: Snapshot[]
+  busy?: string | null
+  onOpen: (snapshot: Snapshot) => void
+  onDelete: (id: string) => void
 }) {
-  const { data, error, loading } = useLoader<Page>(
+  return (
+    <div className="panel overflow-hidden">
+      <div className="border-b border-[var(--color-border-subtle)] px-5 py-4">
+        <h2 className="text-sm font-semibold">Backup history</h2>
+        <p className="mt-1 text-sm text-[var(--color-ink-muted)]">
+          Each row is a point in time for this computer — not a separate folder.
+        </p>
+      </div>
+      <ul>
+        {snapshots.map((snapshot, index) => (
+          <li key={snapshot.id}>
+            <div className="file-row group">
+              <button type="button" className="flex min-w-0 items-center gap-3 text-left" onClick={() => onOpen(snapshot)}>
+                <FolderGlyph />
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold group-hover:text-[var(--color-brand)]">
+                    {index === 0 ? 'Latest backup' : 'Earlier backup'}
+                    {snapshot.device_name ? ` · ${snapshot.device_name}` : ''}
+                  </span>
+                  <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-[var(--color-ink-muted)]">
+                    {absolute(snapshot.started_at)}
+                    {snapshot.kind === 'delta' && <Badge>changes only</Badge>}
+                    {snapshot.kind === 'full' && <Badge>full</Badge>}
+                  </span>
+                </span>
+              </button>
+              <span className="file-row-meta tabular text-sm text-[var(--color-ink-muted)]">
+                {count(snapshot.file_count)}
+              </span>
+              <span className="file-row-meta tabular text-sm text-[var(--color-ink-muted)]">
+                {bytes(snapshot.total_bytes)}
+              </span>
+              <div className="flex items-center justify-end gap-2">
+                <Button onClick={() => onOpen(snapshot)}>Browse</Button>
+                <Button variant="danger" disabled={busy === snapshot.id} onClick={() => onDelete(snapshot.id)}>
+                  Delete
+                </Button>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function FileBrowser({
+  snapshot,
+  prefix,
+  versionsPath,
+  viewingOlder,
+  onNavigate,
+  onOpenVersions,
+  onCloseVersions,
+  onUseLatest,
+  deviceId,
+}: {
+  snapshot: Snapshot
+  prefix: string
+  versionsPath: string
+  viewingOlder: boolean
+  onNavigate: (path: string) => void
+  onOpenVersions: (path: string) => void
+  onCloseVersions: () => void
+  onUseLatest: () => void
+  deviceId: string
+}) {
+  const snapshotId = snapshot.id
+  const { data, error, loading } = useLoader(
     async () => {
-      const [snapshot, page] = await Promise.all([api.snapshot(snapshotId), api.browse(snapshotId, prefix)])
-      return { snapshot, entries: page.entries ?? [], cursor: page.next_cursor ?? '' }
+      const page = await api.browse(snapshotId, prefix)
+      return { entries: page.entries ?? [], cursor: page.next_cursor ?? '' }
     },
     { deps: [snapshotId, prefix] },
   )
-
   const [extra, setExtra] = useState<{ key: string; entries: Entry[]; cursor: string }>()
   const more = useAction()
 
@@ -157,30 +259,33 @@ function SnapshotBrowser({
       files.push(entry)
     }
   }
-
   const folderList = [...folders].sort()
   const fileList = files.slice().sort((a, b) => a.path.localeCompare(b.path))
 
   return (
     <div className="space-y-4">
+      {viewingOlder && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--color-warn)]/30 bg-[var(--color-warn)]/10 px-4 py-3 text-sm">
+          <span>
+            Viewing an earlier backup from {absolute(snapshot.started_at)}. Your current files may differ.
+          </span>
+          <Button onClick={onUseLatest}>Back to latest</Button>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="truncate text-lg font-semibold tracking-tight">
-            {data.snapshot.device_name ?? 'Backup'}
+            {snapshot.device_name ?? 'My files'}
           </div>
           <div className="mt-0.5 text-sm text-[var(--color-ink-muted)]">
-            {absolute(data.snapshot.started_at)} · {count(data.snapshot.file_count)} files ·{' '}
-            {bytes(data.snapshot.total_bytes)}
+            As of {absolute(snapshot.started_at)} · {count(snapshot.file_count)} files ·{' '}
+            {bytes(snapshot.total_bytes)}
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button href={archiveUrl(snapshotId, prefix)}>
-            Download {prefix ? `“${baseName(prefix)}”` : 'folder'} ZIP
-          </Button>
-          <Button variant="ghost" onClick={onClose}>
-            All backups
-          </Button>
-        </div>
+        <Button href={archiveUrl(snapshotId, prefix)}>
+          Download {prefix ? `“${baseName(prefix)}”` : 'everything'} ZIP
+        </Button>
       </div>
 
       <nav className="flex flex-wrap items-center gap-1 text-sm">
@@ -189,7 +294,7 @@ function SnapshotBrowser({
           className="rounded-lg px-2 py-1 font-semibold text-[var(--color-brand)] hover:bg-[var(--color-brand-soft)]"
           onClick={() => onNavigate('')}
         >
-          Root
+          All folders
         </button>
         {prefix
           .split('/')
@@ -216,95 +321,195 @@ function SnapshotBrowser({
           })}
       </nav>
 
-      <div className="panel overflow-hidden">
-        {folderList.length === 0 && fileList.length === 0 ? (
-          <Empty title="This folder is empty in that backup" />
-        ) : (
-          <>
-            <div className="file-row border-b border-[var(--color-border-subtle)] text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-[var(--color-ink-muted)]">
-              <span>Name</span>
-              <span className="file-row-meta">Type</span>
-              <span className="file-row-meta">Size</span>
-              <span className="text-right">Modified</span>
-            </div>
-            <ul>
-              {prefix && (
-                <li>
-                  <button type="button" className="file-row w-full text-left" onClick={() => onNavigate(parentPath(prefix))}>
-                    <span className="flex items-center gap-3 text-sm font-semibold text-[var(--color-ink-muted)]">
-                      <span className="grid size-7 place-items-center rounded-lg bg-[var(--color-surface-muted)]">↑</span>
-                      Parent folder
-                    </span>
-                  </button>
-                </li>
-              )}
-              {folderList.map((folder) => (
-                <li key={folder}>
-                  <button
-                    type="button"
-                    className="file-row w-full text-left"
-                    onClick={() => onNavigate(prefix ? `${prefix}/${folder}` : folder)}
-                  >
-                    <span className="flex min-w-0 items-center gap-3">
-                      <FolderGlyph />
-                      <span className="truncate text-sm font-semibold">{folder}</span>
-                    </span>
-                    <span className="file-row-meta text-sm text-[var(--color-ink-muted)]">Folder</span>
-                    <span className="file-row-meta text-sm text-[var(--color-ink-muted)]">—</span>
-                    <span className="text-right text-sm text-[var(--color-ink-muted)]">—</span>
-                  </button>
-                </li>
-              ))}
-              {fileList.map((file) => (
-                <li key={file.path}>
-                  <div className="file-row">
-                    <span className="flex min-w-0 items-center gap-3">
-                      <FileGlyph />
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-semibold">{baseName(file.path)}</span>
-                        {file.type === 'symlink' && (
-                          <span className="mt-0.5 inline-block">
-                            <Badge>link</Badge>
+      <div className={`grid gap-4 ${versionsPath ? 'xl:grid-cols-[1fr_20rem]' : ''}`}>
+        <div className="panel overflow-hidden">
+          {folderList.length === 0 && fileList.length === 0 ? (
+            <Empty title="This folder is empty in the backup" />
+          ) : (
+            <>
+              <div className="file-row border-b border-[var(--color-border-subtle)] text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-[var(--color-ink-muted)]">
+                <span>Name</span>
+                <span className="file-row-meta">Type</span>
+                <span className="file-row-meta">Size</span>
+                <span className="text-right">Actions</span>
+              </div>
+              <ul>
+                {prefix && (
+                  <li>
+                    <button
+                      type="button"
+                      className="file-row w-full text-left"
+                      onClick={() => onNavigate(parentPath(prefix))}
+                    >
+                      <span className="flex items-center gap-3 text-sm font-semibold text-[var(--color-ink-muted)]">
+                        <span className="grid size-7 place-items-center rounded-lg bg-[var(--color-surface-muted)]">
+                          ↑
+                        </span>
+                        Parent folder
+                      </span>
+                    </button>
+                  </li>
+                )}
+                {folderList.map((folder) => (
+                  <li key={folder}>
+                    <button
+                      type="button"
+                      className="file-row w-full text-left"
+                      onClick={() => onNavigate(prefix ? `${prefix}/${folder}` : folder)}
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <FolderGlyph />
+                        <span className="truncate text-sm font-semibold">{folder}</span>
+                      </span>
+                      <span className="file-row-meta text-sm text-[var(--color-ink-muted)]">Folder</span>
+                      <span className="file-row-meta text-sm text-[var(--color-ink-muted)]">—</span>
+                      <span className="text-right text-sm text-[var(--color-ink-muted)]">Open</span>
+                    </button>
+                  </li>
+                ))}
+                {fileList.map((file) => (
+                  <li key={file.path}>
+                    <div
+                      className={`file-row ${versionsPath === file.path ? 'bg-[var(--color-brand-soft)]' : ''}`}
+                    >
+                      <button
+                        type="button"
+                        className="flex min-w-0 items-center gap-3 text-left"
+                        onClick={() => onOpenVersions(file.path)}
+                      >
+                        <FileGlyph />
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold">{baseName(file.path)}</span>
+                          <span className="mt-0.5 block text-xs text-[var(--color-ink-muted)]">
+                            Changed {relative(file.mtime)}
                           </span>
-                        )}
+                        </span>
+                      </button>
+                      <span className="file-row-meta text-sm text-[var(--color-ink-muted)]">File</span>
+                      <span className="file-row-meta tabular text-sm text-[var(--color-ink-muted)]">
+                        {bytes(file.size)}
                       </span>
-                    </span>
-                    <span className="file-row-meta text-sm text-[var(--color-ink-muted)]">File</span>
-                    <span className="file-row-meta tabular text-sm text-[var(--color-ink-muted)]">
-                      {bytes(file.size)}
-                    </span>
-                    <div className="flex items-center justify-end gap-2">
-                      <span className="hidden text-xs text-[var(--color-ink-muted)] md:inline">
-                        {relative(file.mtime)}
-                      </span>
-                      <Button href={downloadUrl(snapshotId, file.path)}>Download</Button>
+                      <div className="flex items-center justify-end gap-2">
+                        <Button onClick={() => onOpenVersions(file.path)}>Versions</Button>
+                        <Button href={downloadUrl(snapshotId, file.path)}>Download</Button>
+                      </div>
                     </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-        {cursor && (
-          <div className="border-t border-[var(--color-border-subtle)] px-5 py-4 text-center">
-            <Button
-              disabled={more.busy === 'more'}
-              onClick={() => {
-                void more.run('more', async () => {
-                  const page = await api.browse(snapshotId, prefix, cursor)
-                  setExtra({
-                    key,
-                    entries: [...appended, ...(page.entries ?? [])],
-                    cursor: page.next_cursor ?? '',
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {cursor && (
+            <div className="border-t border-[var(--color-border-subtle)] px-5 py-4 text-center">
+              <Button
+                disabled={more.busy === 'more'}
+                onClick={() => {
+                  void more.run('more', async () => {
+                    const page = await api.browse(snapshotId, prefix, cursor)
+                    setExtra({
+                      key,
+                      entries: [...appended, ...(page.entries ?? [])],
+                      cursor: page.next_cursor ?? '',
+                    })
                   })
-                })
-              }}
-            >
-              {more.busy === 'more' ? 'Loading…' : 'Show more'}
-            </Button>
-          </div>
+                }}
+              >
+                {more.busy === 'more' ? 'Loading…' : 'Show more'}
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {versionsPath && (
+          <VersionPanel
+            path={versionsPath}
+            deviceId={deviceId}
+            currentSnapshotId={snapshotId}
+            onClose={onCloseVersions}
+          />
         )}
       </div>
     </div>
+  )
+}
+
+function VersionPanel({
+  path,
+  deviceId,
+  currentSnapshotId,
+  onClose,
+}: {
+  path: string
+  deviceId: string
+  currentSnapshotId: string
+  onClose: () => void
+}) {
+  const navigate = useNavigate()
+  const { data, error, loading } = useLoader<FileVersion[]>(
+    () => api.fileVersions(path, deviceId || undefined),
+    { deps: [path, deviceId] },
+  )
+
+  return (
+    <aside className="panel flex max-h-[70vh] flex-col overflow-hidden">
+      <div className="border-b border-[var(--color-border-subtle)] px-4 py-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold">{baseName(path)}</h2>
+            <p className="mt-0.5 truncate text-xs text-[var(--color-ink-muted)]" title={path}>
+              Version history
+            </p>
+          </div>
+          <Button variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3">
+        {error && <ErrorNote>{error}</ErrorNote>}
+        {loading && !data && <p className="text-sm text-[var(--color-ink-muted)]">Loading versions…</p>}
+        {data && data.length === 0 && (
+          <Empty title="No versions found" hint="This path is not in any completed backup." />
+        )}
+        {data && data.length === 1 && (
+          <p className="mb-2 text-xs text-[var(--color-ink-muted)]">
+            Only one version — the file has not changed across backups yet.
+          </p>
+        )}
+        {data && data.length > 0 && (
+          <ul className="space-y-2">
+            {data.map((version, index) => (
+              <li
+                key={version.snapshot.id}
+                className="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface)] p-3"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold">
+                    {index === 0 ? 'Current' : `Version ${data.length - index}`}
+                  </span>
+                  {version.snapshot.id === currentSnapshotId && <Badge>viewing</Badge>}
+                </div>
+                <p className="mt-1 text-xs text-[var(--color-ink-muted)]">
+                  {absolute(version.snapshot.started_at)} · {bytes(version.entry.size)}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button href={downloadUrl(version.snapshot.id, path)}>Download</Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() =>
+                      navigate(
+                        `/backups?id=${version.snapshot.id}&path=${encodeURIComponent(parentPath(path))}&file=${encodeURIComponent(path)}${deviceId ? `&device=${deviceId}` : ''}`,
+                      )
+                    }
+                  >
+                    Browse then
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </aside>
   )
 }

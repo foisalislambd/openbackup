@@ -553,6 +553,65 @@ func (db *DB) TreeEntry(ctx context.Context, snapshotID, path string) (*api.Entr
 	return nil, ErrNotFound
 }
 
+// FileVersion is one appearance of a path in a completed snapshot.
+type FileVersion struct {
+	Snapshot api.Snapshot `json:"snapshot"`
+	Entry    api.Entry    `json:"entry"`
+}
+
+// FileVersions lists how a path looked across completed backups, newest first.
+// Consecutive snapshots with the same content digest are collapsed so the UI
+// shows real changes, not every incremental backup that left the file alone.
+func (db *DB) FileVersions(ctx context.Context, userID, path, deviceID string, limit int) ([]FileVersion, error) {
+	path = normalizePath(path)
+	if path == "" {
+		return nil, fmt.Errorf("store: path is required")
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 40
+	}
+	// Scan more snapshots than we return so collapsing identical digests still
+	// leaves enough distinct versions for the UI.
+	snaps, err := db.ListSnapshots(ctx, userID, deviceID, limit*3)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]FileVersion, 0, limit)
+	var lastDigest string
+	haveDigest := false
+	for _, snap := range snaps {
+		if snap.Status != api.SnapshotStatusComplete {
+			continue
+		}
+		entry, err := db.TreeEntry(ctx, snap.ID, path)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		if entry.Type == api.EntryDir {
+			continue
+		}
+		digest := entry.Digest
+		if digest == "" && len(entry.Chunks) > 0 {
+			digest = strings.Join(entry.Chunks, ",")
+		}
+		// Only collapse when we have a real content fingerprint. Empty digests
+		// (symlinks, legacy rows) must not merge distinct backups into one.
+		if haveDigest && digest != "" && digest == lastDigest {
+			continue
+		}
+		out = append(out, FileVersion{Snapshot: snap, Entry: *entry})
+		lastDigest = digest
+		haveDigest = digest != ""
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 // DeleteSnapshot removes a snapshot. Deltas that depend on it are removed too,
 // because a delta without its base is unrestorable.
 func (db *DB) DeleteSnapshot(ctx context.Context, userID, snapshotID string) (int, error) {

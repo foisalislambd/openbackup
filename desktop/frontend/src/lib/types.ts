@@ -109,6 +109,11 @@ export interface Entry {
   mtime: string
 }
 
+export interface FileVersion {
+  snapshot: Snapshot
+  entry: Entry
+}
+
 export interface Page {
   entries: Entry[]
   next_cursor?: string

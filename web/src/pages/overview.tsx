@@ -29,11 +29,16 @@ export default function OverviewPage() {
 
   const { devices, usage, snapshots } = data
   const problems = devices.filter((d) => d.health === 'error' || d.health === 'stale')
-  const newest = snapshots.reduce<Snapshot | undefined>(
-    (best, s) => (s.status === 'complete' && (!best || s.started_at > best.started_at) ? s : best),
-    undefined,
-  )
-  const recent = snapshots.filter((s) => s.status === 'complete').slice(0, 8)
+  const complete = snapshots.filter((s) => s.status === 'complete')
+  const newest = complete[0]
+  // One tile per device — each backup is a version of the same files, not a new folder.
+  const latestByDevice: Snapshot[] = []
+  const seen = new Set<string>()
+  for (const snap of complete) {
+    if (seen.has(snap.device_id)) continue
+    seen.add(snap.device_id)
+    latestByDevice.push(snap)
+  }
 
   return (
     <div className="space-y-8">
@@ -42,15 +47,17 @@ export default function OverviewPage() {
       <section>
         <div className="mb-3 flex items-end justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold tracking-tight">Your content</h2>
-            <p className="text-sm text-[var(--color-ink-muted)]">Open a backup to browse folders and files</p>
+            <h2 className="text-lg font-semibold tracking-tight">Your computers</h2>
+            <p className="text-sm text-[var(--color-ink-muted)]">
+              Open current files — older versions appear when you click a file
+            </p>
           </div>
           <Link to="/backups" className="text-sm font-semibold text-[var(--color-brand)] hover:underline">
-            See all
+            Browse files
           </Link>
         </div>
 
-        {recent.length === 0 ? (
+        {latestByDevice.length === 0 ? (
           <div className="panel">
             <Empty
               title="No files backed up yet"
@@ -59,21 +66,25 @@ export default function OverviewPage() {
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {recent.map((snapshot) => (
+            {latestByDevice.map((snapshot) => (
               <button
-                key={snapshot.id}
+                key={snapshot.device_id}
                 type="button"
                 className="content-tile"
-                onClick={() => navigate(`/backups?id=${snapshot.id}`)}
+                onClick={() =>
+                  navigate(`/backups?device=${encodeURIComponent(snapshot.device_id)}`)
+                }
               >
                 <FolderGlyph large />
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold">{snapshot.device_name ?? 'Backup'}</div>
+                  <div className="truncate text-sm font-semibold">
+                    {snapshot.device_name ?? 'Computer'}
+                  </div>
                   <div className="mt-0.5 truncate text-xs text-[var(--color-ink-muted)]">
-                    {count(snapshot.file_count)} items · {bytes(snapshot.total_bytes)}
+                    {count(snapshot.file_count)} files · {bytes(snapshot.total_bytes)}
                   </div>
                   <div className="mt-2 text-[0.7rem] font-medium text-[var(--color-ink-muted)]">
-                    {relative(snapshot.started_at)}
+                    Updated {relative(snapshot.started_at)}
                   </div>
                 </div>
               </button>
@@ -206,7 +217,7 @@ function HealthBanner({ devices, newest }: { devices: Device[]; newest?: Snapsho
   if (never.length > 0) {
     return (
       <Banner tone="warn" title="First backup still running">
-        It will show under Your content when finished.
+        It will show under Your computers when finished.
       </Banner>
     )
   }

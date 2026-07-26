@@ -130,6 +130,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/ui/snapshots/{id}", s.userOnly(s.handleGetSnapshot))
 	mux.Handle("DELETE /api/v1/ui/snapshots/{id}", s.userOnly(s.handleDeleteSnapshot))
 	mux.Handle("GET /api/v1/ui/snapshots/{id}/browse", s.userOnly(s.handleBrowse))
+	mux.Handle("GET /api/v1/ui/files/versions", s.userOnly(s.handleFileVersions))
 	mux.Handle("GET /api/v1/ui/snapshots/{id}/download", s.userOnly(s.handleDownloadFile))
 	mux.Handle("GET /api/v1/ui/snapshots/{id}/archive", s.userOnly(s.handleDownloadArchive))
 	mux.Handle("GET /api/v1/ui/events", s.userOnly(s.handleListEvents))

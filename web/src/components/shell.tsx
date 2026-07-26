@@ -19,7 +19,7 @@ const navigation = [
 
 const titles: Record<string, { title: string; subtitle: string }> = {
   '/': { title: 'Home', subtitle: 'Backup health and recent files' },
-  '/backups': { title: 'My files', subtitle: 'Browse and restore from any backup' },
+  '/backups': { title: 'My files', subtitle: 'Browse current files — click a file for older versions' },
   '/devices': { title: 'Devices', subtitle: 'Computers connected to this server' },
   '/activity': { title: 'Activity', subtitle: 'What happened during backups' },
   '/settings': { title: 'Settings', subtitle: 'Account, retention, and exclusions' },

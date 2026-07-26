@@ -340,6 +340,22 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request, user *stor
 	writeJSON(w, http.StatusOK, map[string]any{"entries": entries, "next_cursor": next})
 }
 
+// handleFileVersions lists distinct versions of a path across completed backups.
+func (s *Server) handleFileVersions(w http.ResponseWriter, r *http.Request, user *store.User) {
+	path := strings.TrimSpace(r.URL.Query().Get("path"))
+	if path == "" {
+		writeError(w, http.StatusBadRequest, "", "path is required")
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	versions, err := s.db.FileVersions(r.Context(), user.ID, path, r.URL.Query().Get("device_id"), limit)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"path": path, "versions": versions})
+}
+
 func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request, user *store.User) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	events, err := s.db.ListEvents(r.Context(), user.ID,

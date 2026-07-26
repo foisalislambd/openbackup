@@ -52,6 +52,11 @@ export type Entry = {
   link_target?: string
 }
 
+export type FileVersion = {
+  snapshot: Snapshot
+  entry: Entry
+}
+
 export type Usage = {
   logical_bytes: number
   stored_bytes: number
@@ -177,6 +182,11 @@ export const api = {
         prefix,
       )}&cursor=${encodeURIComponent(cursor)}&limit=${limit}`,
     ),
+
+  fileVersions: (path: string, deviceId?: string) =>
+    request<{ path: string; versions: FileVersion[] }>(
+      `/files/versions?path=${encodeURIComponent(path)}${deviceId ? `&device_id=${encodeURIComponent(deviceId)}` : ''}`,
+    ).then((r) => r.versions ?? []),
 
   events: (limit = 100) => request<{ events: ActivityEvent[] }>(`/events?limit=${limit}`).then((r) => r.events ?? []),
 

@@ -358,6 +358,16 @@ func (a *App) Search(snapshot, query string) ([]api.Entry, error) {
 	return a.agent.Search(ctx, snapshot, query, 200)
 }
 
+// FileVersions lists distinct versions of a file across completed backups.
+func (a *App) FileVersions(path string) ([]control.FileVersion, error) {
+	if a.agent == nil {
+		return nil, a.configError()
+	}
+	ctx, cancel := context.WithTimeout(a.context(), 90*time.Second)
+	defer cancel()
+	return a.agent.FileVersions(ctx, path, 40)
+}
+
 // ChooseRestoreTarget asks where to restore, defaulting to the desktop so the
 // restored copy lands somewhere the user will find it.
 func (a *App) ChooseRestoreTarget() (string, error) {
