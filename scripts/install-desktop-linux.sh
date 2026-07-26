@@ -189,6 +189,33 @@ EOF
 	fi
 }
 
+ensure_runtime_libs() {
+	# The Wails binary needs WebKitGTK at runtime. A release download does not
+	# bring system libraries with it.
+	if ldconfig -p 2>/dev/null | grep -q 'libwebkit2gtk-4\.1\.so'; then
+		return 0
+	fi
+	if [ -e /usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.1.so.0 ] ||
+		[ -e /usr/lib/aarch64-linux-gnu/libwebkit2gtk-4.1.so.0 ] ||
+		[ -e /usr/lib64/libwebkit2gtk-4.1.so.0 ]; then
+		return 0
+	fi
+	say ""
+	say "Missing runtime library: libwebkit2gtk-4.1.so.0"
+	say "Install it, then run openbackup-desktop again:"
+	say ""
+	if have apt-get; then
+		say "  sudo apt-get update"
+		say "  sudo apt-get install -y libwebkit2gtk-4.1-0 libgtk-3-0"
+	elif have dnf; then
+		say "  sudo dnf install -y webkit2gtk4.1 gtk3"
+	elif have pacman; then
+		say "  sudo pacman -S webkit2gtk-4.1 gtk3"
+	else
+		say "  (install your distro's webkit2gtk 4.1 package)"
+	fi
+}
+
 ensure_agent
 
 if try_release_desktop || try_local_desktop; then
@@ -199,6 +226,7 @@ else
 fi
 
 install_desktop_files
+ensure_runtime_libs
 
 case ":$PATH:" in
 	*":$bindir:"*) ;;
