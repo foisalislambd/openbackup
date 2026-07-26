@@ -12,7 +12,7 @@ with a desktop app for people who would rather not use a terminal.
 
 ```bash
 # On your server
-curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-server.sh | sh
+curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-server.sh | sudo sh
 
 # On each computer, using the code the dashboard gives you
 curl -fsSL https://backup.example.com/install.sh | sh
@@ -77,7 +77,7 @@ volume and the dashboard is embedded in the binary, so there is no second servic
 to run.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-server.sh | sh
+curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-server.sh | sudo sh
 ```
 
 It writes a Compose file to `/opt/openbackup`, generates an admin password, waits

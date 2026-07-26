@@ -10,13 +10,13 @@ plenty — and enough disk for the data you intend to keep.
 ## The one-command install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-server.sh | sh
+curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-server.sh | sudo sh
 ```
 
-It writes a Compose file and an `.env` to `/opt/openbackup`, generates an admin
-password, starts the server, waits until it actually answers, and prints the
-dashboard address with the credentials. Nothing outside that directory and the
-Docker volume is touched.
+It installs Docker and Compose if they are missing, writes a Compose file and an
+`.env` to `/opt/openbackup`, generates an admin password, starts the server,
+waits until it actually answers, and prints the dashboard address with the
+credentials. Run it with `sudo` so those installs are allowed.
 
 Piping a script from the internet into a shell is a reasonable thing to be wary
 of. Read it first if you like:
