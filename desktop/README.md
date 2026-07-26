@@ -1,17 +1,18 @@
 # OpenBackup desktop app
 
-The window **and** the background agent in one binary: Go for the logic, React
-and Tailwind for the interface, glued together by [Wails](https://wails.io).
+The window, tray, and backup engine in **one binary** (Dropbox-style): Go for the
+logic, React and Tailwind for the interface, glued together by
+[Wails](https://wails.io).
 
 ## What it is
 
-Open the app for the UI. The same executable is what Windows/systemd/launchd
-runs when backups happen with the window closed (`service run`). Quitting the
-window stops nothing; **Start service** registers this binary with the OS.
+Open the app for the UI. Closing the window hides to the tray; backups keep
+running in the **same process**. Quit from the tray stops them. After you
+connect, login autostart launches this executable with `--background`.
 
-The UI still talks to the running agent through `internal/agent/control` (same
-as the optional CLI). Service install/start uses `internal/agent/appsvc` on
-**this** process — no second `openbackup.exe` download.
+The UI talks to the in-process agent through `internal/agent/control` (same as
+the optional CLI). Headless installs can still use `service` / `run` via
+`internal/agent/appsvc` without opening the window.
 
 ## Why a separate Go module
 
@@ -26,10 +27,11 @@ the agent code next to it.
 
 ```
 app.go              the methods the frontend calls, bound by Wails
-main.go             window setup, single-instance lock, logging; agent-mode entry
-agent_mode.go       service/run without opening the window
+embedded.go         in-process backup engine + login autostart
+main.go             window setup, --background, single-instance lock
+agent_mode.go       optional service/run without opening the window
 tray.go             notification-area icon, menu and state
-platform.go         service install, notifications, revealing paths
+platform.go         notifications, revealing paths, single-instance
 process_*.go        per-platform "is this pid alive"
 trayicon_*.go       per-platform icon format (Windows needs an ICO)
 build/icons/        the generator for the app and tray icons

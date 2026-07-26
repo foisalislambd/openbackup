@@ -1,8 +1,8 @@
 // Command openbackup-desktop is the OpenBackup app for Windows, macOS and Linux.
 //
-// One binary is the window and the background agent: open it for the UI, and the
-// same executable is what the OS service manager runs when backups happen with
-// the window closed. Closing the window never stops backups.
+// One binary is the window and the backup engine (Dropbox-style): close the
+// window and backups keep running in the tray; Quit stops them until you open
+// the app again or sign in (login autostart uses --background).
 package main
 
 import (
@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -38,10 +39,12 @@ var appVersion = version.Version
 func main() {
 	log := newLogger()
 
-	// When the OS service manager launches this binary (or someone runs
-	// `openbackup-desktop service …`), run the agent without opening the window.
-	if agentMode(os.Args[1:]) {
-		if err := runAgentMode(os.Args[1:]); err != nil {
+	args, startHidden := stripBackgroundFlag(os.Args[1:])
+
+	// Headless agent mode for servers/CLI-style installs (`service` / `run`).
+	// Normal desktop use embeds the engine in the GUI process instead.
+	if agentMode(args) {
+		if err := runAgentMode(args); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -71,6 +74,7 @@ func main() {
 	defer release()
 
 	app := newApp(log)
+	app.startHidden = startHidden
 	trayIcon := newTray(app, log)
 	app.tray = trayIcon
 
@@ -96,19 +100,23 @@ func main() {
 			})
 		},
 		OnBeforeClose: func(ctx context.Context) bool {
+			app.mu.Lock()
+			quit := app.forceQuit
+			app.mu.Unlock()
+			if quit {
+				return false // allow real exit (tray Quit)
+			}
 			// Closing the window hides it instead of quitting, because backups
-			// continue and the tray icon is how the user gets back to them.
-			// Quitting is an explicit choice from the tray menu.
+			// continue in this process and the tray icon is how the user gets back.
 			wruntime.WindowHide(ctx)
 			return true
 		},
 		OnShutdown: func(context.Context) {
+			app.stopEmbeddedAgent()
 			trayIcon.stop()
 		},
 		Bind: []any{app},
 		Windows: &windows.Options{
-			// The system backdrop makes the window feel native on Windows 11 and
-			// degrades to a plain background on older builds.
 			BackdropType:         windows.Mica,
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,
@@ -116,18 +124,28 @@ func main() {
 		Linux: &linux.Options{
 			Icon:                notificationIcon,
 			WindowIsTranslucent: false,
-			// Matches the .desktop StartupWMClass so the window groups with its
-			// launcher icon on GNOME/KDE.
-			ProgramName: "OpenBackup",
-			// Default when Linux options are set; Never caused blank windows on
-			// some NVIDIA/Wayland setups — OnDemand is the safer middle ground.
-			WebviewGpuPolicy: linux.WebviewGpuPolicyOnDemand,
+			ProgramName:         "OpenBackup",
+			WebviewGpuPolicy:    linux.WebviewGpuPolicyOnDemand,
 		},
 	})
 	if err != nil {
 		log.Error("the OpenBackup window could not start", "error", err)
 		os.Exit(1)
 	}
+}
+
+// stripBackgroundFlag removes --background (login autostart) and reports it.
+func stripBackgroundFlag(args []string) (rest []string, background bool) {
+	rest = make([]string, 0, len(args))
+	for _, a := range args {
+		switch strings.TrimSpace(a) {
+		case "--background", "-background":
+			background = true
+		default:
+			rest = append(rest, a)
+		}
+	}
+	return rest, background
 }
 
 // newLogger writes the app's own log next to the agent's, so a support request

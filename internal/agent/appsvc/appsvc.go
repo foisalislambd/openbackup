@@ -1,10 +1,8 @@
 // Package appsvc installs and runs the OpenBackup agent in the background.
 //
-// On Linux and macOS this registers a user service (systemd/launchd). On Windows
-// it uses a per-user login autostart — not a Windows Service — because the
-// desktop app is a GUI binary and Service Control Manager both requires admin
-// elevation and does not run GUI apps reliably. The desktop "Start it" button
-// must work without "Run as administrator".
+// The desktop app prefers an in-process engine (same binary as the window) plus
+// login autostart via EnableLoginAutostart. CLI/headless installs still use
+// Install/Start (Windows detached `run`, Unix systemd/launchd user service).
 package appsvc
 
 import (
@@ -137,4 +135,14 @@ func readAgentPID() (int, error) {
 		return 0, fmt.Errorf("no pid")
 	}
 	return c.PID, nil
+}
+
+// AgentIsSelf reports whether the process answering the control channel is us.
+// Used so Stop / login re-registration never SIGTERM the desktop app itself.
+func AgentIsSelf() bool {
+	pid, err := readAgentPID()
+	if err != nil {
+		return false
+	}
+	return pid == os.Getpid()
 }

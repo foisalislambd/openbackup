@@ -13,7 +13,10 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"github.com/foisalislambd/openbackup/internal/agent/appsvc"
 	"github.com/foisalislambd/openbackup/internal/agent/control"
+	"github.com/foisalislambd/openbackup/internal/agent/engine"
+	"github.com/foisalislambd/openbackup/internal/agent/ipc"
 	"github.com/foisalislambd/openbackup/internal/agent/restore"
 	"github.com/foisalislambd/openbackup/internal/api"
 )
@@ -33,6 +36,13 @@ type App struct {
 	// it without the two polling the agent separately.
 	tray *tray
 
+	// Embedded backup engine (same process as the window — Dropbox-style).
+	eng         *engine.Engine
+	engIPC      *ipc.Server
+	engCancel   context.CancelFunc
+	engRunning  bool
+	engStarting bool
+
 	// openErr records a configuration that could not be read. The window still
 	// opens in that case and shows the reason, because a desktop app that exits
 	// on startup leaves the user with nothing to act on.
@@ -43,6 +53,11 @@ type App struct {
 	mu       sync.Mutex
 	overview control.Overview
 	restore  *restoreJob
+
+	// startHidden is set when launched with --background (login autostart).
+	startHidden bool
+	// forceQuit allows OnBeforeClose to actually exit (tray Quit).
+	forceQuit bool
 }
 
 // restoreJob tracks a running restore so the window can show progress and the
@@ -78,6 +93,15 @@ func newApp(log *slog.Logger) *App {
 // startup is called by Wails once the window exists.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	if a.startHidden {
+		runtime.WindowHide(ctx)
+	}
+	// Same process as the UI: if this device is connected, start backing up now.
+	if a.agent != nil && a.agent.Connected() {
+		if err := a.ensureBackingUp(); err != nil {
+			a.log.Warn("start embedded agent", "error", err)
+		}
+	}
 	go a.pollStatus(ctx)
 }
 
@@ -131,7 +155,7 @@ func (a *App) announce(o control.Overview, previous string) {
 	}
 	switch o.Health {
 	case "agent_stopped":
-		a.notify("Backups have stopped", "The OpenBackup background service is not running.")
+		a.notify("Backups have stopped", "OpenBackup is not backing up right now. Open the app or use Start backups.")
 	case "error":
 		a.notify("A backup did not finish", o.Detail)
 	case "stale":
@@ -188,11 +212,10 @@ func (a *App) Connect(req control.ConnectRequest) (*control.ConnectResult, error
 	if err != nil {
 		return nil, err
 	}
-	// Being connected but not installed as a service is the most common way for
-	// backups to quietly never happen, so the app installs it here rather than
-	// asking the user to run a command.
-	if err := installService(); err != nil {
-		a.log.Warn("install background service", "error", err)
+	// Start backing up in this process and register login autostart (no separate
+	// agent install, no administrator prompt on Windows).
+	if err := a.ensureBackingUp(); err != nil {
+		a.log.Warn("start backups after connect", "error", err)
 	}
 	// Refresh the cached overview so Done → Status() does not replay a stale
 	// disconnected snapshot. Do not emit a status event yet: that would unmount
@@ -210,6 +233,8 @@ func (a *App) Disconnect() error {
 	if a.agent == nil {
 		return a.configError()
 	}
+	a.stopEmbeddedAgent()
+	_ = appsvc.DisableLoginAutostart()
 	ctx, cancel := context.WithTimeout(a.context(), 30*time.Second)
 	defer cancel()
 	if err := a.agent.Disconnect(ctx); err != nil {
@@ -335,9 +360,9 @@ func (a *App) Resume() error {
 	return a.agent.Resume(a.context())
 }
 
-// StartService starts or installs the background agent and waits until it answers.
+// StartService ensures the in-process agent is running and login autostart is on.
 func (a *App) StartService() error {
-	if err := installService(); err != nil {
+	if err := a.ensureBackingUp(); err != nil {
 		return err
 	}
 	overview := a.agent.Overview(a.context())
@@ -348,7 +373,7 @@ func (a *App) StartService() error {
 		runtime.EventsEmit(a.ctx, "status", overview)
 	}
 	if !overview.AgentRunning {
-		return errors.New("the background agent did not come up — open Diagnostics or check the log")
+		return errors.New("backups did not start — open Diagnostics or check the log folder")
 	}
 	return nil
 }
@@ -593,13 +618,17 @@ func (a *App) OpenLogFolder() error { return reveal(filepath.Dir(logPath())) }
 // Window behaviour
 // -----------------------------------------------------------------------------
 
-// MinimiseToTray hides the window. Backups keep running: the service is a
-// separate process, and this app is only its face.
+// MinimiseToTray hides the window. Backups keep running in this process until Quit.
 func (a *App) MinimiseToTray() { runtime.WindowHide(a.context()) }
 
-// Quit closes the app. It does not stop backups, and the frontend says so before
-// calling this.
-func (a *App) Quit() { runtime.Quit(a.context()) }
+// Quit stops backups in this process and closes the app.
+func (a *App) Quit() {
+	a.stopEmbeddedAgent()
+	a.mu.Lock()
+	a.forceQuit = true
+	a.mu.Unlock()
+	runtime.Quit(a.context())
+}
 
 // -----------------------------------------------------------------------------
 // Helpers

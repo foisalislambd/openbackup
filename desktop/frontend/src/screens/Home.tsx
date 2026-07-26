@@ -82,18 +82,18 @@ export function Home({
       {!status.agent_running && (
         <Notice
           tone="warn"
-          title="The background agent is not running"
+          title="Backups are not running"
           action={
             <Button
               busy={action.busy}
               onClick={() => action.run(api.startService, onRefresh)}
             >
-              Start it
+              Start backups
             </Button>
           }
         >
-          Backups only happen while the agent runs. Starting it does not need administrator
-          rights — it will also start automatically when you sign in to Windows.
+          Closing the window keeps backups going in the tray. Use Quit from the tray
+          menu only when you want them to stop.
         </Notice>
       )}
 

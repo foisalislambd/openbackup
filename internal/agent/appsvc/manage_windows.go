@@ -67,6 +67,9 @@ func Stop(opt Options) error {
 	if !AgentRunning() {
 		return nil
 	}
+	if AgentIsSelf() {
+		return errors.New("refusing to stop the current process — use the in-process shutdown instead")
+	}
 	pid, err := readAgentPID()
 	if err != nil {
 		return fmt.Errorf("could not find the running agent: %w", err)
@@ -113,6 +116,20 @@ func StatusText(opt Options) (string, error) {
 // InstallOrStart ensures autostart is registered and the agent is running.
 func InstallOrStart(opt Options) error {
 	return Install(opt)
+}
+
+// EnableLoginAutostart registers this executable to start at user login.
+// Default arguments are --background (open the app hidden with the in-process agent).
+func EnableLoginAutostart(opt Options) error {
+	if len(opt.Arguments) == 0 {
+		opt.Arguments = []string{"--background"}
+	}
+	return enableAutostart(opt)
+}
+
+// DisableLoginAutostart removes the per-user login Run key entry.
+func DisableLoginAutostart() error {
+	return disableAutostart()
 }
 
 func enableAutostart(opt Options) error {

@@ -13,15 +13,8 @@ import (
 
 	"github.com/gen2brain/beeep"
 
-	"github.com/foisalislambd/openbackup/internal/agent/appsvc"
 	"github.com/foisalislambd/openbackup/internal/agent/config"
 )
-
-// installService registers this desktop binary as the background agent and
-// starts it. No separate openbackup.exe is required.
-func installService() error {
-	return appsvc.InstallOrStart(appsvc.Options{})
-}
 
 // reveal opens a folder in the system file manager.
 func reveal(path string) error {
@@ -76,9 +69,6 @@ func logPath() string {
 
 // singleInstance reports whether this is the only copy of the app running, and
 // keeps the lock for the life of the process.
-//
-// A second window would show the same agent's state twice and let the user issue
-// contradictory commands, so the second copy raises the first one instead.
 func singleInstance() (release func(), ok bool) {
 	stateDir, err := config.StateDir()
 	if err != nil {
@@ -96,9 +86,6 @@ func singleInstance() (release func(), ok bool) {
 		return func() { _ = os.Remove(path) }, true
 	}
 
-	// A lock left behind by a crash must never stop someone opening their own app,
-	// so the recorded process is checked rather than trusted. Only a lock held by a
-	// process that is genuinely still running counts.
 	if !holderIsAlive(path) {
 		_ = os.Remove(path)
 		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
@@ -112,7 +99,6 @@ func singleInstance() (release func(), ok bool) {
 	return func() {}, false
 }
 
-// holderIsAlive reports whether the process named in a lock file still exists.
 func holderIsAlive(path string) bool {
 	raw, err := os.ReadFile(path)
 	if err != nil {

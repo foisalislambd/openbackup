@@ -171,6 +171,9 @@ func Start(opt Options) error {
 
 // Stop stops the service.
 func Stop(opt Options) error {
+	if AgentIsSelf() {
+		return errors.New("refusing to stop the current process — use the in-process shutdown instead")
+	}
 	svc, err := newUnixService(opt)
 	if err != nil {
 		return err
@@ -249,6 +252,33 @@ func InstallOrStart(opt Options) error {
 		return WaitUntilRunning(20 * time.Second)
 	}
 	return err
+}
+
+// EnableLoginAutostart writes a login autostart entry (XDG .desktop / LaunchAgent).
+// It never calls systemd/launchd Stop — that would kill a desktop process that
+// was itself started at login.
+func EnableLoginAutostart(opt Options) error {
+	if len(opt.Arguments) == 0 {
+		opt.Arguments = []string{"--background"}
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		return writeLaunchAgent(opt)
+	default:
+		return writeXDGAutostart(opt)
+	}
+}
+
+// DisableLoginAutostart removes the login autostart files (safe while running).
+func DisableLoginAutostart() error {
+	var first error
+	if err := removeXDGAutostart(); err != nil && first == nil {
+		first = err
+	}
+	if err := removeLaunchAgent(); err != nil && first == nil {
+		first = err
+	}
+	return first
 }
 
 func privilegeHint(err error) string {

@@ -83,7 +83,7 @@ export function Health({ status }: { status: Overview }) {
           </Button>
           {!status.agent_running && (
             <Button tone="primary" busy={action.busy} onClick={() => action.run(api.startService)}>
-              Start the background agent
+              Start backups
             </Button>
           )}
         </div>

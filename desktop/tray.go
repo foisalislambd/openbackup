@@ -89,7 +89,7 @@ func (t *tray) onReady(ctx context.Context) {
 	t.resume = systray.AddMenuItem("Resume backups", "Start backing up again")
 	t.resume.Hide()
 	systray.AddSeparator()
-	quit := systray.AddMenuItem("Quit", "Close the window; backups keep running")
+	quit := systray.AddMenuItem("Quit OpenBackup", "Stop backups and close the app")
 
 	open.Click(func() { t.show() })
 	t.backup.Click(func() {
@@ -109,12 +109,19 @@ func (t *tray) onReady(ctx context.Context) {
 		}
 	})
 	quit.Click(func() {
-		// Quitting the window never stops the service, and the menu item says so
-		// rather than silently leaving the user unprotected.
-		wruntime.Quit(ctx)
+		t.app.Quit()
 	})
 
 	go t.refreshLoop(ctx)
+}
+
+// show brings the window forward.
+func (t *tray) show() {
+	if t.ctx == nil {
+		return
+	}
+	wruntime.WindowShow(t.ctx)
+	wruntime.WindowUnminimise(t.ctx)
 }
 
 // refreshLoop keeps the tooltip, icon and menu in step with the agent.
@@ -179,14 +186,6 @@ func (a *App) setTrayState(o control.Overview) {
 	if a.tray != nil {
 		a.tray.setTrayState(o)
 	}
-}
-
-func (t *tray) show() {
-	if t.ctx == nil {
-		return
-	}
-	wruntime.WindowShow(t.ctx)
-	wruntime.WindowUnminimise(t.ctx)
 }
 
 // iconFor maps a health state to an icon. Three states are enough: fine, working,

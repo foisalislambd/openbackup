@@ -1,15 +1,19 @@
 # The desktop app
 
-One app for the machine being backed up: the window **and** the background
-agent. Connect a device, see whether files are safe, browse and restore, change
-limits and encryption, and run diagnostics. Closing the window does not stop
-backups — the same binary keeps running in the background.
+One app for the machine being backed up — window, tray, and backup engine in a
+**single binary** (Dropbox-style). Connect a device, see whether files are safe,
+browse and restore, change limits and encryption, and run diagnostics.
+
+Closing the window hides to the tray; backups keep running in the same process.
+**Quit** from the tray stops backups until you open the app again (or sign in —
+login autostart launches the app with `--background`).
 
 Available for Windows, macOS and Linux. Same screens and design on every platform.
 
 - **Windows:** download the installer (or the portable `.exe`) from the
   [releases page](https://github.com/foisalislambd/openbackup/releases). That
-  single app is enough — you do **not** install a separate agent.
+  single app is enough — you do **not** install a separate agent, and you do
+  **not** need Run as administrator.
 - **Linux:** the installer asks if you want the desktop app after the CLI is
   installed (CLI is optional for servers/headless):
 
@@ -23,19 +27,17 @@ Available for Windows, macOS and Linux. Same screens and design on every platfor
   `make desktop`.
 - **macOS:** build with `make desktop` for now (same Wails app).
 
-## One binary, two roles
+## One binary
 
 | How you start it | What happens |
 | --- | --- |
-| Double-click / app menu | Opens the window |
-| **Start it** in the app | Starts the agent in the background (no admin on Windows) |
-| Sign in to Windows / login | Agent starts automatically (Windows Run key; Linux/macOS user service) |
+| Double-click / app menu | Opens the window; if connected, backups run in this process |
+| Close the window | Hides to the tray — backups continue |
+| Quit (tray) | Stops backups and exits |
+| Sign in / login | App starts hidden (`--background`) and resumes backups |
 
-A backup that only happens while a window is open is not a backup — so the agent
-keeps working when you close the UI. The tray icon is how you get back.
-
-Anything changed in the window is applied to the running agent straight away
-(same control layer as the optional `openbackup` CLI).
+Login autostart is a per-user entry (Windows Run key, Linux XDG autostart, macOS
+LaunchAgent). Headless / server installs can still use `openbackup service`.
 
 ## What each screen does
 
@@ -50,19 +52,17 @@ Anything changed in the window is applied to the running agent straight away
 ## The tray icon
 
 The icon reflects state at a glance — everything backed up, working, idle, or needs
-attention — and its menu offers Open, Back up now, Pause and Resume. Closing the
-window leaves it there; Quit from the menu closes the window for real, and still
-does not stop the service.
+attention — and its menu offers Open, Back up now, Pause, Resume, and Quit.
+Closing the window leaves it there; Quit stops the in-process engine and exits.
 
-Notifications appear only when something needs you: the service stopped, an error,
+Notifications appear only when something needs you: backups stopped, an error,
 or backups have gone stale. Not for successful backups, which would be a
 notification every few minutes saying nothing happened.
 
 ## Resource use
 
-About 10 MB of RAM and no measurable CPU while open, because it holds no backup
-state — it polls the agent for status and calls operations. Closed, it costs
-nothing; the service does the work.
+While the app is open (or in the tray), it runs the backup engine in-process.
+About tens of MB of RAM depending on activity; idle cost is low.
 
 ## Building it
 

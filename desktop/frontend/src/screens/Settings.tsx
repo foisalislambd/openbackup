@@ -74,7 +74,7 @@ export function Settings({ status, onLoggedOut }: { status: Overview; onLoggedOu
 
       <Card
         title="Staying out of your way"
-        description="These limits decide when the agent works. They apply to the background service immediately."
+        description="These limits decide when backups run. They apply immediately."
       >
         <Field
           label="Upload speed limit"
@@ -366,7 +366,8 @@ function About() {
         </Button>
       </div>
       <p className="mt-3 text-xs text-ink-muted">
-        Closing this window does not stop backups: they run as a background service.
+        Closing this window does not stop backups — they keep running until you Quit
+        from the tray. The app also starts at login after you connect.
       </p>
     </Card>
   )
