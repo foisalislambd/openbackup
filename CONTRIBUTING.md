@@ -145,7 +145,7 @@ internal/chunk/          FastCDC content-defined chunking
 internal/codec/          Zstandard + XChaCha20-Poly1305
 internal/ignore/         exclusion rules and project detection
 internal/userdirs/       per-platform personal folder detection
-web/                     dashboard (Next.js static export, embedded in the server)
+web/                     dashboard (Vite React SPA, embedded in the server)
 desktop/                 Wails desktop app (its own Go module)
 docs/                    the documentation
 ```

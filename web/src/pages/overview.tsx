@@ -1,16 +1,16 @@
-'use client'
-
 /**
  * Overview answers the only question most visitors have: is my data safe right
  * now? The health of the least healthy device therefore comes first, ahead of any
  * storage statistics.
  */
 
-import Link from 'next/link'
+import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { api, type Device, type Snapshot, type Usage } from '@/lib/api'
 import { bytes, count, platformLabel, relative } from '@/lib/format'
 import { useLoader } from '@/lib/use-loader'
-import { Badge, Card, Empty, ErrorNote, Meter, Spinner, Stat } from '@/components/ui'
+import { HealthBadge } from '@/components/health-badge'
+import { Card, Empty, ErrorNote, Meter, Spinner, Stat } from '@/components/ui'
 
 type Overview = { devices: Device[]; usage: Usage; snapshots: Snapshot[] }
 
@@ -124,7 +124,7 @@ export default function OverviewPage() {
           <Card
             title="Latest backups"
             action={
-              <Link className="text-xs text-[var(--color-brand)]" href="/backups">
+              <Link className="text-xs text-[var(--color-brand)]" to="/backups">
                 All
               </Link>
             }
@@ -135,7 +135,7 @@ export default function OverviewPage() {
               <ul className="space-y-2.5">
                 {snapshots.slice(0, 5).map((snapshot) => (
                   <li key={snapshot.id} className="text-sm">
-                    <Link className="hover:underline" href={`/backups?id=${snapshot.id}`}>
+                    <Link className="hover:underline" to={`/backups?id=${snapshot.id}`}>
                       <div className="flex items-center justify-between gap-2">
                         <span className="truncate">{snapshot.device_name ?? 'device'}</span>
                         <span className="text-xs text-[var(--color-ink-muted)]">{relative(snapshot.started_at)}</span>
@@ -164,7 +164,7 @@ function HealthBanner({ devices, newest }: { devices: Device[]; newest?: Snapsho
     return (
       <Banner tone="brand" title="No devices are connected yet.">
         Go to{' '}
-        <Link className="underline" href="/devices">
+        <Link className="underline" to="/devices">
           Devices
         </Link>{' '}
         to create a connection code, then run{' '}
@@ -213,7 +213,7 @@ function Banner({
 }: {
   tone: 'good' | 'warn' | 'bad' | 'brand'
   title: string
-  children: React.ReactNode
+  children: ReactNode
 }) {
   const color = `var(--color-${tone})`
   return (
@@ -233,17 +233,4 @@ function Banner({
       </div>
     </div>
   )
-}
-
-export function HealthBadge({ health, state }: { health: string; state?: string }) {
-  switch (health) {
-    case 'ok':
-      return <Badge tone="good">{state === 'uploading' ? 'backing up' : 'healthy'}</Badge>
-    case 'stale':
-      return <Badge tone="warn">out of date</Badge>
-    case 'error':
-      return <Badge tone="bad">error</Badge>
-    default:
-      return <Badge>no backup yet</Badge>
-  }
 }

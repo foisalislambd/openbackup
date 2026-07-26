@@ -74,7 +74,7 @@ nothing else, and deleting `/tmp/ob` resets everything.
 **3. The dashboard**, with hot reload, proxying the API to the server:
 
 ```bash
-cd web && npm install && npm run dev      # http://localhost:3000
+cd web && npm install && npm run dev      # http://localhost:5173
 ```
 
 Or `make dev`, which starts the server and the dashboard together.

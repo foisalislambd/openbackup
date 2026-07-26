@@ -1,5 +1,3 @@
-'use client'
-
 /**
  * useLoader is the one place the dashboard fetches data.
  *

@@ -5,7 +5,7 @@
 .DESCRIPTION
     The Makefile is the reference build, but it needs a POSIX shell. This script
     is the same pipeline for a Windows checkout so contributors on Windows are
-    not second-class: build the Next.js static export, copy it into the package
+    not second-class: build the Vite dashboard, copy it into the package
     that embeds it, then build the server and agent with version metadata.
 
 .PARAMETER SkipWeb
@@ -55,7 +55,7 @@ $date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 $pkg = 'github.com/foisalislambd/openbackup/internal/version'
 $ldflags = "-s -w -X $pkg.Version=$version -X $pkg.Commit=$commit -X $pkg.Date=$date"
 
-$webOut = Join-Path $root 'web\out'
+$webOut = Join-Path $root 'web\dist'
 $webDist = Join-Path $root 'internal\server\web\dist'
 
 if (-not $SkipWeb) {
@@ -69,17 +69,15 @@ if (-not $SkipWeb) {
         }
         if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
         npm run build
-        if ($LASTEXITCODE -ne 0) { throw "next build failed" }
+        if ($LASTEXITCODE -ne 0) { throw "vite build failed" }
     } finally {
         Pop-Location
     }
 
     Step "Embedding the dashboard into the server package"
-    if (-not (Test-Path $webOut)) { throw "expected the export in $webOut" }
+    if (-not (Test-Path $webOut)) { throw "expected the build in $webOut" }
     # Wiping and recreating the directory is the only way to be certain a stale
-    # asset from an earlier build is gone. `rd` does the wiping because both
-    # Remove-Item and .NET's recursive Delete refuse some of the names Next emits
-    # for its route metadata, such as `activity\__next.activity\__PAGE__.txt`.
+    # asset from an earlier build is gone.
     if (Test-Path -LiteralPath $webDist) {
         cmd /c "rd /s /q `"$webDist`"" | Out-Null
         if (Test-Path -LiteralPath $webDist) { throw "could not clear $webDist" }

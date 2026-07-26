@@ -1,10 +1,9 @@
 // Package web embeds the compiled dashboard into the server binary.
 //
-// The dashboard is a Next.js app exported as static files ("output: export").
-// Embedding it means a deployment is one binary and one data directory: no Node
-// runtime, no second container, no reverse-proxy rules to get the UI and the API
-// on the same origin. The dashboard is entirely client-rendered against the
-// authenticated API, so server-side rendering would buy nothing.
+// The dashboard is a Vite React SPA. Embedding it means a deployment is one
+// binary and one data directory: no Node runtime, no second container, no
+// reverse-proxy rules to get the UI and the API on the same origin. The
+// dashboard is entirely client-rendered against the authenticated API.
 package web
 
 import (
@@ -15,7 +14,7 @@ import (
 	"strings"
 )
 
-// dist holds the exported dashboard. It is populated by 'make web'; a fresh
+// dist holds the built dashboard. It is populated by 'make web'; a fresh
 // checkout contains only a placeholder, and the server then runs headless.
 //
 //go:embed all:dist
@@ -31,7 +30,7 @@ func Handler() http.Handler {
 	return HandlerFor(sub)
 }
 
-// HandlerFor serves a dashboard export from any filesystem, and returns nil when
+// HandlerFor serves a dashboard build from any filesystem, and returns nil when
 // the filesystem holds no dashboard. Taking an fs.FS keeps the routing rules
 // testable without a built dashboard in the tree.
 func HandlerFor(fsys fs.FS) http.Handler {
@@ -41,11 +40,11 @@ func HandlerFor(fsys fs.FS) http.Handler {
 	return &spaHandler{fs: fsys, files: http.FileServer(http.FS(fsys))}
 }
 
-// spaHandler serves the exported dashboard.
+// spaHandler serves the Vite SPA.
 //
-// The export is one HTML file per route rather than a single shell, so a request
-// for /devices must find devices.html. That is what makes a bookmark or a refresh
-// land on the right page instead of on the overview.
+// Hashed assets under assets/ are served directly. Everything else falls back
+// to index.html so client-side routes (/devices, /backups?id=…) keep working on
+// refresh and bookmark.
 type spaHandler struct {
 	fs    fs.FS
 	files http.Handler
@@ -57,39 +56,40 @@ func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		name = "index.html"
 	}
 
-	// Candidates in the order a static host would try them: the exact file, the
-	// route's HTML file, then a directory index.
-	for _, candidate := range []string{name, name + ".html", path.Join(name, "index.html")} {
-		info, err := fs.Stat(h.fs, candidate)
-		if err != nil || info.IsDir() {
-			continue
-		}
+	if info, err := fs.Stat(h.fs, name); err == nil && !info.IsDir() {
 		// Hashed build assets are immutable; everything else must revalidate so a
 		// deployed update is picked up on the next load.
-		if strings.HasPrefix(candidate, "_next/static/") {
+		if strings.HasPrefix(name, "assets/") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {
 			w.Header().Set("Cache-Control", "no-cache")
 		}
-		req := r
-		if candidate != name {
-			req = r.Clone(r.Context())
-			req.URL.Path = "/" + candidate
-		}
-		h.files.ServeHTTP(w, req)
+		h.files.ServeHTTP(w, r)
 		return
 	}
 
-	// Nothing matched. Serve the exported not-found page with a 404 status:
-	// answering 200 with the overview page would tell a browser, a crawler and a
-	// monitoring check alike that a mistyped URL was fine.
+	// Missing file that looks like a static asset: real 404, not the SPA shell.
+	if looksLikeAsset(name) {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Client route: serve the SPA shell without going through FileServer, which
+	// would otherwise 301 /index.html → ./ relative to the original path.
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	page, err := fs.ReadFile(h.fs, "404.html")
+	page, err := fs.ReadFile(h.fs, "index.html")
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	w.WriteHeader(http.StatusNotFound)
 	_, _ = w.Write(page)
+}
+
+func looksLikeAsset(name string) bool {
+	if strings.HasPrefix(name, "assets/") {
+		return true
+	}
+	base := path.Base(name)
+	return strings.Contains(base, ".")
 }

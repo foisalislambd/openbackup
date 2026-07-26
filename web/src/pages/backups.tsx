@@ -1,5 +1,3 @@
-'use client'
-
 /**
  * Backups lists snapshots and lets a user walk into one and pull files back out.
  *
@@ -8,25 +6,16 @@
  * paginated by path stays fast with millions of entries.
  */
 
-import { Suspense, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, archiveUrl, downloadUrl, type Entry, type Snapshot } from '@/lib/api'
 import { absolute, baseName, bytes, count, parentPath, relative } from '@/lib/format'
 import { useAction, useLoader } from '@/lib/use-loader'
 import { Badge, Button, Card, Empty, ErrorNote, Spinner } from '@/components/ui'
 
 export default function BackupsPage() {
-  // useSearchParams needs a Suspense boundary in a statically exported app.
-  return (
-    <Suspense fallback={<Spinner />}>
-      <Backups />
-    </Suspense>
-  )
-}
-
-function Backups() {
-  const params = useSearchParams()
-  const router = useRouter()
+  const [params] = useSearchParams()
+  const navigate = useNavigate()
   const selected = params.get('id') ?? ''
   const prefix = params.get('path') ?? ''
 
@@ -38,8 +27,10 @@ function Backups() {
       <SnapshotBrowser
         snapshotId={selected}
         prefix={prefix}
-        onNavigate={(path) => router.push(`/backups?id=${selected}${path ? `&path=${encodeURIComponent(path)}` : ''}`)}
-        onClose={() => router.push('/backups')}
+        onNavigate={(path) =>
+          navigate(`/backups?id=${selected}${path ? `&path=${encodeURIComponent(path)}` : ''}`)
+        }
+        onClose={() => navigate('/backups')}
       />
     )
   }
@@ -64,7 +55,7 @@ function Backups() {
                 <div className="flex items-center gap-2">
                   <button
                     className="text-sm font-medium hover:underline"
-                    onClick={() => router.push(`/backups?id=${snapshot.id}`)}
+                    onClick={() => navigate(`/backups?id=${snapshot.id}`)}
                   >
                     {snapshot.device_name ?? 'device'} — {absolute(snapshot.started_at)}
                   </button>
@@ -79,7 +70,7 @@ function Backups() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Button onClick={() => router.push(`/backups?id=${snapshot.id}`)}>Browse</Button>
+                <Button onClick={() => navigate(`/backups?id=${snapshot.id}`)}>Browse</Button>
                 <Button href={archiveUrl(snapshot.id, '')}>Download all</Button>
                 <Button
                   variant="danger"

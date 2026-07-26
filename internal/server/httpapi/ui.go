@@ -23,7 +23,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	// The dashboard is a static export with no server-rendered redirect, so this
+	// The dashboard is a static SPA with no server-rendered redirect, so this
 	// one unauthenticated call is what tells it whether to show the first-run
 	// form, the sign-in form, or the dashboard itself.
 	_, sessionErr := s.currentUser(r)

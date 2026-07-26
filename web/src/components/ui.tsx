@@ -1,5 +1,3 @@
-'use client'
-
 /** Small presentational building blocks shared across the dashboard. */
 
 import type { ReactNode } from 'react'
@@ -101,7 +99,8 @@ export function Button({
     primary: 'bg-[var(--color-brand)] text-white hover:opacity-90',
     secondary:
       'border border-[var(--color-border-subtle)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-muted)]',
-    danger: 'border border-[var(--color-bad)] text-[var(--color-bad)] hover:bg-[color-mix(in_oklch,var(--color-bad)_10%,transparent)]',
+    danger:
+      'border border-[var(--color-bad)] text-[var(--color-bad)] hover:bg-[color-mix(in_oklch,var(--color-bad)_10%,transparent)]',
     ghost: 'text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]',
   }
   const base = `inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${styles[variant]} ${className}`

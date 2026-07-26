@@ -25,7 +25,7 @@ RUN go mod download
 
 COPY . .
 # The export lands where //go:embed expects it, so the binary carries the UI.
-COPY --from=web /web/out/ ./internal/server/web/dist/
+COPY --from=web /web/dist/ ./internal/server/web/dist/
 
 ARG VERSION=dev
 ARG COMMIT=unknown

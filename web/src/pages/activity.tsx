@@ -1,5 +1,3 @@
-'use client'
-
 /**
  * Activity is the answer to "why is that folder not in my backup?".
  *

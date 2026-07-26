@@ -15,7 +15,7 @@ LDFLAGS := -s -w \
 	-X github.com/foisalislambd/openbackup/internal/version.Date=$(DATE)
 
 BIN     := bin
-WEB_OUT := web/out
+WEB_OUT := web/dist
 WEB_DIST := internal/server/web/dist
 
 # PKGS is spelled out rather than ./... because the dashboard's node_modules can
@@ -86,8 +86,8 @@ cross:
 # Dashboard
 # ---------------------------------------------------------------------------
 
-# The dashboard is a Next.js static export copied into the package that embeds
-# it, so `go build` alone produces a server with a working UI.
+# The dashboard is a Vite React SPA copied into the package that embeds it, so
+# `go build` alone produces a server with a working UI.
 .PHONY: web
 web:
 	cd web && npm ci --no-audit --no-fund
@@ -132,7 +132,7 @@ desktop-check:
 
 .PHONY: dev
 dev:
-	@echo "server on :18200, dashboard on :3000 (proxying /api to the server)"
+	@echo "server on :18200, dashboard on :5173 (proxying /api to the server)"
 	@( go run ./cmd/openbackup-server & cd web && npm run dev; kill %1 )
 
 .PHONY: run-server
@@ -164,7 +164,7 @@ docker:
 
 .PHONY: clean
 clean:
-	rm -rf $(BIN) dist web/out web/.next
+	rm -rf $(BIN) dist web/dist web/out web/.next
 	rm -rf desktop/build/bin desktop/frontend/dist
 	rm -rf $(WEB_DIST)
 	mkdir -p $(WEB_DIST)

@@ -1,14 +1,13 @@
 # OpenBackup dashboard
 
 The web dashboard: devices, storage, backup health, activity, settings, and
-restore. It is a Next.js app exported as static files and embedded into the Go
-server binary, so a self-hosted install stays one binary with no Node runtime in
-production.
+restore. It is a Vite + React SPA embedded into the Go server binary, so a
+self-hosted install stays one binary with no Node runtime in production.
 
 ## Layout
 
 ```
-src/app/         one route per page, all client-rendered
+src/pages/       one file per route
 src/components/  shell (navigation and the auth gate) and the UI primitives
 src/lib/         the typed API client, the data-loading hook, formatting helpers
 ```
@@ -25,7 +24,7 @@ The dashboard needs the API, so run both:
 # terminal 1 — the API on :18200
 go run ./cmd/openbackup-server
 
-# terminal 2 — the dashboard on :3000, proxying /api to :18200
+# terminal 2 — the dashboard on :5173, proxying /api to :18200
 cd web && npm install && npm run dev
 ```
 
@@ -33,7 +32,7 @@ Point the proxy somewhere else with `OPENBACKUP_DEV_SERVER=http://host:port`.
 
 ## Building
 
-`make web` from the repository root builds the export and copies it into
+`make web` from the repository root builds the SPA and copies it into
 `internal/server/web/dist`, where `//go:embed` picks it up. On Windows use
 `./scripts/build.ps1`, which does the same and then builds the binaries.
 
@@ -49,10 +48,10 @@ npm run lint
 - **Authentication is a cookie.** Nothing here stores a token. The session cookie
   is `HttpOnly`, so a script cannot read it, and requests use
   `credentials: 'same-origin'`.
-- **`/api/v1/ui/bootstrap` runs first.** A static export cannot redirect on the
+- **`/api/v1/ui/bootstrap` runs first.** A static SPA cannot redirect on the
   server, so `Shell` asks the server whether to show first-run setup, the sign-in
   form, or the dashboard.
-- **Colours come from theme tokens** in `src/app/globals.css`, referenced as
+- **Colours come from theme tokens** in `src/styles.css`, referenced as
   `var(--color-ink)` and friends. Dark mode re-points those variables; no
   component needs a `dark:` variant.
 - **Restore downloads are plain links** built by `downloadUrl` and `archiveUrl`,

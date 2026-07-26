@@ -1,5 +1,3 @@
-'use client'
-
 /**
  * Settings covers the handful of choices that genuinely need making: how long to
  * keep backups, how much space to allow, and how fast agents may upload. It also

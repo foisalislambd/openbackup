@@ -11,16 +11,13 @@ import (
 	"github.com/foisalislambd/openbackup/internal/server/web"
 )
 
-// export mimics what `next build` writes with output: 'export' and
-// trailingSlash: false — one HTML file per route, plus a 404 page and hashed
-// assets.
+// export mimics what `vite build` writes: a single index.html shell plus hashed
+// assets under assets/.
 func export() fstest.MapFS {
 	return fstest.MapFS{
-		"index.html":                   {Data: []byte("<title>overview</title>")},
-		"devices.html":                 {Data: []byte("<title>devices</title>")},
-		"backups.html":                 {Data: []byte("<title>backups</title>")},
-		"404.html":                     {Data: []byte("<title>not found</title>")},
-		"_next/static/chunk.abc123.js": {Data: []byte("console.log(1)")},
+		"index.html":              {Data: []byte("<title>OpenBackup</title><div id=root>")},
+		"assets/index-abc123.js":  {Data: []byte("console.log(1)")},
+		"favicon.svg":             {Data: []byte("<svg></svg>")},
 	}
 }
 
@@ -37,33 +34,25 @@ func get(t *testing.T, h http.Handler, path string) (*http.Response, string) {
 	return resp, string(body)
 }
 
-// TestRoutesResolveToTheirOwnPage is the difference between a bookmark working
-// and a bookmark quietly showing the wrong screen: /devices must serve
-// devices.html, not the overview.
-func TestRoutesResolveToTheirOwnPage(t *testing.T) {
+// TestClientRoutesServeSpaShell is the difference between a bookmark working
+// and a blank page: /devices must serve index.html so React Router can take over.
+func TestClientRoutesServeSpaShell(t *testing.T) {
 	h := web.HandlerFor(export())
 	if h == nil {
 		t.Fatal("HandlerFor returned nil for a filesystem containing a dashboard")
 	}
 
-	cases := map[string]string{
-		"/":             "overview",
-		"/devices":      "devices",
-		"/backups":      "backups",
-		"/devices.html": "devices",
-		"/devices/":     "devices",
-		"//devices":     "devices",
-		// Traversal must resolve inside the export rather than escape it.
-		"/../devices": "devices",
-	}
-	for path, want := range cases {
+	for _, path := range []string{"/", "/devices", "/backups", "/settings", "/devices/"} {
 		resp, body := get(t, h, path)
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("GET %s = %d, want 200", path, resp.StatusCode)
 			continue
 		}
-		if !strings.Contains(body, want) {
-			t.Errorf("GET %s served %q, want the %s page", path, body, want)
+		if !strings.Contains(body, "OpenBackup") {
+			t.Errorf("GET %s served %q, want the SPA shell", path, body)
+		}
+		if cc := resp.Header.Get("Cache-Control"); cc != "no-cache" {
+			t.Errorf("GET %s Cache-Control = %q, want no-cache", path, cc)
 		}
 	}
 
@@ -76,19 +65,15 @@ func TestRoutesResolveToTheirOwnPage(t *testing.T) {
 	}
 }
 
-// TestUnknownPathIsNotFound guards against answering 200 with the overview page
-// for a mistyped URL, which would tell browsers, crawlers and uptime checks alike
-// that a broken link is fine.
-func TestUnknownPathIsNotFound(t *testing.T) {
+// TestMissingAssetIsNotFound guards against answering with the SPA shell for a
+// missing JS/CSS file, which would break the dashboard after a bad deploy.
+func TestMissingAssetIsNotFound(t *testing.T) {
 	h := web.HandlerFor(export())
 
-	for _, path := range []string{"/nonsense", "/devices/nested/deep", "/_next/static"} {
-		resp, body := get(t, h, path)
+	for _, path := range []string{"/assets/missing.js", "/favicon.ico", "/nonsense.txt"} {
+		resp, _ := get(t, h, path)
 		if resp.StatusCode != http.StatusNotFound {
 			t.Errorf("GET %s = %d, want 404", path, resp.StatusCode)
-		}
-		if path == "/nonsense" && !strings.Contains(body, "not found") {
-			t.Errorf("GET %s served %q, want the exported 404 page", path, body)
 		}
 	}
 }
@@ -98,7 +83,7 @@ func TestUnknownPathIsNotFound(t *testing.T) {
 func TestAssetCachingRules(t *testing.T) {
 	h := web.HandlerFor(export())
 
-	resp, _ := get(t, h, "/_next/static/chunk.abc123.js")
+	resp, _ := get(t, h, "/assets/index-abc123.js")
 	if cc := resp.Header.Get("Cache-Control"); cc != "public, max-age=31536000, immutable" {
 		t.Errorf("hashed asset Cache-Control = %q, want it cached immutably", cc)
 	}

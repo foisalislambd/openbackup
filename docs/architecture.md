@@ -133,7 +133,7 @@ removing a device take effect immediately instead of at the end of a token's lif
 
 ## The dashboard
 
-A Next.js static export, copied into `internal/server/web/dist` and embedded with
+A Vite React SPA, copied into `internal/server/web/dist` and embedded with
 `//go:embed`. The server therefore ships its UI: no second container, no CDN, no
 version skew between the API and the pages calling it. `go build` alone produces a
 working server — it just embeds whatever dashboard was last built.

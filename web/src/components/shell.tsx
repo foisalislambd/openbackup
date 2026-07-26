@@ -1,16 +1,13 @@
-'use client'
-
 /**
  * Shell holds the navigation and the authentication gate.
  *
- * Because the dashboard is a static export there is no server-side redirect to a
- * login page: the first thing the app does is ask the server whether it needs
- * setting up, whether the visitor is signed in, and only then render anything.
+ * The dashboard is a static SPA, so there is no server-side redirect to a login
+ * page: the first thing the app does is ask the server whether it needs setting
+ * up, whether the visitor is signed in, and only then render anything.
  */
 
-import { useState } from 'react'
-import { usePathname, useRouter } from 'next/navigation'
-import Link from 'next/link'
+import { useState, type ReactNode } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { api, type Bootstrap } from '@/lib/api'
 import { message, useLoader } from '@/lib/use-loader'
 import { Button, ErrorNote, Field, inputClass, Spinner } from './ui'
@@ -23,8 +20,8 @@ const navigation = [
   { href: '/settings', label: 'Settings' },
 ]
 
-export function Shell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname()
+export function Shell({ children }: { children: ReactNode }) {
+  const location = useLocation()
   const { data: state, error, loading, reload } = useLoader<Bootstrap>(() => api.bootstrap())
 
   if (error) {
@@ -60,11 +57,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
         <nav className="flex flex-wrap items-center gap-1">
           {navigation.map((item) => {
-            const active = pathname === item.href
+            const active = location.pathname === item.href
             return (
               <Link
                 key={item.href}
-                href={item.href}
+                to={item.href}
                 className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
                   active
                     ? 'bg-[var(--color-brand-soft)] text-[var(--color-brand)]'
@@ -101,13 +98,13 @@ function Logo() {
 }
 
 function SignOutButton({ onDone }: { onDone: () => void }) {
-  const router = useRouter()
+  const navigate = useNavigate()
   return (
     <Button
       variant="ghost"
       onClick={() => {
         void api.logout().then(() => {
-          router.push('/')
+          navigate('/')
           onDone()
         })
       }}

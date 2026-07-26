@@ -136,7 +136,7 @@ jobs:
         run: |
           rm -rf internal/server/web/dist
           mkdir -p internal/server/web/dist
-          cp -r web/out/. internal/server/web/dist/
+          cp -r web/dist/. internal/server/web/dist/
           go build ./cmd/openbackup-server
 
   desktop:

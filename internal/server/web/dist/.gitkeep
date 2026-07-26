@@ -1,3 +1,1 @@
-# The built dashboard is copied here by `make web` or scripts/build.ps1.
-# This file only exists so //go:embed has a directory to embed in a fresh
-# checkout; the build output itself is not committed.
+# placeholder

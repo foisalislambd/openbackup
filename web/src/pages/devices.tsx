@@ -1,5 +1,3 @@
-'use client'
-
 /**
  * Devices is where a machine is added, and where the connection code appears.
  * The code is shown next to the exact command it goes into, so connecting a
@@ -10,8 +8,8 @@ import { useState } from 'react'
 import { api, type Device } from '@/lib/api'
 import { bytes, count, platformLabel, relative } from '@/lib/format'
 import { useAction, useLoader } from '@/lib/use-loader'
+import { HealthBadge } from '@/components/health-badge'
 import { Badge, Button, Card, Empty, ErrorNote, inputClass, Spinner } from '@/components/ui'
-import { HealthBadge } from '../page'
 
 export default function DevicesPage() {
   const { data: devices, error, loading, reload } = useLoader<Device[]>(() => api.devices(), { pollMs: 15000 })
