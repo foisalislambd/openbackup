@@ -4,8 +4,10 @@
 #   curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
 #
 # Prefers a GitHub release binary; if none exists, builds the agent from git.
-# On Linux it also downloads the desktop app when a release binary exists
-# (same window as Windows). Skip with OPENBACKUP_SKIP_DESKTOP=1.
+# On Linux, after the agent is installed it asks whether you also want the
+# desktop app (GUI). Answer y/n. Non-interactive overrides:
+#   OPENBACKUP_DESKTOP=1      install GUI without asking
+#   OPENBACKUP_SKIP_DESKTOP=1 skip GUI without asking
 #
 # Nothing is backed up until you connect with a dashboard code (or open the app).
 set -eu
@@ -17,6 +19,7 @@ REF="${OPENBACKUP_REF:-main}"
 GO_VERSION="${OPENBACKUP_GO_VERSION:-1.26.5}"
 FORCE_BUILD="${OPENBACKUP_FORCE_BUILD:-0}"
 SKIP_DESKTOP="${OPENBACKUP_SKIP_DESKTOP:-0}"
+WANT_DESKTOP="${OPENBACKUP_DESKTOP:-}"
 PREFIX="${OPENBACKUP_PREFIX:-}"
 
 say() { printf '%s\n' "$*"; }
@@ -134,16 +137,12 @@ build_from_git() {
 	say "Built from source"
 }
 
-# On Linux, also install the desktop app from Releases when available.
+# On Linux, install the desktop app from Releases when the user wants it.
 install_desktop_linux() {
 	[ "$goos" = linux ] || return 0
-	[ "$SKIP_DESKTOP" = "1" ] && {
-		say "OPENBACKUP_SKIP_DESKTOP=1 — skipping desktop app"
-		return 0
-	}
 
 	desk="$tmp/openbackup-desktop"
-	say "Looking for Linux desktop app (${goarch})..."
+	say "Downloading the OpenBackup desktop app (${goarch})..."
 	if ! fetch "$desktop_url" "$desk" 2>/dev/null; then
 		say "No desktop release binary yet — agent CLI only. Re-run later after a desktop release."
 		rm -f "$desk"
@@ -210,6 +209,35 @@ EOF
 	fi
 }
 
+# Ask on a real terminal (works even when the script is piped from curl).
+ask_want_desktop() {
+	[ "$goos" = linux ] || return 1
+
+	case "$SKIP_DESKTOP" in
+		1 | true | TRUE | yes | YES) return 1 ;;
+	esac
+	case "$WANT_DESKTOP" in
+		1 | true | TRUE | yes | YES | y | Y) return 0 ;;
+	esac
+
+	say ""
+	say "The agent (background backup) is installed."
+	say "Do you also want the desktop app (GUI window, like on Windows)?"
+	printf 'Install desktop app? [y/N] ' >/dev/tty 2>/dev/null || printf 'Install desktop app? [y/N] '
+	answer=
+	if [ -r /dev/tty ]; then
+		# shellcheck disable=SC2162
+		read -r answer </dev/tty || answer=
+	else
+		# shellcheck disable=SC2162
+		read -r answer || answer=
+	fi
+	case "$answer" in
+		y | Y | yes | YES) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
 if [ "$FORCE_BUILD" = "1" ]; then
 	say "OPENBACKUP_FORCE_BUILD=1 — skipping release download"
 	build_from_git
@@ -240,7 +268,11 @@ else
 	say "Run '$ob service install' yourself, or start it manually with '$ob run'."
 fi
 
-install_desktop_linux
+if ask_want_desktop; then
+	install_desktop_linux
+else
+	[ "$goos" = linux ] && say "Skipping desktop app. You can re-run this installer later and choose yes."
+fi
 
 say ""
 say "Installed. Nothing is being backed up yet."

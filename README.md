@@ -112,14 +112,16 @@ In the dashboard:
 curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
 ```
 
-On Linux this also installs the desktop app when a release build exists (`openbackup-desktop`). Then either open the app, or:
+On Linux this asks whether to install the desktop app (GUI). Answer **y** for the
+window app, or **N** for CLI only. Then either open the app, or:
 
 ```bash
 openbackup connect --server https://backup.example.com --code ABCD-EFGH-JKLM
 ```
 
-Use your real server URL (or `http://YOUR_IP:18200` for a quick test). Prefer HTTPS for real use — see [install-server.md](docs/install-server.md).  
-CLI-only on Linux: `OPENBACKUP_SKIP_DESKTOP=1 curl -fsSL …/install-agent.sh | sh`
+Non-interactive: `OPENBACKUP_DESKTOP=1` (always GUI) or `OPENBACKUP_SKIP_DESKTOP=1` (never).
+
+Use your real server URL (or `http://YOUR_IP:18200` for a quick test). Prefer HTTPS for real use — see [install-server.md](docs/install-server.md).
 
 ### Step 4 — Check that it worked
 

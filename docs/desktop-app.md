@@ -9,16 +9,17 @@ Available for Windows, macOS and Linux. Same screens and design on every platfor
 
 - **Windows:** download the installer from the
   [releases page](https://github.com/foisalislambd/openbackup/releases).
-- **Linux:** the agent installer also installs the desktop app when a release
-  build exists:
+- **Linux:** the agent installer asks if you want the desktop GUI after the
+  CLI is installed:
 
   ```bash
   curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
+  # → Install desktop app? [y/N]
   openbackup-desktop
   ```
 
-  CLI only: `OPENBACKUP_SKIP_DESKTOP=1` before the same curl. Or build locally
-  with `make desktop`.
+  Or set `OPENBACKUP_DESKTOP=1` / `OPENBACKUP_SKIP_DESKTOP=1`. Local build:
+  `make desktop`.
 - **macOS:** build with `make desktop` for now (same Wails app).
 
 ## It is a client, not the backup

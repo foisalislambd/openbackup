@@ -14,18 +14,19 @@ hours by default.
 curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
 ```
 
-On **Linux**, the same script also downloads the desktop app when a release binary
-exists (`openbackup-desktop` + app-menu entry). Open the app and connect with a
-dashboard code, or use the terminal:
+On **Linux**, after the agent is installed the script asks if you also want the
+desktop app (GUI). Answer `y` to download and set it up (`openbackup-desktop` +
+app-menu entry), or `N` for the command line only. Then open the app, or:
 
 ```bash
 openbackup connect --server https://backup.example.com --code ABCD-EFGH-JKLM
 ```
 
-Agent-only (no desktop window):
+Without a prompt:
 
 ```bash
-OPENBACKUP_SKIP_DESKTOP=1 curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
+OPENBACKUP_DESKTOP=1 curl -fsSL …/install-agent.sh | sh   # always install GUI
+OPENBACKUP_SKIP_DESKTOP=1 curl -fsSL …/install-agent.sh | sh   # never
 ```
 
 Same pattern as the server installer: one script from this repo on GitHub. It
@@ -35,7 +36,7 @@ registers a background service and stops.
 
 Optional overrides: `OPENBACKUP_FORCE_BUILD=1`, `OPENBACKUP_REPO`, `OPENBACKUP_REF`
 (default `main`), `OPENBACKUP_GO_VERSION`, `OPENBACKUP_VERSION`,
-`OPENBACKUP_SKIP_DESKTOP=1`.
+`OPENBACKUP_DESKTOP=1`, `OPENBACKUP_SKIP_DESKTOP=1`.
 
 Where it installs depends on how you run it:
 
