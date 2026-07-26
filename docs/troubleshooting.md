@@ -73,8 +73,16 @@ curl -fsS https://backup.example.com/api/v1/health
 - **Works over `http` but not `https`:** the certificate. A self-signed one is not
   trusted by the agent any more than by a browser; use a real certificate, which
   Caddy will get for you.
-- **Times out on large uploads only:** a proxy body limit below the chunk size.
-  Allow at least 16 MiB, or raise `OPENBACKUP_MAX_CHUNK_BYTES` and match it.
+- **Times out on large uploads only / activity shows `413 Request Entity Too Large`:**
+  nginx (or another reverse proxy) is rejecting the chunk body. Raise the body
+  limit above the largest chunk (16 MiB by default), then reload the proxy:
+
+  ```nginx
+  client_max_body_size 64m;
+  ```
+
+  Also check Cloudflare if you use it — free plans can reject very large uploads.
+  OpenBackup itself is fine; the proxy in front is the limit.
 
 ## Backups are slow
 

@@ -18,7 +18,7 @@ The dashboard shows the same list under **Settings → What is not backed up**.
 | `system` | `C:\Windows`, `Program Files`, `ProgramData`, `$Recycle.Bin`, `System Volume Information`, `/proc`, `/sys`, `/dev`, `/run`, `/tmp`, `/usr`, `/System`, `/Library` | Operating system and installed software. Reinstallable, and often not even readable |
 | `junk` | `Thumbs.db`, `.DS_Store`, `desktop.ini`, `.Trash`, recycle bins | Regenerated automatically; noise in a restore |
 | `cache` | browser caches, `~/.cache`, package manager caches, thumbnail caches | Large, constantly rewritten, worthless once restored |
-| `developer` | `node_modules`, `vendor`, `target`, `build`, `dist`, `.next`, `venv`, `__pycache__`, `bin`, `obj` and similar | Reproducible from the sources next to them — see the scoping rule below |
+| `developer` | `.git`, `node_modules`, `vendor`, `target`, `build`, `dist`, `.next`, `venv`, `__pycache__`, `bin`, `obj` and similar | Reproducible from the sources next to them (or from a git remote) — see the scoping rule below |
 | `virtualisation` | `.vdi`, `.vmdk`, `.qcow2`, `.vhdx`, Docker images | Tens of gigabytes that change on every boot |
 | `ephemeral` | `*.tmp`, `*.part`, `~$*.docx`, crash dumps, swap and hibernation files | Half-written files and things the OS recreates |
 

@@ -263,6 +263,9 @@ func cacheRules() []Rule {
 // user data, wherever it appears, so these apply everywhere.
 func developerGlobalRules() []Rule {
 	return []Rule{
+		{".git/", "Git object store; source files are backed up, history lives on the remote"},
+		{".svn/", "Subversion metadata; working copy files are backed up"},
+		{".hg/", "Mercurial metadata; working copy files are backed up"},
 		{"node_modules/", "reinstallable with npm install"},
 		{"bower_components/", "reinstallable dependency directory"},
 		{"jspm_packages/", "reinstallable dependency directory"},

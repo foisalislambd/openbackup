@@ -26,6 +26,8 @@ func TestGlobalJunkRules(t *testing.T) {
 		{"AppData/Local/Google/Chrome/User Data/Default/Cache/f_00001", false, true},
 		{"Music/song.mp3", false, false},
 		{"Desktop/notes.txt", false, false},
+		{"desktop/code/zentra/.git/objects/pack/pack-abc.pack", false, true},
+		{"desktop/code/zentra/src/main.go", false, false},
 	}
 	for _, tc := range cases {
 		got := m.Match(tc.path, tc.isDir)
