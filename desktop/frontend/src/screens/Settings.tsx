@@ -26,6 +26,17 @@ export function Settings({ status, onLoggedOut }: { status: Overview; onLoggedOu
     }
   }, [loaded.data, draft])
 
+  if (loaded.error && !draft) {
+    return (
+      <Notice tone="bad" title="Could not load settings">
+        {loaded.error}
+        <button className="ml-2 text-brand underline" onClick={loaded.reload}>
+          Try again
+        </button>
+      </Notice>
+    )
+  }
+
   if (!draft) {
     return <p className="text-sm text-ink-muted">Loading settings...</p>
   }
@@ -132,7 +143,11 @@ export function Settings({ status, onLoggedOut }: { status: Overview; onLoggedOu
         </div>
       </Card>
 
-      <Encryption encrypted={draft.encrypted} hasBackups={status.snapshot_count > 0} />
+      <Encryption
+        encrypted={draft.encrypted || status.encrypted}
+        hasBackups={status.snapshot_count > 0}
+        onEnabled={() => setDraft((d) => (d ? { ...d, encrypted: true } : d))}
+      />
 
       <Account
         serverURL={status.server_url}
@@ -210,7 +225,15 @@ function Account({
   )
 }
 
-function Encryption({ encrypted, hasBackups }: { encrypted: boolean; hasBackups: boolean }) {
+function Encryption({
+  encrypted,
+  hasBackups,
+  onEnabled,
+}: {
+  encrypted: boolean
+  hasBackups: boolean
+  onEnabled: () => void
+}) {
   const action = useAction()
   const [code, setCode] = useState('')
   const [revealed, setRevealed] = useState(false)
@@ -292,6 +315,7 @@ function Encryption({ encrypted, hasBackups }: { encrypted: boolean; hasBackups:
                 action.run(async () => {
                   try {
                     setCode(await api.enableEncryption(''))
+                    onEnabled()
                   } catch (err) {
                     // A restart requirement arrives as an error alongside the code,
                     // so it is shown as a warning rather than a failure.
@@ -299,6 +323,7 @@ function Encryption({ encrypted, hasBackups }: { encrypted: boolean; hasBackups:
                     if (text.includes('restart')) {
                       setWarning(text)
                       setCode(await api.recoveryCode())
+                      onEnabled()
                       return
                     }
                     throw err

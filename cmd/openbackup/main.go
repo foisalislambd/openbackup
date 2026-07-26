@@ -401,8 +401,12 @@ func cmdBackup(args []string) error {
 		if err := client.BackupNow(ctx); err != nil {
 			return err
 		}
-		fmt.Println("Backup requested. Watch it with 'openbackup status'.")
-		return nil
+		if !*wait {
+			fmt.Println("Backup requested. Watch it with 'openbackup status'.")
+			return nil
+		}
+		fmt.Println("Backup requested. Waiting for it to finish…")
+		return waitForBackupIdle(ctx, client)
 	}
 
 	fmt.Println("The agent is not running, so this backup runs here in the foreground.")
@@ -412,8 +416,36 @@ func cmdBackup(args []string) error {
 		return err
 	}
 	defer eng.Close()
-	_ = wait
 	return eng.RunOnce(ctx)
+}
+
+func waitForBackupIdle(ctx context.Context, client *ipc.Client) error {
+	deadline := time.Now().Add(6 * time.Hour)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	sawBusy := false
+	for {
+		var status engine.Status
+		if err := client.Status(ctx, &status); err != nil {
+			return err
+		}
+		busy := status.State == api.StateScanning || status.State == api.StateUploading
+		if busy {
+			sawBusy = true
+		}
+		if sawBusy && !busy && !status.Paused {
+			fmt.Println("Backup finished.")
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for the backup to finish (state=%s)", status.State)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func cmdPause(args []string) error {
@@ -429,8 +461,6 @@ func cmdPause(args []string) error {
 	if err != nil {
 		return err
 	}
-	// A pause with no agent running is still recorded, so it takes effect when one
-	// starts instead of being silently forgotten.
 	if err := agent.Pause(context.Background(), *duration); err != nil {
 		return err
 	}

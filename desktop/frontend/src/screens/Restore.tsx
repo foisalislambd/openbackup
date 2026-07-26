@@ -188,7 +188,17 @@ export function Restore() {
           {page.error && <Notice tone="warn" title="Cannot read this backup">{page.error}</Notice>}
 
           {!activeSnapshot ? (
-            <Empty title="No completed backups yet" />
+            snapshots.error ? (
+              <Notice tone="bad" title="Could not load backups">
+                {snapshots.error}
+              </Notice>
+            ) : snapshots.loading ? (
+              <div className="flex items-center gap-2 py-6 text-sm text-ink-muted">
+                <Spinner /> Loading backups...
+              </div>
+            ) : (
+              <Empty title="No completed backups yet" />
+            )
           ) : page.loading && !page.data ? (
             <div className="flex items-center gap-2 py-6 text-sm text-ink-muted">
               <Spinner /> Reading the backup...

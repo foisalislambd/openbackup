@@ -99,7 +99,9 @@ func (a *App) pollStatus(ctx context.Context) {
 			if err := a.agent.Reload(); err != nil {
 				a.log.Debug("reload configuration", "error", err)
 			}
-			overview := a.agent.Overview(ctx)
+			pollCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			overview := a.agent.Overview(pollCtx)
+			cancel()
 
 			a.mu.Lock()
 			a.overview = overview
@@ -192,6 +194,13 @@ func (a *App) Connect(req control.ConnectRequest) (*control.ConnectResult, error
 	if err := installService(); err != nil {
 		a.log.Warn("install background service", "error", err)
 	}
+	// Refresh the cached overview so Done → Status() does not replay a stale
+	// disconnected snapshot. Do not emit a status event yet: that would unmount
+	// the recovery-code screen before the user can copy the code.
+	overview := a.agent.Overview(ctx)
+	a.mu.Lock()
+	a.overview = overview
+	a.mu.Unlock()
 	return result, nil
 }
 

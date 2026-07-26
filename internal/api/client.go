@@ -132,14 +132,20 @@ func (c *Client) SetToken(token string) { c.token = token }
 func (c *Client) BaseURL() string { return c.baseURL.String() }
 
 // do performs a request with retries. body must be nil or a byte slice so it
-// can be replayed on retry.
+// can be replayed on retry. Non-idempotent methods (POST that create resources)
+// are not retried on network/5xx errors — a lost response after the server
+// committed would duplicate snapshots or burn a join code.
 func (c *Client) do(ctx context.Context, method, path string, body []byte, headers map[string]string) (*http.Response, error) {
 	backoff := c.Backoff
 	if backoff <= 0 {
 		backoff = time.Second
 	}
+	maxAttempts := c.MaxRetries
+	if !idempotentMethod(method) {
+		maxAttempts = 0
+	}
 	var lastErr error
-	for attempt := 0; attempt <= c.MaxRetries; attempt++ {
+	for attempt := 0; attempt <= maxAttempts; attempt++ {
 		if attempt > 0 {
 			delay := backoff
 			var apiErr *APIError
@@ -201,7 +207,16 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, heade
 		}
 		lastErr = apiErr
 	}
-	return nil, fmt.Errorf("api: %s %s failed after %d attempts: %w", method, path, c.MaxRetries+1, lastErr)
+	return nil, fmt.Errorf("api: %s %s failed after %d attempts: %w", method, path, maxAttempts+1, lastErr)
+}
+
+func idempotentMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPut, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
 }
 
 func parseError(resp *http.Response) *APIError {

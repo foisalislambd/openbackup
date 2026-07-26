@@ -22,6 +22,9 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
 export default function App() {
   const { status, error, refresh } = useStatus()
   const [tab, setTab] = useState<Tab>('home')
+  // Stay on onboarding after Connect until Done, so a status poll cannot hide
+  // the recovery code before the user copies it.
+  const [holdOnboarding, setHoldOnboarding] = useState(false)
 
   // Nothing can be shown until the agent's state is known: guessing would mean
   // telling the user their data is safe before checking.
@@ -47,8 +50,16 @@ export default function App() {
 
   // A device that is not connected has exactly one thing to do, so it gets the
   // whole window rather than a disabled version of the normal interface.
-  if (!status.connected) {
-    return <Onboarding onConnected={refresh} />
+  if (!status.connected || holdOnboarding) {
+    return (
+      <Onboarding
+        onConnectSuccess={() => setHoldOnboarding(true)}
+        onConnected={() => {
+          setHoldOnboarding(false)
+          refresh()
+        }}
+      />
+    )
   }
 
   return (

@@ -8,7 +8,13 @@ import { Button, Field, Input, Notice, Toggle } from '../components/ui'
 /** Onboarding is the only screen a new user sees, so it asks for the least
  *  possible: where the server is, and the code from it. Folders are detected
  *  automatically and can be changed afterwards. */
-export function Onboarding({ onConnected }: { onConnected: () => void }) {
+export function Onboarding({
+  onConnected,
+  onConnectSuccess,
+}: {
+  onConnected: () => void
+  onConnectSuccess?: () => void
+}) {
   const [server, setServer] = useState('')
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
@@ -31,6 +37,7 @@ export function Onboarding({ onConnected }: { onConnected: () => void }) {
         encrypt: encrypt || joining,
         recovery_code: joining ? recoveryCode : '',
       })
+      onConnectSuccess?.()
       setResult(connected)
     })
 

@@ -391,9 +391,12 @@ func (a *Agent) Disconnect(ctx context.Context) error {
 	if !a.cfg.Enrolled() {
 		return ErrNotConnected
 	}
-	// Best-effort: stop in-flight work so the daemon does not keep using stale
-	// credentials after we wipe them.
-	_ = a.Pause(ctx, 24*time.Hour)
+	// Stop in-flight work. Use an indefinite pause (not a timed one): a timed
+	// pause lives only in the governor and would still block backups after a
+	// later reconnect. Clearing Paused in the wipe + Reload resumes the daemon.
+	if client, err := a.daemon(); err == nil {
+		_ = client.Pause(ctx, 0)
+	}
 
 	if err := a.cfg.Update(func(c *config.Config) error {
 		c.ServerURL = ""
@@ -401,6 +404,7 @@ func (a *Agent) Disconnect(ctx context.Context) error {
 		c.DeviceToken = ""
 		c.DeviceName = ""
 		c.Encryption = config.Encryption{}
+		c.Paused = false
 		return nil
 	}); err != nil {
 		return err
@@ -571,13 +575,17 @@ func (a *Agent) BackupNow(ctx context.Context) error {
 	return client.BackupNow(ctx)
 }
 
-// Pause stops backups, for a period or until resumed. The choice is written to
-// the configuration as well as sent to the daemon, so it survives a restart.
+// Pause stops backups, for a period or until resumed. An indefinite pause is
+// written to the configuration so it survives a restart. A timed pause only
+// lives in the running daemon — without one it cannot be honoured.
 func (a *Agent) Pause(ctx context.Context, d time.Duration) error {
-	if client, err := a.daemon(); err == nil {
+	client, err := a.daemon()
+	if err == nil {
 		if err := client.Pause(ctx, d); err != nil {
 			return err
 		}
+	} else if d > 0 {
+		return fmt.Errorf("cannot pause for %s: the OpenBackup agent is not running", d)
 	}
 	// An indefinite pause is a lasting decision; a timed one is not, and writing
 	// it down would leave the agent paused after a reboot.

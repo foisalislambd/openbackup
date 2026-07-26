@@ -42,6 +42,14 @@ export function Folders({ status }: { status: Overview }) {
           </div>
         )}
 
+        {folders.error && (
+          <div className="mb-4">
+            <Notice tone="bad" title="Could not load folders">
+              {folders.error}
+            </Notice>
+          </div>
+        )}
+
         {folders.loading && !folders.data ? (
           <div className="flex items-center gap-2 py-6 text-sm text-ink-muted">
             <Spinner /> Loading folders...
