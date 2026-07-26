@@ -65,7 +65,7 @@ type Config struct {
 // Default returns the built-in configuration.
 func Default() Config {
 	return Config{
-		Addr:          ":8080",
+		Addr:          ":18200",
 		DataDir:       "./data",
 		SessionTTL:    30 * 24 * time.Hour,
 		JoinTokenTTL:  24 * time.Hour,

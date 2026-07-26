@@ -231,7 +231,7 @@ Configuration is environment variables, all optional:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `OPENBACKUP_ADDR` | `:8080` | Listen address |
+| `OPENBACKUP_ADDR` | `:18200` | Listen address |
 | `OPENBACKUP_DATA_DIR` | `./data` | Database and blobs |
 | `OPENBACKUP_PUBLIC_URL` | — | External URL; enables Secure cookies when https |
 | `OPENBACKUP_ADMIN_EMAIL` / `_PASSWORD` | — | Create the first account on an empty database |

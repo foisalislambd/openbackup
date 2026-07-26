@@ -228,20 +228,20 @@ jobs:
       # An image that starts but does not serve is not a passing build.
       - name: Smoke test the image
         run: |
-          docker run -d --name ob -p 8080:8080 \
+          docker run -d --name ob -p 18200:18200 \
             -e OPENBACKUP_ADMIN_EMAIL=ci@example.com \
             -e OPENBACKUP_ADMIN_PASSWORD=a-long-enough-password \
             openbackup/server:ci
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/api/v1/health >/dev/null; then break; fi
+            if curl -fsS http://127.0.0.1:18200/api/v1/health >/dev/null; then break; fi
             echo "waiting for server ($i)..."
             docker logs ob 2>&1 | tail -20 || true
             sleep 1
           done
-          curl -fsS http://127.0.0.1:8080/api/v1/health
+          curl -fsS http://127.0.0.1:18200/api/v1/health
           # The dashboard must be embedded in the published image.
-          curl -fsS http://127.0.0.1:8080/ | grep -q OpenBackup
+          curl -fsS http://127.0.0.1:18200/ | grep -q OpenBackup
           # And the one-command agent install must be served.
-          curl -fsS http://127.0.0.1:8080/install.sh | head -1 | grep -q '#!/bin/sh'
+          curl -fsS http://127.0.0.1:18200/install.sh | head -1 | grep -q '#!/bin/sh'
           docker logs ob
           docker rm -f ob

@@ -151,4 +151,4 @@ if ($Test) {
 
 Step "Done"
 Write-Host "Start the server with:  .\bin\openbackup-server.exe"
-Write-Host "Then open:              http://localhost:8080"
+Write-Host "Then open:              http://localhost:18200"

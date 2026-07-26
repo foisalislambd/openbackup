@@ -43,7 +43,7 @@ Three terminals, and a configuration that cannot disturb a real backup.
 
 ```bash
 OPENBACKUP_DATA_DIR=/tmp/ob/data \
-OPENBACKUP_ADDR=127.0.0.1:8080 \
+OPENBACKUP_ADDR=127.0.0.1:18200 \
 go run ./cmd/openbackup-server
 ```
 
@@ -62,7 +62,7 @@ export OPENBACKUP_STATE_DIR=/tmp/ob/state
 
 mkdir -p /tmp/ob/home/Documents && echo hello > /tmp/ob/home/Documents/a.txt
 
-go run ./cmd/openbackup connect --server http://127.0.0.1:8080 --code CODE --name "Dev box"
+go run ./cmd/openbackup connect --server http://127.0.0.1:18200 --code CODE --name "Dev box"
 go run ./cmd/openbackup folders add /tmp/ob/home
 go run ./cmd/openbackup backup
 go run ./cmd/openbackup run          # the daemon, in the foreground

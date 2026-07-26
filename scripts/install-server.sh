@@ -10,10 +10,13 @@
 #
 # Optional environment variables (all have working defaults):
 #   OPENBACKUP_PUBLIC_URL   https://backup.example.com  (set this for real use)
-#   OPENBACKUP_PORT         8080
+#   OPENBACKUP_PORT         18200
 #   OPENBACKUP_ADMIN_EMAIL  admin@localhost
 #   OPENBACKUP_IMAGE        foisalislambd/openbackup:latest
 #   OPENBACKUP_DIR          /opt/openbackup
+#
+# Default port is 18200 (not 8080) so it is less likely to clash with other
+# apps on a typical VPS. Override with OPENBACKUP_PORT if needed.
 #
 set -eu
 
@@ -21,7 +24,7 @@ DIR="${OPENBACKUP_DIR:-/opt/openbackup}"
 IMAGE="${OPENBACKUP_IMAGE:-foisalislambd/openbackup:latest}"
 REPO="${OPENBACKUP_REPO:-https://github.com/foisalislambd/openbackup.git}"
 REF="${OPENBACKUP_REF:-main}"
-PORT="${OPENBACKUP_PORT:-8080}"
+PORT="${OPENBACKUP_PORT:-18200}"
 PUBLIC_URL="${OPENBACKUP_PUBLIC_URL:-}"
 ADMIN_EMAIL="${OPENBACKUP_ADMIN_EMAIL:-}"
 
@@ -253,7 +256,7 @@ services:
     container_name: openbackup
     restart: unless-stopped
     ports:
-      - '${PORT}:8080'
+      - '${PORT}:18200'
     volumes:
       - openbackup-data:/data
     env_file:
@@ -277,7 +280,7 @@ services:
     container_name: openbackup
     restart: unless-stopped
     ports:
-      - '${PORT}:8080'
+      - '${PORT}:18200'
     volumes:
       - openbackup-data:/data
     env_file:

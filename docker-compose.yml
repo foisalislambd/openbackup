@@ -21,10 +21,11 @@ services:
     restart: unless-stopped
 
     ports:
+      # 18200 is OpenBackup's default (avoids clashing with apps on 8080).
       # Bind to localhost when a reverse proxy on the same host will front it, so
-      # the server is never briefly exposed without TLS. Use "8080:8080" if you
+      # the server is never briefly exposed without TLS. Use "18200:18200" if you
       # are proxying from another machine.
-      - '127.0.0.1:8080:8080'
+      - '127.0.0.1:18200:18200'
 
     volumes:
       # Everything that matters lives here: the SQLite database and every stored

@@ -13,7 +13,7 @@ nobody needs.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `OPENBACKUP_ADDR` | `:8080` | Listen address |
+| `OPENBACKUP_ADDR` | `:18200` | Listen address |
 | `OPENBACKUP_DATA_DIR` | `./data` | Holds `openbackup.db` and `blobs/` |
 | `OPENBACKUP_PUBLIC_URL` | — | The externally reachable base URL. Used in enrolment instructions, and an `https://` value turns on `Secure` session cookies |
 | `OPENBACKUP_TRUST_PROXY` | `false` | Honour `X-Forwarded-For`. Required behind a proxy, dangerous when directly exposed |

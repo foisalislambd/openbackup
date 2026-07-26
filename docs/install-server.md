@@ -28,10 +28,14 @@ Settings it accepts, all optional:
 ```bash
 OPENBACKUP_PUBLIC_URL=https://backup.example.com \
 OPENBACKUP_ADMIN_EMAIL=you@example.com \
-OPENBACKUP_PORT=8080 \
+OPENBACKUP_PORT=18200 \
 OPENBACKUP_DIR=/opt/openbackup \
 sh install-server.sh
 ```
+
+The default listen port is **18200**, chosen so it is less likely to collide with
+other services already using `8080` on a VPS. Set `OPENBACKUP_PORT` to something
+else if you prefer.
 
 Re-running it upgrades in place: the Compose file is rewritten, `.env` (which
 holds your password) is left alone.
@@ -49,7 +53,7 @@ services:
     restart: unless-stopped
     ports:
       # localhost only, because a reverse proxy on this host will front it
-      - '127.0.0.1:8080:8080'
+      - '127.0.0.1:18200:18200'
     volumes:
       - openbackup-data:/data
     environment:
@@ -86,7 +90,7 @@ TLS, and the easiest way is Caddy, which gets certificates by itself:
 
 ```
 backup.example.com {
-	reverse_proxy 127.0.0.1:8080
+	reverse_proxy 127.0.0.1:18200
 }
 ```
 
@@ -103,7 +107,7 @@ chunk (16 MiB by default):
 
 ```nginx
 location / {
-	proxy_pass http://127.0.0.1:8080;
+	proxy_pass http://127.0.0.1:18200;
 	proxy_set_header Host $host;
 	proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 	proxy_set_header X-Forwarded-Proto $scheme;

@@ -132,7 +132,7 @@ desktop-check:
 
 .PHONY: dev
 dev:
-	@echo "server on :8080, dashboard on :3000 (proxying /api to the server)"
+	@echo "server on :18200, dashboard on :3000 (proxying /api to the server)"
 	@( go run ./cmd/openbackup-server & cd web && npm run dev; kill %1 )
 
 .PHONY: run-server

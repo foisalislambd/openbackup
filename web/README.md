@@ -22,10 +22,10 @@ server is the state.
 The dashboard needs the API, so run both:
 
 ```bash
-# terminal 1 — the API on :8080
+# terminal 1 — the API on :18200
 go run ./cmd/openbackup-server
 
-# terminal 2 — the dashboard on :3000, proxying /api to :8080
+# terminal 2 — the dashboard on :3000, proxying /api to :18200
 cd web && npm install && npm run dev
 ```
 

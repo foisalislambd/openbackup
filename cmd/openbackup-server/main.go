@@ -74,7 +74,7 @@ Usage:
   openbackup-server version            Print the build version
 
 Configuration comes from the environment; every value has a working default:
-  OPENBACKUP_ADDR              listen address              (default :8080)
+  OPENBACKUP_ADDR              listen address              (default :18200)
   OPENBACKUP_DATA_DIR          data directory              (default ./data)
   OPENBACKUP_PUBLIC_URL        externally reachable URL
   OPENBACKUP_ADMIN_EMAIL       bootstrap the first account
@@ -259,7 +259,7 @@ func runHealth(args []string) error {
 	if url == "" {
 		addr := os.Getenv("OPENBACKUP_ADDR")
 		if addr == "" {
-			addr = ":8080"
+			addr = ":18200"
 		}
 		if strings.HasPrefix(addr, ":") {
 			addr = "127.0.0.1" + addr
@@ -359,7 +359,7 @@ Run this on the device you want to back up:
 
 // localURL turns a listen address into an address a device can dial.
 //
-// The listen address may be ":8080", "0.0.0.0:8080" or "127.0.0.1:18099", and
+// The listen address may be ":18200", "0.0.0.0:18200" or "127.0.0.1:18099", and
 // only the last is a usable host. Printing a URL that cannot be dialled is worse
 // than printing none, because the first thing a new user does is copy it.
 func localURL(addr string) string {

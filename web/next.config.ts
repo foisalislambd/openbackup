@@ -31,7 +31,7 @@ const nextConfig: NextConfig = {
   ...(isDev
     ? {
         async rewrites() {
-          const server = process.env.OPENBACKUP_DEV_SERVER ?? 'http://localhost:8080'
+          const server = process.env.OPENBACKUP_DEV_SERVER ?? 'http://localhost:18200'
           return [{ source: '/api/:path*', destination: `${server}/api/:path*` }]
         },
       }

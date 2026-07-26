@@ -56,10 +56,10 @@ COPY --from=build --chown=nonroot:nonroot /data/ /data/
 # directory (including ownership) into an empty volume.
 VOLUME /data
 ENV OPENBACKUP_DATA_DIR=/data \
-	OPENBACKUP_ADDR=:8080 \
+	OPENBACKUP_ADDR=:18200 \
 	OPENBACKUP_LOG_JSON=true
 
-EXPOSE 8080
+EXPOSE 18200
 USER nonroot:nonroot
 
 # The server's own check subcommand verifies the database and blob store, which
