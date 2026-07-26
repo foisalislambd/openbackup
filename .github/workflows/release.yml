@@ -143,6 +143,13 @@ jobs:
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
 
+      # windows-latest does not ship makensis; Wails -nsis needs it on PATH.
+      - name: Install NSIS
+        run: |
+          choco install nsis -y --no-progress
+          echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "C:\Program Files\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
       - name: Build desktop + NSIS installer
         working-directory: desktop
         shell: bash
@@ -150,28 +157,25 @@ jobs:
           VERSION: ${{ needs.version.outputs.tag }}
         run: |
           set -eu
+          command -v makensis
           LDFLAGS="-s -w -X github.com/foisalislambd/openbackup/internal/version.Version=${VERSION} -X github.com/foisalislambd/openbackup/internal/version.Commit=${GITHUB_SHA::7} -X github.com/foisalislambd/openbackup/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          wails build -trimpath -ldflags "$LDFLAGS"
+          # One -nsis build produces both the app and the installer.
           wails build -nsis -trimpath -ldflags "$LDFLAGS"
           mkdir -p dist
-          # Portable app
-          if [ -f build/bin/openbackup-desktop.exe ]; then
-            cp build/bin/openbackup-desktop.exe dist/openbackup-desktop-windows-amd64.exe
-          fi
-          # NSIS installer (Wails names vary slightly by version)
-          installer=$(ls build/bin/*installer*.exe build/bin/*setup*.exe 2>/dev/null | head -n1 || true)
-          if [ -n "$installer" ]; then
-            cp "$installer" dist/openbackup-desktop-windows-amd64-setup.exe
-          else
-            # Fall back: ship whatever extra exe Wails produced besides the app.
+          cp build/bin/openbackup-desktop.exe dist/openbackup-desktop-windows-amd64.exe
+          ls -la build/bin
+          installer=$(ls build/bin/*installer*.exe build/bin/*-setup.exe build/bin/*Setup*.exe 2>/dev/null | head -n1 || true)
+          if [ -z "$installer" ]; then
             for f in build/bin/*.exe; do
               base=$(basename "$f")
               case "$base" in
                 openbackup-desktop.exe) ;;
-                *) cp "$f" "dist/openbackup-desktop-windows-amd64-setup.exe"; break ;;
+                *) installer=$f; break ;;
               esac
             done
           fi
+          test -n "$installer"
+          cp "$installer" dist/openbackup-desktop-windows-amd64-setup.exe
           ls -la dist
           test -f dist/openbackup-desktop-windows-amd64.exe
           test -f dist/openbackup-desktop-windows-amd64-setup.exe
