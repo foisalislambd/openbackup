@@ -15,9 +15,9 @@ import (
 // assets under assets/.
 func export() fstest.MapFS {
 	return fstest.MapFS{
-		"index.html":              {Data: []byte("<title>OpenBackup</title><div id=root>")},
-		"assets/index-abc123.js":  {Data: []byte("console.log(1)")},
-		"favicon.svg":             {Data: []byte("<svg></svg>")},
+		"index.html":             {Data: []byte("<title>OpenBackup</title><div id=root>")},
+		"assets/index-abc123.js": {Data: []byte("console.log(1)")},
+		"favicon.svg":            {Data: []byte("<svg></svg>")},
 	}
 }
 
