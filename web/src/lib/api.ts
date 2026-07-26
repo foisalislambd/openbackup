@@ -20,6 +20,9 @@ export type Device = {
   queued_files?: number
   queued_bytes?: number
   last_error?: string
+  current_path?: string
+  files_done?: number
+  files_total?: number
   snapshot_count?: number
   logical_bytes?: number
   last_backup_at?: string | null

@@ -360,6 +360,20 @@ func (a *App) Resume() error {
 	return a.agent.Resume(a.context())
 }
 
+// Activity returns recent backup activity lines for the Logs screen.
+func (a *App) Activity() ([]api.Event, error) {
+	if a.agent == nil {
+		return nil, a.configError()
+	}
+	ctx, cancel := context.WithTimeout(a.context(), 5*time.Second)
+	defer cancel()
+	events, err := a.agent.Activity(ctx, 150)
+	if err != nil {
+		return []api.Event{}, nil // agent stopped — empty feed, not an error page
+	}
+	return events, nil
+}
+
 // StartService ensures the in-process agent is running and login autostart is on.
 func (a *App) StartService() error {
 	if err := a.ensureBackingUp(); err != nil {

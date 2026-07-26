@@ -477,12 +477,12 @@ func (e *Engine) Control() ipc.Handler { return controlAdapter{e} }
 
 type controlAdapter struct{ e *Engine }
 
-func (c controlAdapter) Status() any             { return c.e.Status() }
-func (c controlAdapter) BackupNow(reason string) { c.e.BackupNow(reason) }
-func (c controlAdapter) Pause(d time.Duration)   { c.e.Pause(d) }
-func (c controlAdapter) Resume()                 { c.e.Resume() }
-
-func (c controlAdapter) Reload(ctx context.Context) error { return c.e.Reload(ctx) }
+func (c controlAdapter) Status() any                          { return c.e.Status() }
+func (c controlAdapter) BackupNow(reason string)              { c.e.BackupNow(reason) }
+func (c controlAdapter) Pause(d time.Duration)                { c.e.Pause(d) }
+func (c controlAdapter) Resume()                              { c.e.Resume() }
+func (c controlAdapter) Reload(ctx context.Context) error     { return c.e.Reload(ctx) }
+func (c controlAdapter) RecentEvents(limit int) []api.Event   { return c.e.RecentEvents(limit) }
 
 // runBackup performs one backup pass with all the guards around it.
 func (e *Engine) runBackup(ctx context.Context, t trigger) {
@@ -511,6 +511,7 @@ func (e *Engine) runBackup(ctx context.Context, t trigger) {
 	switch {
 	case err == nil:
 		e.setState(api.StateIdle, "")
+		e.setCurrentPath("")
 		e.mu.Lock()
 		e.progress.LastBackupAt = time.Now()
 		e.progress.LastError = ""
@@ -519,6 +520,7 @@ func (e *Engine) runBackup(ctx context.Context, t trigger) {
 
 	case errors.Is(err, context.Canceled):
 		e.setState(api.StateIdle, "stopped")
+		e.setCurrentPath("")
 
 	case api.IsAuthError(err):
 		e.setState(api.StateError, "this device is no longer authorised")
@@ -888,7 +890,14 @@ func (e *Engine) processItem(ctx context.Context, item scanner.Item, kind api.Sn
 	stats.bytes += result.Size
 	e.mu.Lock()
 	e.progress.FilesDone++
+	done := e.progress.FilesDone
 	e.mu.Unlock()
+
+	// Sample file activity for the Logs pages — every file would flood the feed.
+	if done == 1 || done%15 == 0 {
+		e.event("info", "Backing up "+item.SnapPath, item.SnapPath, "")
+		e.flushEvents(ctx)
+	}
 
 	if err := e.idx.Put(ctx, index.FileState{
 		Path: item.AbsPath, Size: result.Size, ModTime: item.ModTime,
@@ -969,14 +978,26 @@ func (s *entrySender) flush(ctx context.Context) error {
 }
 
 // heartbeatLoop reports status and collects commands.
+// While uploading/scanning it reports more often so the dashboard Logs page
+// can show the current file without waiting a full minute.
 func (e *Engine) heartbeatLoop(ctx context.Context) {
-	ticker := time.NewTicker(e.settings().Schedule.HeartbeatInterval)
-	defer ticker.Stop()
 	for {
+		interval := e.settings().Schedule.HeartbeatInterval
+		if interval <= 0 {
+			interval = time.Minute
+		}
+		st := e.Status()
+		if st.State == api.StateUploading || st.State == api.StateScanning {
+			if interval > 15*time.Second {
+				interval = 15 * time.Second
+			}
+		}
+		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			if err := e.heartbeat(ctx); err != nil && ctx.Err() == nil {
 				e.log.Debug("heartbeat failed", "error", err)
 			}
@@ -1010,6 +1031,9 @@ func (e *Engine) heartbeat(ctx context.Context) error {
 		BatteryPct:    machine.Battery.Percent,
 		OnMetered:     machine.Metered,
 		LastError:     status.LastError,
+		CurrentPath:   status.CurrentPath,
+		FilesDone:     status.FilesDone,
+		FilesTotal:    status.FilesTotal,
 	})
 	if err != nil {
 		return err
@@ -1132,6 +1156,11 @@ func (e *Engine) event(level, message, path, reason string) {
 	})
 }
 
+// RecentEvents returns the newest local activity lines (for the desktop Logs page).
+func (e *Engine) RecentEvents(limit int) []api.Event {
+	return e.events.recent(limit)
+}
+
 // flushEvents sends buffered events. Failures are tolerated: the activity log is
 // useful, but losing a line of it must never fail a backup.
 func (e *Engine) flushEvents(ctx context.Context) {
@@ -1144,10 +1173,11 @@ func (e *Engine) flushEvents(ctx context.Context) {
 	}
 }
 
-// eventBuffer collects events between heartbeats.
+// eventBuffer collects events between heartbeats and keeps a recent ring for the UI.
 type eventBuffer struct {
 	mu     sync.Mutex
 	events []api.Event
+	ring   []api.Event
 }
 
 func newEventBuffer() *eventBuffer { return &eventBuffer{} }
@@ -1161,6 +1191,10 @@ func (b *eventBuffer) add(event api.Event) {
 		b.events = b.events[1:]
 	}
 	b.events = append(b.events, event)
+	b.ring = append(b.ring, event)
+	if len(b.ring) > 200 {
+		b.ring = b.ring[len(b.ring)-200:]
+	}
 }
 
 func (b *eventBuffer) take() []api.Event {
@@ -1171,6 +1205,24 @@ func (b *eventBuffer) take() []api.Event {
 	}
 	out := b.events
 	b.events = nil
+	return out
+}
+
+func (b *eventBuffer) recent(limit int) []api.Event {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if limit <= 0 || limit > len(b.ring) {
+		limit = len(b.ring)
+	}
+	if limit == 0 {
+		return nil
+	}
+	// Newest first for the Logs UI.
+	src := b.ring[len(b.ring)-limit:]
+	out := make([]api.Event, len(src))
+	for i := range src {
+		out[i] = src[len(src)-1-i]
+	}
 	return out
 }
 

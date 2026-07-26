@@ -30,6 +30,9 @@ type Device struct {
 	BatteryPct   int
 	OnMetered    bool
 	Revoked      bool
+	CurrentPath  string
+	FilesDone    int64
+	FilesTotal   int64
 }
 
 // CreateDevice registers an agent and returns the stored record. tokenHash must
@@ -53,7 +56,7 @@ func (db *DB) CreateDevice(ctx context.Context, d Device, tokenHash string) (*De
 
 const deviceColumns = `id, user_id, name, hostname, platform, os_version, agent_version, key_id,
 	created_at, last_seen, state, state_reason, queued_files, queued_bytes, last_error,
-	battery_pct, on_metered, revoked`
+	battery_pct, on_metered, revoked, current_path, files_done, files_total`
 
 // DeviceByTokenHash authenticates an agent request.
 func (db *DB) DeviceByTokenHash(ctx context.Context, tokenHash string) (*Device, error) {
@@ -77,7 +80,7 @@ func scanDevice(row *sql.Row) (*Device, error) {
 	)
 	err := row.Scan(&d.ID, &d.UserID, &d.Name, &d.Hostname, &platform, &d.OSVersion, &d.AgentVersion,
 		&d.KeyID, &created, &lastSeen, &d.State, &d.StateReason, &d.QueuedFiles, &d.QueuedBytes,
-		&d.LastError, &d.BatteryPct, &metered, &revoked)
+		&d.LastError, &d.BatteryPct, &metered, &revoked, &d.CurrentPath, &d.FilesDone, &d.FilesTotal)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -98,6 +101,7 @@ func (db *DB) ListDevices(ctx context.Context, userID string) ([]api.Device, err
 	rows, err := db.sql.QueryContext(ctx, `
 		SELECT d.id, d.name, d.hostname, d.platform, d.os_version, d.agent_version, d.key_id,
 		       d.created_at, d.last_seen, d.state, d.state_reason, d.queued_files, d.queued_bytes, d.last_error,
+		       d.current_path, d.files_done, d.files_total,
 		       (SELECT COUNT(*) FROM snapshots s WHERE s.device_id = d.id AND s.status = ?) AS snapshot_count,
 		       COALESCE((SELECT s.total_bytes FROM snapshots s
 		                 WHERE s.device_id = d.id AND s.status = ?
@@ -124,6 +128,7 @@ func (db *DB) ListDevices(ctx context.Context, userID string) ([]api.Device, err
 		)
 		if err := rows.Scan(&d.ID, &d.Name, &d.Hostname, &platform, &d.OSVersion, &d.AgentVersion, &d.KeyID,
 			&created, &lastSeen, &d.State, &d.StateReason, &d.QueuedFiles, &d.QueuedBytes, &d.LastError,
+			&d.CurrentPath, &d.FilesDone, &d.FilesTotal,
 			&d.SnapshotCount, &d.LogicalBytes, &lastComplete); err != nil {
 			return nil, err
 		}
@@ -163,10 +168,12 @@ func (db *DB) TouchDevice(ctx context.Context, deviceID string, hb api.Heartbeat
 	res, err := db.sql.ExecContext(ctx,
 		`UPDATE devices SET last_seen = ?, state = ?, state_reason = ?, queued_files = ?, queued_bytes = ?,
 		 last_error = ?, agent_version = COALESCE(NULLIF(?, ''), agent_version),
-		 os_version = COALESCE(NULLIF(?, ''), os_version), battery_pct = ?, on_metered = ?
+		 os_version = COALESCE(NULLIF(?, ''), os_version), battery_pct = ?, on_metered = ?,
+		 current_path = ?, files_done = ?, files_total = ?
 		 WHERE id = ?`,
 		nowMillis(), hb.State, truncate(hb.StateReason, 256), hb.QueuedFiles, hb.QueuedBytes,
 		truncate(hb.LastError, 512), hb.AgentVersion, hb.OSVersion, hb.BatteryPct, boolToInt(hb.OnMetered),
+		truncate(hb.CurrentPath, 1024), hb.FilesDone, hb.FilesTotal,
 		deviceID)
 	return affected(res, err)
 }

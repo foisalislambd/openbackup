@@ -575,6 +575,15 @@ func (a *Agent) BackupNow(ctx context.Context) error {
 	return client.BackupNow(ctx)
 }
 
+// Activity returns recent local backup activity for the Logs screen.
+func (a *Agent) Activity(ctx context.Context, limit int) ([]api.Event, error) {
+	client, err := a.daemon()
+	if err != nil {
+		return nil, err
+	}
+	return client.RecentEvents(ctx, limit)
+}
+
 // Pause stops backups, for a period or until resumed. An indefinite pause is
 // written to the configuration so it survives a restart. A timed pause only
 // lives in the running daemon — without one it cannot be honoured.

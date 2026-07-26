@@ -5,16 +5,18 @@ import { useStatus } from './lib/use-status'
 import { Folders } from './screens/Folders'
 import { Health } from './screens/Health'
 import { Home } from './screens/Home'
+import { Logs } from './screens/Logs'
 import { Onboarding } from './screens/Onboarding'
 import { Restore } from './screens/Restore'
 import { Settings } from './screens/Settings'
 
-type Tab = 'home' | 'folders' | 'restore' | 'settings' | 'health'
+type Tab = 'home' | 'folders' | 'restore' | 'logs' | 'settings' | 'health'
 
 const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'home', label: 'Overview', icon: 'M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H4a1 1 0 0 1-1-1z' },
   { id: 'folders', label: 'Folders', icon: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' },
   { id: 'restore', label: 'Restore', icon: 'M12 5v8m0 0 3.5-3.5M12 13 8.5 9.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3' },
+  { id: 'logs', label: 'Logs', icon: 'M4 6h16M4 12h16M4 18h10' },
   { id: 'settings', label: 'Settings', icon: 'M10.3 3h3.4l.5 2.3 2 1.2 2.2-.8 1.7 2.9-1.7 1.6v2.3l1.7 1.6-1.7 2.9-2.2-.8-2 1.2-.5 2.3h-3.4l-.5-2.3-2-1.2-2.2.8-1.7-2.9 1.7-1.6v-2.3L4.1 8.6l1.7-2.9 2.2.8 2-1.2z' },
   { id: 'health', label: 'Diagnostics', icon: 'M4 12h3l2-5 3 10 2.5-5H20' },
 ]
@@ -105,6 +107,7 @@ export default function App() {
         )}
         {tab === 'folders' && <Folders status={status} />}
         {tab === 'restore' && <Restore />}
+        {tab === 'logs' && <Logs status={status} />}
         {tab === 'settings' && <Settings status={status} onLoggedOut={refresh} />}
         {tab === 'health' && <Health status={status} />}
       </main>

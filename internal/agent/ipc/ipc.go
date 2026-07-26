@@ -19,9 +19,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/foisalislambd/openbackup/internal/api"
 	"github.com/foisalislambd/openbackup/internal/idgen"
 )
 
@@ -49,6 +51,8 @@ type Handler interface {
 	// desktop app and the command line make a settings change take effect on the
 	// running agent instead of at the next restart.
 	Reload(ctx context.Context) error
+	// RecentEvents returns recent activity lines for the Logs UI.
+	RecentEvents(limit int) []api.Event
 }
 
 // Server exposes a Handler on loopback.
@@ -98,6 +102,7 @@ func Listen(stateDir string, handler Handler) (*Server, error) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /status", s.auth(s.handleStatus))
+	mux.HandleFunc("GET /events", s.auth(s.handleEvents))
 	mux.HandleFunc("POST /backup", s.auth(s.handleBackup))
 	mux.HandleFunc("POST /pause", s.auth(s.handlePause))
 	mux.HandleFunc("POST /resume", s.auth(s.handleResume))
@@ -130,6 +135,16 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.handler.Status())
+}
+
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	writeJSON(w, s.handler.RecentEvents(limit))
 }
 
 func (s *Server) handleBackup(w http.ResponseWriter, _ *http.Request) {
@@ -204,6 +219,21 @@ func Dial(stateDir string) (*Client, error) {
 // Status fetches the agent's status into out.
 func (c *Client) Status(ctx context.Context, out any) error {
 	return c.call(ctx, http.MethodGet, "/status", out)
+}
+
+// RecentEvents fetches recent local activity lines.
+func (c *Client) RecentEvents(ctx context.Context, limit int) ([]api.Event, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var out []api.Event
+	if err := c.call(ctx, http.MethodGet, "/events?limit="+strconv.Itoa(limit), &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []api.Event{}
+	}
+	return out, nil
 }
 
 // BackupNow asks the agent to back up immediately.

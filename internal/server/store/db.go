@@ -226,6 +226,13 @@ CREATE TABLE settings (
 ALTER TABLE users ADD COLUMN max_upload_bytes_per_sec INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN require_encryption INTEGER NOT NULL DEFAULT 0;
 `},
+
+	// Live backup progress for the dashboard Logs page (which file is uploading).
+	{"0003_device_progress", `
+ALTER TABLE devices ADD COLUMN current_path TEXT NOT NULL DEFAULT '';
+ALTER TABLE devices ADD COLUMN files_done INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE devices ADD COLUMN files_total INTEGER NOT NULL DEFAULT 0;
+`},
 }
 
 func (db *DB) migrate(ctx context.Context) error {

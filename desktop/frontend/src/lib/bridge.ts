@@ -5,6 +5,7 @@
 // place where the frontend's idea of the agent meets the real one.
 
 import type {
+  ActivityEvent,
   AppInfo,
   Check,
   ConnectRequest,
@@ -86,6 +87,8 @@ export const api = {
   startRestore: (req: RestoreRequest) => call<void>('StartRestore', req),
   cancelRestore: () => call<void>('CancelRestore'),
   restoreProgress: () => call<RestoreProgress | null>('RestoreProgress'),
+
+  activity: () => call<ActivityEvent[]>('Activity'),
 
   settings: () => call<Settings>('Settings'),
   updateSettings: (s: Settings) => call<Settings>('UpdateSettings', s),

@@ -154,3 +154,11 @@ export interface AppInfo {
   config_path: string
   log_path: string
 }
+
+export interface ActivityEvent {
+  at: string
+  level: string
+  message: string
+  path?: string
+  reason?: string
+}

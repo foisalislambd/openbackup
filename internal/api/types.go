@@ -154,6 +154,10 @@ type HeartbeatRequest struct {
 	BatteryPct    int     `json:"battery_pct,omitempty"`
 	OnMetered     bool    `json:"on_metered,omitempty"`
 	LastError     string  `json:"last_error,omitempty"`
+	// CurrentPath is the file/folder the agent is working on right now.
+	CurrentPath string `json:"current_path,omitempty"`
+	FilesDone   int64  `json:"files_done,omitempty"`
+	FilesTotal  int64  `json:"files_total,omitempty"`
 }
 
 // HeartbeatResponse lets the server steer the agent without a push channel.
@@ -347,6 +351,10 @@ type Device struct {
 	QueuedFiles  int64      `json:"queued_files"`
 	QueuedBytes  int64      `json:"queued_bytes"`
 	LastError    string     `json:"last_error,omitempty"`
+	// CurrentPath is set while the device is actively backing up.
+	CurrentPath string `json:"current_path,omitempty"`
+	FilesDone   int64  `json:"files_done,omitempty"`
+	FilesTotal  int64  `json:"files_total,omitempty"`
 	// LogicalBytes is the size of the newest snapshot's contents.
 	LogicalBytes  int64      `json:"logical_bytes"`
 	SnapshotCount int64      `json:"snapshot_count"`

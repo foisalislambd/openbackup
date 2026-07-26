@@ -13,7 +13,7 @@ const navigation = [
   { href: '/', label: 'Home', icon: HomeIcon },
   { href: '/backups', label: 'My files', icon: FilesIcon },
   { href: '/devices', label: 'Devices', icon: DevicesIcon },
-  { href: '/activity', label: 'Activity', icon: ActivityIcon },
+  { href: '/activity', label: 'Logs', icon: ActivityIcon },
   { href: '/settings', label: 'Settings', icon: SettingsIcon },
 ]
 
@@ -21,7 +21,7 @@ const titles: Record<string, { title: string; subtitle: string }> = {
   '/': { title: 'Home', subtitle: 'Backup health and recent files' },
   '/backups': { title: 'My files', subtitle: 'Browse current files — click a file for older versions' },
   '/devices': { title: 'Devices', subtitle: 'Computers connected to this server' },
-  '/activity': { title: 'Activity', subtitle: 'What happened during backups' },
+  '/activity': { title: 'Logs', subtitle: 'Which files are backing up, skips, and errors' },
   '/settings': { title: 'Settings', subtitle: 'Account, retention, and exclusions' },
 }
 
