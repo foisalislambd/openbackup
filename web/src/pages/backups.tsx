@@ -1,6 +1,6 @@
 /**
- * My files: browse the latest backup like a drive. Click a file to see older
- * versions. Snapshot history is secondary, not the main list.
+ * My files: first level is each computer (device) as a folder, then that
+ * device's backup roots and files. Multiple devices stay easy to tell apart.
  */
 
 import { useState } from 'react'
@@ -76,16 +76,16 @@ export default function BackupsPage() {
     )
   }
 
-  const deviceIds = new Set(complete.map((s) => s.device_id))
-  const deviceOptions = data.devices.filter((d) => deviceIds.has(d.id))
-  const activeDevice = deviceId || deviceOptions[0]?.id || ''
-  const deviceSnaps = complete.filter((s) => !activeDevice || s.device_id === activeDevice)
+  const deviceOptions = devicesWithBackups(data.devices, complete)
+  const activeDevice = deviceOptions.find((d) => d.id === deviceId)
+  const deviceSnaps = complete.filter((s) => s.device_id === deviceId)
   const latest = snapshotOverride
-    ? deviceSnaps.find((s) => s.id === snapshotOverride) || complete.find((s) => s.id === snapshotOverride)
+    ? deviceSnaps.find((s) => s.id === snapshotOverride) ||
+      complete.find((s) => s.id === snapshotOverride)
     : deviceSnaps[0]
 
   const historySnaps = data.snapshots
-    .filter((s) => !activeDevice || s.device_id === activeDevice)
+    .filter((s) => !deviceId || s.device_id === deviceId)
     .filter((s) => s.status === 'complete' || s.status === 'failed' || s.status === 'running')
 
   return (
@@ -96,38 +96,41 @@ export default function BackupsPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant={view === 'files' ? 'primary' : 'ghost'}
-            onClick={() => setQuery({ view: undefined, id: undefined, file: undefined })}
+            onClick={() =>
+              setQuery({
+                view: undefined,
+                device: undefined,
+                path: undefined,
+                id: undefined,
+                file: undefined,
+              })
+            }
           >
             My files
           </Button>
           <Button
             variant={view === 'history' ? 'primary' : 'ghost'}
-            onClick={() => setQuery({ view: 'history', path: undefined, file: undefined, id: undefined })}
+            onClick={() =>
+              setQuery({
+                view: 'history',
+                path: undefined,
+                file: undefined,
+                id: undefined,
+              })
+            }
           >
             Backup history
           </Button>
         </div>
-        {(view === 'files' || view === 'history') && deviceOptions.length > 1 && (
-          <select
-            className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2 text-sm"
-            value={activeDevice}
-            onChange={(e) =>
-              setQuery({ device: e.target.value, path: undefined, file: undefined, id: undefined })
-            }
-          >
-            {deviceOptions.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-        )}
       </div>
 
       {view === 'history' ? (
         <HistoryList
           snapshots={historySnaps}
+          showDevice={!deviceId}
+          filterDevice={activeDevice}
           busy={busy}
+          onClearDevice={() => setQuery({ device: undefined })}
           onOpen={(snapshot) => {
             if (snapshot.status !== 'complete') return
             setQuery({
@@ -149,42 +152,158 @@ export default function BackupsPage() {
             void run(id, () => api.deleteSnapshot(id), reload)
           }}
         />
+      ) : !deviceId ? (
+        <DeviceFolders
+          devices={deviceOptions}
+          snapshots={complete}
+          onOpen={(id) =>
+            setQuery({ device: id, path: undefined, file: undefined, id: undefined })
+          }
+        />
       ) : !latest ? (
         <div className="panel">
-          <Empty title="No completed backup for this device" />
+          <Empty
+            title="No completed backup for this device"
+            hint="Pick another computer, or wait for the first backup to finish."
+          />
+          <div className="border-t border-[var(--color-border-subtle)] px-5 py-4">
+            <Button onClick={() => setQuery({ device: undefined, path: undefined, file: undefined })}>
+              All computers
+            </Button>
+          </div>
         </div>
       ) : (
         <FileBrowser
           snapshot={latest}
+          deviceName={activeDevice?.name || latest.device_name || 'This computer'}
           prefix={prefix}
           versionsPath={versionsPath}
           viewingOlder={Boolean(snapshotOverride && snapshotOverride !== deviceSnaps[0]?.id)}
+          onBackToDevices={() =>
+            setQuery({ device: undefined, path: undefined, file: undefined, id: undefined })
+          }
           onNavigate={(path) => setQuery({ path: path || undefined, file: undefined })}
           onOpenVersions={(path) => setQuery({ file: path })}
           onCloseVersions={() => setQuery({ file: undefined })}
           onUseLatest={() => setQuery({ id: undefined, file: undefined })}
-          deviceId={activeDevice}
+          deviceId={deviceId}
         />
       )}
     </div>
   )
 }
 
+/** Devices that have at least one completed backup, newest backup first. */
+function devicesWithBackups(devices: Device[], complete: Snapshot[]): Device[] {
+  const byId = new Map(devices.map((d) => [d.id, d]))
+  const order: string[] = []
+  const seen = new Set<string>()
+  for (const snap of complete) {
+    if (seen.has(snap.device_id)) continue
+    seen.add(snap.device_id)
+    order.push(snap.device_id)
+  }
+  return order.map((id) => {
+    const known = byId.get(id)
+    if (known) return known
+    const snap = complete.find((s) => s.device_id === id)
+    return {
+      id,
+      name: snap?.device_name || 'Removed device',
+      hostname: '',
+      platform: '',
+      created_at: '',
+      state: 'unknown',
+      health: 'unknown',
+    } satisfies Device
+  })
+}
+
+function DeviceFolders({
+  devices,
+  snapshots,
+  onOpen,
+}: {
+  devices: Device[]
+  snapshots: Snapshot[]
+  onOpen: (deviceId: string) => void
+}) {
+  if (devices.length === 0) {
+    return (
+      <div className="panel">
+        <Empty title="No computers with backups yet" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="panel overflow-hidden">
+      <div className="border-b border-[var(--color-border-subtle)] px-5 py-4">
+        <h2 className="text-sm font-semibold">Computers</h2>
+        <p className="mt-1 text-sm text-[var(--color-ink-muted)]">
+          Each folder is one device. Open it to browse that computer’s backed-up files.
+        </p>
+      </div>
+      <div className="file-row border-b border-[var(--color-border-subtle)] text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-[var(--color-ink-muted)]">
+        <span>Name</span>
+        <span className="file-row-meta">Last backup</span>
+        <span className="file-row-meta">Size</span>
+        <span className="text-right">Actions</span>
+      </div>
+      <ul>
+        {devices.map((device) => {
+          const snaps = snapshots.filter((s) => s.device_id === device.id)
+          const latest = snaps[0]
+          return (
+            <li key={device.id}>
+              <button type="button" className="file-row w-full text-left" onClick={() => onOpen(device.id)}>
+                <span className="flex min-w-0 items-center gap-3">
+                  <FolderGlyph />
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold">{device.name}</span>
+                    <span className="mt-0.5 block text-xs text-[var(--color-ink-muted)]">
+                      {count(snaps.length)} backup{snaps.length === 1 ? '' : 's'}
+                      {device.platform ? ` · ${device.platform}` : ''}
+                    </span>
+                  </span>
+                </span>
+                <span className="file-row-meta text-sm text-[var(--color-ink-muted)]">
+                  {latest ? absolute(latest.started_at) : '—'}
+                </span>
+                <span className="file-row-meta tabular text-sm text-[var(--color-ink-muted)]">
+                  {latest ? bytes(latest.total_bytes) : '—'}
+                </span>
+                <span className="text-right text-sm text-[var(--color-ink-muted)]">Open</span>
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
 function HistoryList({
   snapshots,
+  showDevice,
+  filterDevice,
   busy,
+  onClearDevice,
   onOpen,
   onDelete,
 }: {
   snapshots: Snapshot[]
+  showDevice: boolean
+  filterDevice?: Device
   busy?: string | null
+  onClearDevice: () => void
   onOpen: (snapshot: Snapshot) => void
   onDelete: (id: string) => void
 }) {
   if (snapshots.length === 0) {
     return (
       <div className="panel">
-        <Empty title="No backups for this device yet" />
+        <Empty title="No backups yet" />
       </div>
     )
   }
@@ -194,18 +313,30 @@ function HistoryList({
       <div className="border-b border-[var(--color-border-subtle)] px-5 py-4">
         <h2 className="text-sm font-semibold">Backup history</h2>
         <p className="mt-1 text-sm text-[var(--color-ink-muted)]">
-          Each row is a point in time for this computer — not a separate folder.
+          {filterDevice
+            ? `Points in time for ${filterDevice.name}.`
+            : 'Each row is a point in time — open one to browse that computer’s files.'}
         </p>
+        {filterDevice && (
+          <button
+            type="button"
+            className="mt-2 text-sm font-semibold text-[var(--color-brand)] hover:underline"
+            onClick={onClearDevice}
+          >
+            Show all computers
+          </button>
+        )}
       </div>
       <ul>
         {snapshots.map((snapshot, index) => {
           const complete = snapshot.status === 'complete'
+          const firstComplete = snapshots.findIndex((s) => s.status === 'complete')
           const title =
             snapshot.status === 'running'
               ? 'Backup in progress'
               : snapshot.status === 'failed'
                 ? 'Failed backup'
-                : index === 0 || snapshots.findIndex((s) => s.status === 'complete') === index
+                : index === firstComplete
                   ? 'Latest backup'
                   : 'Earlier backup'
 
@@ -222,7 +353,9 @@ function HistoryList({
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-semibold group-hover:text-[var(--color-brand)]">
                       {title}
-                      {snapshot.device_name ? ` · ${snapshot.device_name}` : ''}
+                      {(showDevice || filterDevice) && snapshot.device_name
+                        ? ` · ${snapshot.device_name}`
+                        : ''}
                     </span>
                     <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-[var(--color-ink-muted)]">
                       {absolute(snapshot.started_at)}
@@ -256,9 +389,11 @@ function HistoryList({
 
 function FileBrowser({
   snapshot,
+  deviceName,
   prefix,
   versionsPath,
   viewingOlder,
+  onBackToDevices,
   onNavigate,
   onOpenVersions,
   onCloseVersions,
@@ -266,9 +401,11 @@ function FileBrowser({
   deviceId,
 }: {
   snapshot: Snapshot
+  deviceName: string
   prefix: string
   versionsPath: string
   viewingOlder: boolean
+  onBackToDevices: () => void
   onNavigate: (path: string) => void
   onOpenVersions: (path: string) => void
   onCloseVersions: () => void
@@ -293,7 +430,6 @@ function FileBrowser({
   const key = `${snapshotId}:${prefix}`
   const appended = extra?.key === key ? extra.entries : []
   const cursor = extra?.key === key ? extra.cursor : data.cursor
-  // children=1 returns immediate children only — no nested-path folding needed.
   const entries = [...data.entries, ...appended]
   const folders = entries
     .filter((e) => e.type === 'dir')
@@ -313,6 +449,11 @@ function FileBrowser({
     }
   }
 
+  const goUp = () => {
+    if (prefix) onNavigate(parentPath(prefix))
+    else onBackToDevices()
+  }
+
   return (
     <div className="space-y-4">
       {viewingOlder && (
@@ -328,9 +469,7 @@ function FileBrowser({
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate text-lg font-semibold tracking-tight">
-            {snapshot.device_name ?? 'My files'}
-          </div>
+          <div className="truncate text-lg font-semibold tracking-tight">{deviceName}</div>
           <div className="mt-0.5 text-sm text-[var(--color-ink-muted)]">
             As of {absolute(snapshot.started_at)} · {count(snapshot.file_count)} files ·{' '}
             {bytes(snapshot.total_bytes)}
@@ -345,10 +484,22 @@ function FileBrowser({
         <button
           type="button"
           className="rounded-lg px-2 py-1 font-semibold text-[var(--color-brand)] hover:bg-[var(--color-brand-soft)]"
-          onClick={() => onNavigate('')}
+          onClick={onBackToDevices}
         >
-          All folders
+          Computers
         </button>
+        <span className="text-[var(--color-ink-muted)]">/</span>
+        {prefix ? (
+          <button
+            type="button"
+            className="rounded-lg px-2 py-1 font-semibold text-[var(--color-brand)] hover:bg-[var(--color-brand-soft)]"
+            onClick={() => onNavigate('')}
+          >
+            {deviceName}
+          </button>
+        ) : (
+          <span className="rounded-lg px-2 py-1 font-semibold">{deviceName}</span>
+        )}
         {prefix
           .split('/')
           .filter(Boolean)
@@ -376,33 +527,29 @@ function FileBrowser({
 
       <div className={`grid gap-4 ${versionsPath ? 'xl:grid-cols-[1fr_20rem]' : ''}`}>
         <div className="panel overflow-hidden">
-          {folders.length === 0 && files.length === 0 ? (
-            <Empty title="This folder is empty in the backup" />
-          ) : (
-            <>
-              <div className="file-row border-b border-[var(--color-border-subtle)] text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-[var(--color-ink-muted)]">
-                <span>Name</span>
-                <span className="file-row-meta">Type</span>
-                <span className="file-row-meta">Size</span>
-                <span className="text-right">Actions</span>
-              </div>
-              <ul>
-                {prefix && (
-                  <li>
-                    <button
-                      type="button"
-                      className="file-row w-full text-left"
-                      onClick={() => onNavigate(parentPath(prefix))}
-                    >
-                      <span className="flex items-center gap-3 text-sm font-semibold text-[var(--color-ink-muted)]">
-                        <span className="grid size-7 place-items-center rounded-lg bg-[var(--color-surface-muted)]">
-                          ↑
-                        </span>
-                        Parent folder
-                      </span>
-                    </button>
-                  </li>
-                )}
+          <div className="file-row border-b border-[var(--color-border-subtle)] text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-[var(--color-ink-muted)]">
+            <span>Name</span>
+            <span className="file-row-meta">Type</span>
+            <span className="file-row-meta">Size</span>
+            <span className="text-right">Actions</span>
+          </div>
+          <ul>
+            <li>
+              <button type="button" className="file-row w-full text-left" onClick={goUp}>
+                <span className="flex items-center gap-3 text-sm font-semibold text-[var(--color-ink-muted)]">
+                  <span className="grid size-7 place-items-center rounded-lg bg-[var(--color-surface-muted)]">
+                    ↑
+                  </span>
+                  {prefix ? 'Parent folder' : 'All computers'}
+                </span>
+              </button>
+            </li>
+            {folders.length === 0 && files.length === 0 ? (
+              <li className="px-5 py-8">
+                <Empty title="This folder is empty in the backup" />
+              </li>
+            ) : (
+              <>
                 {folders.map((folder) => (
                   <li key={folder.path}>
                     <button
@@ -464,9 +611,9 @@ function FileBrowser({
                     </div>
                   </li>
                 ))}
-              </ul>
-            </>
-          )}
+              </>
+            )}
+          </ul>
           {cursor && (
             <div className="border-t border-[var(--color-border-subtle)] px-5 py-4 text-center">
               <Button
