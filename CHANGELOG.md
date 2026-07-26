@@ -10,10 +10,18 @@ older agent keeps working against a newer server, so upgrade the server first.
 
 ## Unreleased
 
+## [0.2.0] - 2026-07-26
+
 ### Changed
 
 - Published server image is `foisalislambd/openbackup` (Compose, docs, and
-  Makefile). Releases push `latest` plus the version tag to Docker Hub from CI.
+  Makefile). Releases push `latest` plus the version tag to Docker Hub from CI
+  for `linux/amd64` and `linux/arm64`.
+
+### Fixed
+
+- Release workflow only downloads `openbackup-*` artifacts, so Docker buildx
+  cache artifacts no longer break GitHub Release creation.
 
 ### Added
 
