@@ -405,6 +405,7 @@ func (e *Engine) Reload(ctx context.Context) error {
 	}
 
 	e.setSettings(next)
+	e.cfg = fresh
 	e.bucket.SetRate(next.Limits.UploadBytesPerSec)
 	e.gov.SetLimits(next.Limits)
 	if next.Paused {
@@ -554,6 +555,10 @@ func (e *Engine) backup(ctx context.Context, t trigger) error {
 			missing.Path, "the folder or drive is missing")
 	}
 
+	if e.encryptionRequired() && !set.Encryption.Enabled {
+		return errors.New("this server requires end-to-end encryption; run 'openbackup encrypt' before backing up")
+	}
+
 	parentID, err := e.idx.Meta(ctx, index.MetaLastSnapshotID)
 	if err != nil {
 		return err
@@ -585,7 +590,7 @@ func (e *Engine) backup(ctx context.Context, t trigger) error {
 		snapshotRoots = append(snapshotRoots, api.SnapshotRoot{Name: r.Name, Path: r.Path})
 	}
 
-	snapshotID, err := e.client.StartSnapshot(ctx, api.StartSnapshotRequest{
+	snapshot, err := e.client.StartSnapshot(ctx, api.StartSnapshotRequest{
 		Roots:     snapshotRoots,
 		Kind:      kind,
 		ParentID:  parentID,
@@ -598,6 +603,17 @@ func (e *Engine) backup(ctx context.Context, t trigger) error {
 	if err != nil {
 		return err
 	}
+	snapshotID := snapshot.SnapshotID
+	if snapshot.Kind != "" {
+		kind = snapshot.Kind
+	}
+	parentID = snapshot.ParentID
+	if kind == api.SnapshotFull {
+		full = true
+		// Server promoted a delta request to full: a partial watcher upload would
+		// leave an unrestorable tip, so force a complete tree walk.
+		t.paths = nil
+	}
 	e.log.Info("snapshot started", "id", snapshotID, "kind", kind, "parent", parentID, "reason", t.reason)
 
 	sender := &entrySender{engine: e, snapshotID: snapshotID}
@@ -609,8 +625,11 @@ func (e *Engine) backup(ctx context.Context, t trigger) error {
 		err = e.backupFullTree(ctx, set, roots, kind, sender, &stats)
 	}
 	if err != nil {
-		// Leave the snapshot incomplete: the server marks it failed rather than
-		// letting a partial tree masquerade as a backup.
+		// Best-effort mark so the dashboard does not keep a forever-running row.
+		_ = e.client.CompleteSnapshot(ctx, snapshotID, api.CompleteSnapshotRequest{
+			CompletedAt: time.Now().UTC(),
+			Error:       err.Error(),
+		})
 		return err
 	}
 	if err := sender.flush(ctx); err != nil {
@@ -740,9 +759,24 @@ func (e *Engine) backupChanges(ctx context.Context, set config.Settings, changes
 
 		info, statErr := os.Lstat(change.AbsPath)
 		if statErr != nil || change.Removed {
-			// Gone: record the deletion and forget it locally.
-			if err := sender.addDeletion(ctx, snapPath); err != nil {
-				return err
+			// Gone: record deletions for every indexed path under this tree, then
+			// forget them locally. A directory delete must name each child or the
+			// server's delta merge would keep the old files forever.
+			indexed, listErr := e.idx.PathsUnder(ctx, change.AbsPath)
+			if listErr != nil {
+				return listErr
+			}
+			if len(indexed) == 0 {
+				indexed = []string{change.AbsPath}
+			}
+			for _, abs := range indexed {
+				childSnap, ok := scanner.SnapshotPath(change.Root, abs)
+				if !ok {
+					continue
+				}
+				if err := sender.addDeletion(ctx, childSnap); err != nil {
+					return err
+				}
 			}
 			if err := e.idx.DeleteTree(ctx, change.AbsPath); err != nil {
 				return err
@@ -839,7 +873,7 @@ func (e *Engine) processItem(ctx context.Context, item scanner.Item, kind api.Sn
 
 	result, err := e.up.UploadFile(ctx, item.AbsPath, item.Size)
 	if err != nil {
-		if api.IsAuthError(err) || api.IsQuotaError(err) || errors.Is(err, context.Canceled) {
+		if api.IsAuthError(err) || api.IsQuotaError(err) || api.IsEncryptionRequired(err) || errors.Is(err, context.Canceled) {
 			return err
 		}
 		// One unreadable file (locked by another process, permission denied)
@@ -1001,18 +1035,25 @@ func (e *Engine) heartbeat(ctx context.Context) error {
 // machine.
 func (e *Engine) applyPolicy(policy api.Policy) {
 	set := e.settings()
-	if policy.MaxUploadBytesPerSec != set.Limits.UploadBytesPerSec {
+	// Only a positive server cap overrides the local limit. Zero means "no
+	// policy" and must not wipe a throttle the user set on this machine.
+	if policy.MaxUploadBytesPerSec > 0 && policy.MaxUploadBytesPerSec != set.Limits.UploadBytesPerSec {
 		set.Limits.UploadBytesPerSec = policy.MaxUploadBytesPerSec
 		e.setSettings(set)
 		e.bucket.SetRate(policy.MaxUploadBytesPerSec)
 		e.gov.SetLimits(set.Limits)
 	}
 	if policy.RequireEncryption && !set.Encryption.Enabled {
-		// Refusing to upload plaintext into a repository that demands encryption
-		// is better than having the server reject every chunk.
 		e.event("error", "This server requires end-to-end encryption, but this device has it turned off. "+
 			"Run 'openbackup encrypt' to enable it.", "", "")
 	}
+}
+
+// encryptionRequired reports whether the account policy forbids plaintext uploads.
+func (e *Engine) encryptionRequired() bool {
+	e.policyMu.RLock()
+	defer e.policyMu.RUnlock()
+	return e.policy.RequireEncryption
 }
 
 // handleCommand executes a server command.

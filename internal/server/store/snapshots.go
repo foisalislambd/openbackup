@@ -19,10 +19,10 @@ import (
 const maxChainLength = 64
 
 // StartSnapshot opens a snapshot for a device.
-func (db *DB) StartSnapshot(ctx context.Context, userID, deviceID string, req api.StartSnapshotRequest) (string, error) {
+func (db *DB) StartSnapshot(ctx context.Context, userID, deviceID string, req api.StartSnapshotRequest) (string, api.SnapshotKind, string, error) {
 	roots, err := json.Marshal(req.Roots)
 	if err != nil {
-		return "", err
+		return "", "", "", err
 	}
 	kind := req.Kind
 	if kind != api.SnapshotDelta {
@@ -30,14 +30,21 @@ func (db *DB) StartSnapshot(ctx context.Context, userID, deviceID string, req ap
 	}
 	parent := req.ParentID
 	if kind == api.SnapshotDelta {
-		// Refuse to chain a delta onto a parent we cannot resolve, and force a
-		// full snapshot once the chain gets too long. Silently accepting either
-		// would produce a snapshot that cannot be restored.
-		chain, err := db.snapshotChain(ctx, parent)
-		if err != nil || len(chain) == 0 || len(chain) >= maxChainLength {
+		// Refuse to chain onto a parent that is not a completed snapshot owned by
+		// this same device. Cross-account or foreign-device parents would leak
+		// another tree into restores; an unresolvable / over-long chain would
+		// produce a snapshot that cannot be restored.
+		ok, err := db.deltaParentOK(ctx, userID, deviceID, parent)
+		if err != nil {
+			return "", "", "", err
+		}
+		chain, chainErr := db.snapshotChain(ctx, parent)
+		if !ok || chainErr != nil || len(chain) == 0 || len(chain) >= maxChainLength {
 			kind = api.SnapshotFull
 			parent = ""
 		}
+	} else {
+		parent = ""
 	}
 
 	id := idgen.NewPrefixed("snp")
@@ -54,9 +61,28 @@ func (db *DB) StartSnapshot(ctx context.Context, userID, deviceID string, req ap
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, userID, deviceID, string(kind), api.SnapshotStatusRunning, parentArg, toMillis(started), string(roots))
 	if err != nil {
-		return "", err
+		return "", "", "", err
 	}
-	return id, nil
+	return id, kind, parent, nil
+}
+
+// deltaParentOK reports whether parent is a completed snapshot belonging to this
+// device (and therefore this account).
+func (db *DB) deltaParentOK(ctx context.Context, userID, deviceID, parent string) (bool, error) {
+	if parent == "" {
+		return false, nil
+	}
+	var owner, device, status string
+	err := db.sql.QueryRowContext(ctx,
+		`SELECT user_id, device_id, status FROM snapshots WHERE id = ?`, parent).
+		Scan(&owner, &device, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return owner == userID && device == deviceID && status == api.SnapshotStatusComplete, nil
 }
 
 // AddEntries appends a batch of entries and deletions to an open snapshot.
@@ -71,6 +97,18 @@ func (db *DB) AddEntries(ctx context.Context, snapshotID string, entries []api.E
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	var status string
+	err = tx.QueryRowContext(ctx, `SELECT status FROM snapshots WHERE id = ?`, snapshotID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if status != api.SnapshotStatusRunning {
+		return fmt.Errorf("%w: snapshot is %s", ErrConflict, status)
+	}
 
 	entryStmt, err := tx.PrepareContext(ctx,
 		`INSERT INTO entries (snapshot_id, path, type, size, mode, mtime, digest, link_target, chunks)
@@ -91,9 +129,9 @@ func (db *DB) AddEntries(ctx context.Context, snapshotID string, entries []api.E
 	defer refStmt.Close()
 
 	for _, e := range entries {
-		path := normalizePath(e.Path)
-		if path == "" {
-			continue
+		path, err := cleanStoredPath(e.Path)
+		if err != nil {
+			return err
 		}
 		var chunkJSON string
 		if len(e.Chunks) > 0 {
@@ -122,9 +160,9 @@ func (db *DB) AddEntries(ctx context.Context, snapshotID string, entries []api.E
 		}
 		defer delStmt.Close()
 		for _, p := range deleted {
-			path := normalizePath(p)
-			if path == "" {
-				continue
+			path, err := cleanStoredPath(p)
+			if err != nil {
+				return err
 			}
 			if _, err := delStmt.ExecContext(ctx, snapshotID, path); err != nil {
 				return err
@@ -416,12 +454,13 @@ func (db *DB) treeChildren(ctx context.Context, snapshotID string, q TreeQuery) 
 			return out, "", nil
 		}
 		if len(out) == limit {
-			// '/' sorts below '0', so this cursor skips the rest of the last
-			// child's subtree instead of paging through files nobody asked for.
-			return out, lastChild + "0", nil
+			// Resume after this child. Using lastChild (not lastChild+"0") keeps
+			// siblings such as "docs0" and "docs!" visible on the next page; the
+			// loop already skips the child we just emitted.
+			return out, lastChild, nil
 		}
 	}
-	return out, lastChild + "0", nil
+	return out, lastChild, nil
 }
 
 // childOf reduces a path to the name of the entry directly below prefix. It
@@ -473,16 +512,25 @@ func (db *DB) treeRange(ctx context.Context, snapshotID string, q TreeQuery) ([]
 	if prefix != "" {
 		// Range comparisons instead of LIKE: they use the primary key index and
 		// need no escaping of % or _ in user paths.
-		pathFilter = ` AND (e.path = ? OR (e.path >= ? AND e.path < ?))`
+		pathFilter = ` AND (e2.path = ? OR (e2.path >= ? AND e2.path < ?))`
 	}
 
 	query := `WITH chain(sid, seq) AS (VALUES ` + strings.Join(values, ", ") + `),
 	latest AS (
+		-- Join back to the MAX(seq) row. Bare GROUP BY cannot pick other columns
+		-- from that row in SQLite, so a delta would otherwise risk serving an
+		-- older version's digest/chunks for a path that changed later.
 		SELECT e.path AS path, e.type AS type, e.size AS size, e.mode AS mode, e.mtime AS mtime,
-		       e.digest AS digest, e.link_target AS link_target, e.chunks AS chunks, MAX(c.seq) AS seq
-		FROM entries e JOIN chain c ON c.sid = e.snapshot_id
-		WHERE e.path > ?` + pathFilter + `
-		GROUP BY e.path
+		       e.digest AS digest, e.link_target AS link_target, e.chunks AS chunks, m.seq AS seq
+		FROM entries e
+		JOIN chain c ON c.sid = e.snapshot_id
+		JOIN (
+			SELECT e2.path AS path, MAX(c2.seq) AS seq
+			FROM entries e2
+			JOIN chain c2 ON c2.sid = e2.snapshot_id
+			WHERE e2.path > ?` + pathFilter + `
+			GROUP BY e2.path
+		) m ON m.path = e.path AND m.seq = c.seq
 	),
 	removed AS (
 		SELECT d.path AS path, MAX(c.seq) AS seq
@@ -495,6 +543,7 @@ func (db *DB) treeRange(ctx context.Context, snapshotID string, q TreeQuery) ([]
 	ORDER BY l.path
 	LIMIT ?`
 
+	// Cursor + optional prefix filter args are bound for the inner MAX(seq) query.
 	args = append(args, q.Cursor)
 	if prefix != "" {
 		args = append(args, prefix, prefix+"/", prefix+"0")
@@ -540,7 +589,7 @@ func (db *DB) treeRange(ctx context.Context, snapshotID string, q TreeQuery) ([]
 // TreeEntry resolves a single path within a snapshot, used to serve a file
 // download.
 func (db *DB) TreeEntry(ctx context.Context, snapshotID, path string) (*api.Entry, error) {
-	entries, _, err := db.Tree(ctx, snapshotID, TreeQuery{Prefix: normalizePath(path), Limit: 2})
+	entries, _, err := db.Tree(ctx, snapshotID, TreeQuery{Prefix: normalizePath(path), Limit: 1})
 	if err != nil {
 		return nil, err
 	}
@@ -563,9 +612,9 @@ type FileVersion struct {
 // Consecutive snapshots with the same content digest are collapsed so the UI
 // shows real changes, not every incremental backup that left the file alone.
 func (db *DB) FileVersions(ctx context.Context, userID, path, deviceID string, limit int) ([]FileVersion, error) {
-	path = normalizePath(path)
-	if path == "" {
-		return nil, fmt.Errorf("store: path is required")
+	path, err := cleanStoredPath(path)
+	if err != nil {
+		return nil, err
 	}
 	if limit <= 0 || limit > 100 {
 		limit = 40
@@ -586,6 +635,10 @@ func (db *DB) FileVersions(ctx context.Context, userID, path, deviceID string, l
 		entry, err := db.TreeEntry(ctx, snap.ID, path)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
+				// A gap (deleted then restored) must not collapse the restored
+				// copy into the pre-deletion version.
+				haveDigest = false
+				lastDigest = ""
 				continue
 			}
 			return nil, err
@@ -672,21 +725,29 @@ func (db *DB) descendants(ctx context.Context, snapshotID string) ([]string, err
 }
 
 // normalizePath canonicalises a stored path: forward slashes, no leading or
-// trailing separator, and no traversal segments.
+// trailing separator, and no traversal segments. Empty means "no path / root".
 func normalizePath(p string) string {
+	path, err := cleanStoredPath(p)
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
+// cleanStoredPath is normalizePath that reports invalid input instead of mapping
+// it to the empty root path (which would otherwise mean "whole tree").
+func cleanStoredPath(p string) (string, error) {
 	p = strings.ReplaceAll(p, `\`, "/")
 	p = strings.Trim(p, "/")
 	if p == "" || p == "." {
-		return ""
+		return "", ErrInvalidPath
 	}
-	// Reject traversal outright rather than trying to clean it: a malicious
-	// agent must not be able to make a restore write outside its target.
 	for _, seg := range strings.Split(p, "/") {
-		if seg == ".." {
-			return ""
+		if seg == "" || seg == "." || seg == ".." {
+			return "", ErrInvalidPath
 		}
 	}
-	return p
+	return p, nil
 }
 
 func reverse[T any](s []T) {

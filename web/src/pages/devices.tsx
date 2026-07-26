@@ -6,7 +6,7 @@
 
 import { useState } from 'react'
 import { api, type Device } from '@/lib/api'
-import { bytes, count, platformLabel, relative } from '@/lib/format'
+import { bytes, count, platformLabel, relative, until } from '@/lib/format'
 import { useAction, useLoader } from '@/lib/use-loader'
 import { HealthBadge } from '@/components/health-badge'
 import { Badge, Button, Card, Empty, ErrorNote, inputClass } from '@/components/ui'
@@ -39,8 +39,8 @@ export default function DevicesPage() {
         {code ? (
           <div className="space-y-3">
             <p className="text-sm">
-              Run this on the computer you want to back up. The code works once, and expires in about{' '}
-              {relative(code.expires_at).replace(' ago', '')}.
+              Run this on the computer you want to back up. The code works once, and expires{' '}
+              {until(code.expires_at)}.
             </p>
             <CopyBlock text={`openbackup connect --server ${code.server_url} --code ${code.code}`} />
             <p className="text-xs text-[var(--color-ink-muted)]">

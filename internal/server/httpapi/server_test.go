@@ -166,7 +166,7 @@ func (h *harness) backup(client *api.Client, kind api.SnapshotKind, parent strin
 	h.t.Helper()
 	ctx := context.Background()
 
-	id, err := client.StartSnapshot(ctx, api.StartSnapshotRequest{
+	started, err := client.StartSnapshot(ctx, api.StartSnapshotRequest{
 		Roots:     []api.SnapshotRoot{{Name: "documents", Path: "/home/test/Documents"}},
 		Kind:      kind,
 		ParentID:  parent,
@@ -175,6 +175,7 @@ func (h *harness) backup(client *api.Client, kind api.SnapshotKind, parent strin
 	if err != nil {
 		h.t.Fatalf("StartSnapshot: %v", err)
 	}
+	id := started.SnapshotID
 
 	var entries []api.Entry
 	var total int64
@@ -359,6 +360,26 @@ func TestDeltaSnapshotResolvesAgainstParent(t *testing.T) {
 		t.Errorf("changed file has size %d, want the newer version", paths["Documents/change.txt"])
 	}
 
+	wantDigest := hash.Sum([]byte("version two"))
+	entry, err := h.db.TreeEntry(context.Background(), delta, "Documents/change.txt")
+	if err != nil {
+		t.Fatalf("TreeEntry: %v", err)
+	}
+	if entry.Digest != wantDigest {
+		t.Fatalf("changed file digest = %q, want %q (delta must not serve the parent's content)", entry.Digest, wantDigest)
+	}
+
+	resp := h.do(http.MethodGet,
+		"/api/v1/ui/snapshots/"+delta+"/download?path="+url.QueryEscape("Documents/change.txt"), nil, nil)
+	got, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "version two" {
+		t.Fatalf("download returned %q, want version two", got)
+	}
+
 	// The parent snapshot must still show the world as it was.
 	parentEntries, _, err := h.db.Tree(context.Background(), full, store.TreeQuery{Limit: 100})
 	if err != nil {
@@ -449,10 +470,11 @@ func TestSnapshotWithMissingChunkCannotComplete(t *testing.T) {
 	client := h.enroll("laptop")
 	ctx := context.Background()
 
-	id, err := client.StartSnapshot(ctx, api.StartSnapshotRequest{Kind: api.SnapshotFull, StartedAt: time.Now()})
+	started, err := client.StartSnapshot(ctx, api.StartSnapshotRequest{Kind: api.SnapshotFull, StartedAt: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}
+	id := started.SnapshotID
 	// Reference a chunk that was never uploaded.
 	phantom := hash.Sum([]byte("never uploaded"))
 	if err := client.AddEntries(ctx, id, api.AddEntriesRequest{Entries: []api.Entry{{
@@ -587,11 +609,11 @@ func TestOneDeviceCannotTouchAnothersSnapshot(t *testing.T) {
 	phone := h.enroll("phone")
 	ctx := context.Background()
 
-	id, err := laptop.StartSnapshot(ctx, api.StartSnapshotRequest{Kind: api.SnapshotFull, StartedAt: time.Now()})
+	started, err := laptop.StartSnapshot(ctx, api.StartSnapshotRequest{Kind: api.SnapshotFull, StartedAt: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = phone.AddEntries(ctx, id, api.AddEntriesRequest{Entries: []api.Entry{{Path: "x", Type: api.EntryFile}}})
+	err = phone.AddEntries(ctx, started.SnapshotID, api.AddEntriesRequest{Entries: []api.Entry{{Path: "x", Type: api.EntryFile}}})
 	if err == nil {
 		t.Fatal("a device must not be able to write into another device's snapshot")
 	}
@@ -811,10 +833,11 @@ func TestEncryptedRepositoryRefusesServerSideRestore(t *testing.T) {
 		t.Fatalf("PutChunk: %v", err)
 	}
 
-	id, err := client.StartSnapshot(ctx, api.StartSnapshotRequest{Kind: api.SnapshotFull, StartedAt: time.Now()})
+	started, err := client.StartSnapshot(ctx, api.StartSnapshotRequest{Kind: api.SnapshotFull, StartedAt: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}
+	id := started.SnapshotID
 	if err := client.AddEntries(ctx, id, api.AddEntriesRequest{Entries: []api.Entry{{
 		Path: "Documents/diary.txt", Type: api.EntryFile, Size: int64(len(content)),
 		Chunks: []string{digest}, Digest: digest,

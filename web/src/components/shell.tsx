@@ -200,13 +200,13 @@ function AuthScreen({ mode, onDone }: { mode: 'setup' | 'signin'; onDone: () => 
         </Field>
         <Field
           label="Password"
-          hint={setup ? 'At least 12 characters. Use a password manager.' : undefined}
+          hint={setup ? 'At least 10 characters. Use a password manager.' : undefined}
         >
           <input
             className={inputClass}
             type="password"
             required
-            minLength={setup ? 12 : undefined}
+            minLength={setup ? 10 : undefined}
             autoComplete={setup ? 'new-password' : 'current-password'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}

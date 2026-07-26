@@ -369,12 +369,16 @@ func (s *Server) handleStartSnapshot(w http.ResponseWriter, r *http.Request, dev
 		writeError(w, http.StatusConflict, api.CodeKeyMismatch, "encryption key does not match the enrolled key")
 		return
 	}
-	id, err := s.db.StartSnapshot(r.Context(), device.UserID, device.ID, req)
+	id, kind, parentID, err := s.db.StartSnapshot(r.Context(), device.UserID, device.ID, req)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, api.StartSnapshotResponse{SnapshotID: id})
+	writeJSON(w, http.StatusCreated, api.StartSnapshotResponse{
+		SnapshotID: id,
+		Kind:       kind,
+		ParentID:   parentID,
+	})
 }
 
 func (s *Server) handleAddEntries(w http.ResponseWriter, r *http.Request, device *store.Device) {
@@ -457,6 +461,22 @@ func (s *Server) handleAgentTree(w http.ResponseWriter, r *http.Request, device 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": entries, "next_cursor": next})
+}
+
+// handleAgentFileVersions lists distinct versions of a path on this device.
+func (s *Server) handleAgentFileVersions(w http.ResponseWriter, r *http.Request, device *store.Device) {
+	path := strings.TrimSpace(r.URL.Query().Get("path"))
+	if path == "" {
+		writeError(w, http.StatusBadRequest, "", "path is required")
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	versions, err := s.db.FileVersions(r.Context(), device.UserID, path, device.ID, limit)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"path": path, "versions": versions})
 }
 
 func (s *Server) handlePutEscrow(w http.ResponseWriter, r *http.Request, device *store.Device) {

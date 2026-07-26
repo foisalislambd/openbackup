@@ -57,10 +57,11 @@ export default function ActivityPage() {
                   <span className="text-sm">{event.message}</span>
                   {event.device_name && <Badge>{event.device_name}</Badge>}
                 </div>
-                {event.reason && (
+                {(event.reason || event.path) && (
                   <div className="mt-0.5 text-xs text-[var(--color-ink-muted)]">
-                    Reason: {event.reason}
-                    {event.path ? ` — ${event.path}` : ''}
+                    {event.reason ? `Reason: ${event.reason}` : null}
+                    {event.reason && event.path ? ' — ' : null}
+                    {event.path ?? null}
                   </div>
                 )}
               </div>

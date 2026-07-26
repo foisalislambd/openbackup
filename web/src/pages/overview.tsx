@@ -216,8 +216,10 @@ function HealthBanner({ devices, newest }: { devices: Device[]; newest?: Snapsho
   }
   if (never.length > 0) {
     return (
-      <Banner tone="warn" title="First backup still running">
-        It will show under Your computers when finished.
+      <Banner tone="warn" title={`${never.length === 1 ? never[0].name : `${never.length} devices`} never finished a backup`}>
+        {never.length === 1
+          ? 'Start a backup from Devices, or wait if one is already running.'
+          : `${never.map((d) => d.name).join(', ')} will appear under Your computers after the first backup completes.`}
       </Banner>
     )
   }

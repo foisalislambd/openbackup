@@ -24,6 +24,7 @@ const (
 	PathChunksMissing  = "/api/v1/agent/chunks/missing"
 	PathChunk          = "/api/v1/agent/chunks/" // + digest
 	PathSnapshots      = "/api/v1/agent/snapshots"
+	PathFileVersions   = "/api/v1/agent/files/versions"
 	PathKeyEscrow      = "/api/v1/agent/key"
 	PathEvents         = "/api/v1/agent/events"
 	PathSnapshotEntry  = "/entries"  // suffix of /snapshots/{id}
@@ -64,6 +65,7 @@ const (
 	CodeKeyMismatch    = "key_mismatch"
 	CodeProtocolTooOld = "protocol_too_old"
 	CodeNotFound       = "not_found"
+	CodeConflict       = "conflict"
 	CodeRateLimited    = "rate_limited"
 	// CodeEncryptionRequired tells an agent to turn on end-to-end encryption
 	// before retrying, rather than to keep resending a chunk that will never be
@@ -259,9 +261,12 @@ type SnapshotRoot struct {
 	Path string `json:"path"`
 }
 
-// StartSnapshotResponse returns the new snapshot id.
+// StartSnapshotResponse returns the new snapshot id and the kind the server
+// actually opened (which may be promoted from delta to full).
 type StartSnapshotResponse struct {
-	SnapshotID string `json:"snapshot_id"`
+	SnapshotID string       `json:"snapshot_id"`
+	Kind       SnapshotKind `json:"kind"`
+	ParentID   string       `json:"parent_id,omitempty"`
 }
 
 // AddEntriesRequest appends a batch of entries to an open snapshot.
@@ -343,9 +348,10 @@ type Device struct {
 	QueuedBytes  int64      `json:"queued_bytes"`
 	LastError    string     `json:"last_error,omitempty"`
 	// LogicalBytes is the size of the newest snapshot's contents.
-	LogicalBytes  int64  `json:"logical_bytes"`
-	SnapshotCount int64  `json:"snapshot_count"`
-	Health        string `json:"health"`
+	LogicalBytes  int64      `json:"logical_bytes"`
+	SnapshotCount int64      `json:"snapshot_count"`
+	LastBackupAt  *time.Time `json:"last_backup_at,omitempty"`
+	Health        string     `json:"health"`
 }
 
 // Device health values shown in the dashboard.

@@ -77,6 +77,8 @@ func run(args []string) error {
 		return cmdSnapshots(rest)
 	case "find":
 		return cmdFind(rest)
+	case "versions":
+		return cmdVersions(rest)
 	case "restore":
 		return cmdRestore(rest)
 	case "folders":
@@ -120,6 +122,7 @@ Everyday use:
 Getting files back:
   openbackup snapshots              List the backups on the server
   openbackup find <text>            Find a file in the latest backup
+  openbackup versions <path>        List distinct versions of a file
   openbackup restore --path Documents/report.docx --to .
   openbackup restore --snapshot <id> --to ./restored
 
@@ -541,6 +544,54 @@ func cmdFind(args []string) error {
 		return err
 	}
 	fmt.Printf("\nRestore one with:\n  openbackup restore --path \"%s\" --to .\n", entries[0].Path)
+	return nil
+}
+
+func cmdVersions(args []string) error {
+	fs := flag.NewFlagSet("versions", flag.ContinueOnError)
+	limit := fs.Int("limit", 20, "how many versions to show")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	path := strings.TrimSpace(strings.Join(fs.Args(), " "))
+	if path == "" {
+		return errors.New("usage: openbackup versions <path inside the backup>")
+	}
+	if _, err := requireEnrolled(); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	agent, err := openAgent()
+	if err != nil {
+		return err
+	}
+	versions, err := agent.FileVersions(ctx, path, *limit)
+	if err != nil {
+		return err
+	}
+	if len(versions) == 0 {
+		fmt.Printf("No versions of %q in completed backups.\n", path)
+		return nil
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "WHEN\tSNAPSHOT\tSIZE")
+	for i, v := range versions {
+		label := shortID(v.Snapshot.ID)
+		if i == 0 {
+			label += " (current)"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\n",
+			v.Snapshot.StartedAt.Local().Format("2006-01-02 15:04"),
+			label,
+			humanBytes(v.Entry.Size))
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	fmt.Printf("\nRestore one with:\n  openbackup restore --snapshot %s --path \"%s\" --to .\n",
+		versions[0].Snapshot.ID, path)
 	return nil
 }
 

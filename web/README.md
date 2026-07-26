@@ -54,8 +54,8 @@ npm run lint
 - **Colours come from theme tokens** in `src/styles.css`, referenced as
   `var(--color-ink)` and friends. Dark mode re-points those variables; no
   component needs a `dark:` variant.
-- **Restore downloads are plain links** built by `downloadUrl` and `archiveUrl`,
-  so the browser streams them and shows its own progress. End-to-end encrypted
-  backups cannot be restored from the browser, because the server has no key —
-  the server returns a clear error saying to use `openbackup restore` on the
-  device instead.
+- **Restore downloads use authenticated fetch** (`downloadSnapshotFile` /
+  `downloadSnapshotArchive`) so encrypted or missing-file errors show in the UI
+  instead of a blank browser download. End-to-end encrypted backups cannot be
+  restored from the browser, because the server has no key — the server returns
+  a clear error saying to use `openbackup restore` on the device instead.

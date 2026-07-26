@@ -31,12 +31,9 @@ export function useLoader<T>(fetcher: () => Promise<T>, options: Options = {}): 
   const { pollMs, deps = [] } = options
   const [result, setResult] = useState<{ data?: T; error?: string }>({})
   const [nonce, setNonce] = useState(0)
+  const depsKey = JSON.stringify(deps)
+  const depsKeyRef = useRef(depsKey)
 
-  // The fetcher is usually an inline arrow function, so it changes on every
-  // render; keeping the latest one in a ref means the fetch effect depends on the
-  // caller's real inputs instead of restarting on every render. The ref is
-  // updated in an effect, never during render, and this effect is declared first
-  // so it always runs before the fetch below.
   const fetcherRef = useRef(fetcher)
   useEffect(() => {
     fetcherRef.current = fetcher
@@ -46,6 +43,13 @@ export function useLoader<T>(fetcher: () => Promise<T>, options: Options = {}): 
 
   useEffect(() => {
     let active = true
+    const depsChanged = depsKeyRef.current !== depsKey
+    depsKeyRef.current = depsKey
+    // Drop stale rows when the query identity changes (folder, snapshot, …).
+    // Poll/reload keeps the previous paint so the UI does not flash empty.
+    if (depsChanged) {
+      setResult({})
+    }
 
     const run = () => {
       fetcherRef.current().then(
@@ -53,7 +57,9 @@ export function useLoader<T>(fetcher: () => Promise<T>, options: Options = {}): 
           if (active) setResult({ data })
         },
         (err: unknown) => {
-          if (active) setResult({ error: message(err) })
+          if (active) {
+            setResult((prev) => ({ data: prev.data, error: message(err) }))
+          }
         },
       )
     }
@@ -67,8 +73,6 @@ export function useLoader<T>(fetcher: () => Promise<T>, options: Options = {}): 
     }
 
     const timer = setInterval(() => {
-      // A background tab does not need fresh numbers, and polling it would keep
-      // a laptop's radio awake for nothing.
       if (document.visibilityState === 'visible') run()
     }, pollMs)
 
@@ -76,8 +80,7 @@ export function useLoader<T>(fetcher: () => Promise<T>, options: Options = {}): 
       active = false
       clearInterval(timer)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nonce, pollMs, ...deps])
+  }, [nonce, pollMs, depsKey])
 
   return {
     data: result.data,

@@ -11,7 +11,7 @@ import { Button, Card, Field, Input, Notice, Toggle } from '../components/ui'
  *  The defaults are meant to be right, so this screen is short: limits that keep
  *  the agent out of the user's way, and encryption, which is the one decision that
  *  cannot be undone. */
-export function Settings({ status }: { status: Overview }) {
+export function Settings({ status, onLoggedOut }: { status: Overview; onLoggedOut: () => void }) {
   const loaded = useAsync(() => api.settings(), [])
   const action = useAction()
   const [draft, setDraft] = useState<SettingsData | null>(null)
@@ -93,9 +93,18 @@ export function Settings({ status }: { status: Overview }) {
               max={100}
               step={5}
               value={draft.max_cpu_percent}
-              onChange={(event) => setDraft({ ...draft, max_cpu_percent: Number(event.target.value) })}
-              onMouseUp={() => save(draft)}
-              onKeyUp={() => save(draft)}
+              onChange={(event) => {
+                const max_cpu_percent = Number(event.target.value)
+                setDraft({ ...draft, max_cpu_percent })
+              }}
+              onMouseUp={(event) => {
+                const max_cpu_percent = Number((event.target as HTMLInputElement).value)
+                save({ ...draft, max_cpu_percent })
+              }}
+              onKeyUp={(event) => {
+                const max_cpu_percent = Number((event.target as HTMLInputElement).value)
+                save({ ...draft, max_cpu_percent })
+              }}
               className="mt-2 w-full accent-brand"
             />
           </Field>
@@ -125,14 +134,26 @@ export function Settings({ status }: { status: Overview }) {
 
       <Encryption encrypted={draft.encrypted} hasBackups={status.snapshot_count > 0} />
 
-      <Account serverURL={status.server_url} deviceName={status.device_name} />
+      <Account
+        serverURL={status.server_url}
+        deviceName={status.device_name}
+        onLoggedOut={onLoggedOut}
+      />
 
       <About />
     </div>
   )
 }
 
-function Account({ serverURL, deviceName }: { serverURL: string; deviceName: string }) {
+function Account({
+  serverURL,
+  deviceName,
+  onLoggedOut,
+}: {
+  serverURL: string
+  deviceName: string
+  onLoggedOut: () => void
+}) {
   const action = useAction()
   const [confirming, setConfirming] = useState(false)
 
@@ -171,9 +192,9 @@ function Account({ serverURL, deviceName }: { serverURL: string; deviceName: str
               tone="danger"
               busy={action.busy}
               onClick={() =>
-                action.run(async () => {
+                void action.run(async () => {
                   await api.disconnect()
-                  // Status polling will flip the window back to onboarding.
+                  onLoggedOut()
                 })
               }
             >

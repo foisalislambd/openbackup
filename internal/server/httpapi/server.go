@@ -109,6 +109,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/agent/snapshots/{id}/entries", s.agentOnly(s.handleAddEntries))
 	mux.Handle("GET /api/v1/agent/snapshots/{id}/entries", s.agentOnly(s.handleAgentTree))
 	mux.Handle("POST /api/v1/agent/snapshots/{id}/complete", s.agentOnly(s.handleCompleteSnapshot))
+	mux.Handle("GET "+api.PathFileVersions, s.agentOnly(s.handleAgentFileVersions))
 	mux.Handle("PUT "+api.PathKeyEscrow, s.agentOnly(s.handlePutEscrow))
 	mux.Handle("GET "+api.PathKeyEscrow, s.agentOnly(s.handleGetEscrow))
 	mux.Handle("POST "+api.PathEvents, s.agentOnly(s.handleAgentEvents))
@@ -221,6 +222,10 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, store.ErrBlobNotFound):
 		writeError(w, http.StatusNotFound, api.CodeNotFound, "not found")
+	case errors.Is(err, store.ErrConflict):
+		writeError(w, http.StatusConflict, api.CodeConflict, err.Error())
+	case errors.Is(err, store.ErrInvalidPath):
+		writeError(w, http.StatusBadRequest, "", "invalid path")
 	case errors.Is(err, context.Canceled):
 		// The client hung up; no response will be read anyway.
 	default:

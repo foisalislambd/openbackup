@@ -92,7 +92,7 @@ export default function App() {
         {tab === 'home' && <Home status={status} onGoToFolders={() => setTab('folders')} />}
         {tab === 'folders' && <Folders status={status} />}
         {tab === 'restore' && <Restore />}
-        {tab === 'settings' && <Settings status={status} />}
+        {tab === 'settings' && <Settings status={status} onLoggedOut={refresh} />}
         {tab === 'health' && <Health status={status} />}
       </main>
     </div>

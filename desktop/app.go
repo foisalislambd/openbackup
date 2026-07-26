@@ -206,6 +206,15 @@ func (a *App) Disconnect() error {
 	if err := a.agent.Disconnect(ctx); err != nil {
 		return err
 	}
+	// Push a fresh overview immediately so the window flips to onboarding without
+	// waiting for the next poll tick.
+	overview := a.agent.Overview(ctx)
+	a.mu.Lock()
+	a.overview = overview
+	a.mu.Unlock()
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "status", overview)
+	}
 	a.notify("Logged out", "This device is no longer connected. Connect again with a new code when you are ready.")
 	return nil
 }
@@ -342,6 +351,7 @@ func (a *App) Browse(snapshot, prefix, cursor string) (*control.Page, error) {
 	}
 	ctx, cancel := context.WithTimeout(a.context(), 60*time.Second)
 	defer cancel()
+	prefix = strings.Trim(strings.ReplaceAll(prefix, `\`, "/"), "/")
 	return a.agent.Browse(ctx, snapshot, prefix, cursor, 200)
 }
 
@@ -365,7 +375,14 @@ func (a *App) FileVersions(path string) ([]control.FileVersion, error) {
 	}
 	ctx, cancel := context.WithTimeout(a.context(), 90*time.Second)
 	defer cancel()
-	return a.agent.FileVersions(ctx, path, 40)
+	versions, err := a.agent.FileVersions(ctx, path, 40)
+	if err != nil {
+		return nil, err
+	}
+	if versions == nil {
+		return []control.FileVersion{}, nil
+	}
+	return versions, nil
 }
 
 // ChooseRestoreTarget asks where to restore, defaulting to the desktop so the
@@ -385,6 +402,9 @@ func (a *App) ChooseRestoreTarget() (string, error) {
 func (a *App) StartRestore(req control.RestoreRequest) error {
 	if a.agent == nil {
 		return a.configError()
+	}
+	if strings.TrimSpace(req.Target) == "" {
+		return errors.New("choose a folder to restore into")
 	}
 	a.mu.Lock()
 	if a.restore != nil && a.restore.Running {
@@ -444,16 +464,27 @@ func (a *App) CancelRestore() {
 	}
 }
 
-// RestoreProgress returns the state of the current or last restore.
+// RestoreProgress returns a copy of the current or last restore state so the
+// frontend cannot race the background job mutating the live struct.
 func (a *App) RestoreProgress() *restoreJob {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.restore
+	if a.restore == nil {
+		return nil
+	}
+	copy := *a.restore
+	copy.cancel = nil
+	return &copy
 }
 
 func (a *App) emitRestore() {
 	a.mu.Lock()
-	job := a.restore
+	var job *restoreJob
+	if a.restore != nil {
+		copy := *a.restore
+		copy.cancel = nil
+		job = &copy
+	}
 	a.mu.Unlock()
 	if a.ctx != nil && job != nil {
 		runtime.EventsEmit(a.ctx, "restore", job)

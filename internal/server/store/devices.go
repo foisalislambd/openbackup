@@ -130,6 +130,10 @@ func (db *DB) ListDevices(ctx context.Context, userID string) ([]api.Device, err
 		d.Platform = api.Platform(platform)
 		d.CreatedAt = fromMillis(created)
 		d.LastSeen = nullTime(lastSeen)
+		if lastComplete > 0 {
+			t := fromMillis(lastComplete)
+			d.LastBackupAt = &t
+		}
 		d.Health = deviceHealth(d, fromMillis(lastComplete))
 		out = append(out, d)
 	}

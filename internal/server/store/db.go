@@ -17,6 +17,13 @@ import (
 // ErrNotFound is returned by lookups that find nothing.
 var ErrNotFound = errors.New("store: not found")
 
+// ErrConflict is returned when an operation is refused because of current state
+// (for example writing entries into a completed snapshot).
+var ErrConflict = errors.New("store: conflict")
+
+// ErrInvalidPath is returned when a stored path is rejected (traversal, empty).
+var ErrInvalidPath = errors.New("store: invalid path")
+
 // DB wraps the metadata database.
 type DB struct {
 	sql  *sql.DB

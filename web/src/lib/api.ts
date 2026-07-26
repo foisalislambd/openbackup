@@ -39,7 +39,6 @@ export type Snapshot = {
   dir_count?: number
   total_bytes: number
   uploaded_bytes?: number
-  pinned?: boolean
 }
 
 export type Entry = {
@@ -105,6 +104,7 @@ export type IgnoreRule = { pattern: string; reason: string }
 export type IgnoreRules = {
   categories: Record<string, IgnoreRule[]>
   project_markers: string[]
+  max_file_size?: number
 }
 
 /** ApiError carries the server's message so the UI can show it verbatim. */
@@ -126,7 +126,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
       ...init?.headers,
     },
-    // Same-origin cookies carry the session.
     credentials: 'same-origin',
   })
 
@@ -135,26 +134,58 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   const text = await response.text()
-  const body = text ? JSON.parse(text) : {}
+  let body: Record<string, unknown> = {}
+  if (text) {
+    try {
+      body = JSON.parse(text) as Record<string, unknown>
+    } catch {
+      if (!response.ok) {
+        throw new ApiError(`Request failed (${response.status})`, response.status)
+      }
+      throw new ApiError('The server returned an unexpected response', response.status)
+    }
+  }
 
   if (!response.ok) {
-    throw new ApiError(body.error ?? `Request failed (${response.status})`, response.status, body.code)
+    const code = typeof body.code === 'string' ? body.code : undefined
+    // Session middleware uses invalid_token. Wrong password on /password is also 401
+    // but without that code — do not bounce the user to the login gate for that.
+    if (
+      response.status === 401 &&
+      code === 'invalid_token' &&
+      path !== '/bootstrap' &&
+      path !== '/login' &&
+      path !== '/setup'
+    ) {
+      window.location.assign('/')
+    }
+    throw new ApiError(
+      typeof body.error === 'string' ? body.error : `Request failed (${response.status})`,
+      response.status,
+      code,
+    )
   }
   return body as T
 }
 
+type UserResponse = { user: Me }
+
 export const api = {
   bootstrap: () => request<Bootstrap>('/bootstrap'),
   setup: (email: string, password: string) =>
-    request<Me>('/setup', { method: 'POST', body: JSON.stringify({ email, password }) }),
+    request<UserResponse>('/setup', { method: 'POST', body: JSON.stringify({ email, password }) }).then(
+      (r) => r.user,
+    ),
   login: (email: string, password: string) =>
-    request<Me>('/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+    request<UserResponse>('/login', { method: 'POST', body: JSON.stringify({ email, password }) }).then(
+      (r) => r.user,
+    ),
   logout: () => request<void>('/logout', { method: 'POST' }),
-  me: () => request<Me>('/me'),
+  me: () => request<UserResponse>('/me').then((r) => r.user),
   changePassword: (current: string, next: string) =>
     request<void>('/password', {
       method: 'POST',
-      body: JSON.stringify({ current_password: current, new_password: next }),
+      body: JSON.stringify({ current, new: next }),
     }),
 
   devices: () => request<{ devices: Device[] }>('/devices').then((r) => r.devices ?? []),
@@ -165,17 +196,12 @@ export const api = {
     request<void>(`/devices/${id}/commands`, { method: 'POST', body: JSON.stringify({ kind }) }),
 
   usage: () => request<Usage>('/usage'),
-  history: (days = 30) => request<{ points: { date: string; bytes: number }[] }>(`/history?days=${days}`),
 
-  snapshots: (deviceId?: string) =>
-    request<{ snapshots: Snapshot[] }>(`/snapshots${deviceId ? `?device_id=${deviceId}` : ''}`).then(
-      (r) => r.snapshots ?? [],
-    ),
-  snapshot: (id: string) => request<Snapshot>(`/snapshots/${id}`),
+  snapshots: (deviceId?: string, limit = 200) =>
+    request<{ snapshots: Snapshot[] }>(
+      `/snapshots?limit=${limit}${deviceId ? `&device_id=${encodeURIComponent(deviceId)}` : ''}`,
+    ).then((r) => r.snapshots ?? []),
   deleteSnapshot: (id: string) => request<void>(`/snapshots/${id}`, { method: 'DELETE' }),
-  // children=1 keeps this a folder-at-a-time listing; without it the server
-  // returns the whole subtree, which is what a restore wants and a file browser
-  // does not.
   browse: (id: string, prefix = '', cursor = '', limit = 200) =>
     request<{ entries: Entry[]; next_cursor: string }>(
       `/snapshots/${id}/browse?children=1&prefix=${encodeURIComponent(
@@ -190,9 +216,6 @@ export const api = {
 
   events: (limit = 100) => request<{ events: ActivityEvent[] }>(`/events?limit=${limit}`).then((r) => r.events ?? []),
 
-  joinTokens: () => request<{ tokens: { id: string; label: string; expires_at: string; used: boolean }[] }>(
-    '/join-tokens',
-  ),
   createJoinToken: (label: string) =>
     request<{ code: string; expires_at: string; server_url: string }>('/join-tokens', {
       method: 'POST',
@@ -214,4 +237,46 @@ export function downloadUrl(snapshotId: string, path: string): string {
 /** archiveUrl builds a link that streams a folder as a ZIP. */
 export function archiveUrl(snapshotId: string, prefix: string): string {
   return `/api/v1/ui/snapshots/${snapshotId}/archive?prefix=${encodeURIComponent(prefix)}`
+}
+
+/** downloadSnapshotFile fetches a file with credentials and surfaces API errors. */
+export async function downloadSnapshotFile(snapshotId: string, path: string): Promise<void> {
+  await saveDownload(downloadUrl(snapshotId, path), baseNameOf(path))
+}
+
+/** downloadSnapshotArchive fetches a folder ZIP with credentials. */
+export async function downloadSnapshotArchive(snapshotId: string, prefix: string): Promise<void> {
+  const name = prefix ? `${baseNameOf(prefix)}.zip` : 'backup.zip'
+  await saveDownload(archiveUrl(snapshotId, prefix), name)
+}
+
+async function saveDownload(url: string, filename: string): Promise<void> {
+  const response = await fetch(url, { credentials: 'same-origin' })
+  if (!response.ok) {
+    const text = await response.text()
+    let message = `Download failed (${response.status})`
+    let code: string | undefined
+    try {
+      const body = JSON.parse(text) as { error?: string; code?: string }
+      if (body.error) message = body.error
+      code = body.code
+    } catch {
+      /* keep status message */
+    }
+    throw new ApiError(message, response.status, code)
+  }
+  const blob = await response.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(objectUrl)
+}
+
+function baseNameOf(path: string): string {
+  const parts = path.replace(/\/+$/, '').split('/').filter(Boolean)
+  return parts[parts.length - 1] || 'download'
 }

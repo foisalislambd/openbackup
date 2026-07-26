@@ -26,7 +26,7 @@ export function relative(iso?: string | null): string {
   const then = new Date(iso).getTime()
   if (Number.isNaN(then)) return 'never'
   const seconds = Math.round((Date.now() - then) / 1000)
-  if (seconds < 0) return 'just now'
+  if (seconds < 0) return until(iso)
   if (seconds < 60) return 'just now'
   const minutes = Math.round(seconds / 60)
   if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
@@ -37,6 +37,21 @@ export function relative(iso?: string | null): string {
   const months = Math.round(days / 30)
   if (months < 12) return `${months} month${months === 1 ? '' : 's'} ago`
   return `${Math.round(months / 12)} year${months < 18 ? '' : 's'} ago`
+}
+
+/** until renders a future timestamp as "in 2 hours". */
+export function until(iso?: string | null): string {
+  if (!iso) return 'never'
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return 'never'
+  const seconds = Math.max(0, Math.round((then - Date.now()) / 1000))
+  if (seconds < 60) return 'in under a minute'
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `in ${minutes} minute${minutes === 1 ? '' : 's'}`
+  const hours = Math.round(minutes / 60)
+  if (hours < 48) return `in ${hours} hour${hours === 1 ? '' : 's'}`
+  const days = Math.round(hours / 24)
+  return `in ${days} day${days === 1 ? '' : 's'}`
 }
 
 /** absolute renders a full local timestamp for tooltips and details. */

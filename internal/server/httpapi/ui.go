@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -387,7 +386,7 @@ func (s *Server) handleListJoinTokens(w http.ResponseWriter, r *http.Request, us
 			"expired":    time.Now().After(t.ExpiresAt),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"join_tokens": out})
+	writeJSON(w, http.StatusOK, map[string]any{"tokens": out})
 }
 
 // handleCreateJoinToken issues a one-time enrolment code and returns the exact
@@ -521,6 +520,3 @@ func (s *Server) handleIgnoreRules(w http.ResponseWriter, r *http.Request) {
 		"max_file_size":   ignore.DefaultMaxFileSize,
 	})
 }
-
-// errUnsupported is returned when a restore cannot be served by the server.
-var errUnsupported = errors.New("unsupported")

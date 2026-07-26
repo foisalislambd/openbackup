@@ -75,6 +75,12 @@ func IsQuotaError(err error) bool {
 	return errors.As(err, &apiErr) && apiErr.Code == CodeQuotaExceeded
 }
 
+// IsEncryptionRequired reports whether the server rejected plaintext data.
+func IsEncryptionRequired(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.Code == CodeEncryptionRequired
+}
+
 // IsNotFound reports whether the server does not know the requested object.
 func IsNotFound(err error) bool {
 	var apiErr *APIError
@@ -318,16 +324,20 @@ func (c *Client) GetChunk(ctx context.Context, digest string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 }
 
-// StartSnapshot opens a snapshot.
-func (c *Client) StartSnapshot(ctx context.Context, req StartSnapshotRequest) (string, error) {
+// StartSnapshot opens a snapshot and returns the id plus the kind the server
+// actually accepted (it may promote an unusable delta request to a full).
+func (c *Client) StartSnapshot(ctx context.Context, req StartSnapshotRequest) (StartSnapshotResponse, error) {
 	var out StartSnapshotResponse
 	if err := c.postJSON(ctx, http.MethodPost, PathSnapshots, req, &out); err != nil {
-		return "", err
+		return StartSnapshotResponse{}, err
 	}
 	if out.SnapshotID == "" {
-		return "", errors.New("api: server returned an empty snapshot id")
+		return StartSnapshotResponse{}, errors.New("api: server returned an empty snapshot id")
 	}
-	return out.SnapshotID, nil
+	if out.Kind == "" {
+		out.Kind = req.Kind
+	}
+	return out, nil
 }
 
 // AddEntries appends a batch of entries to an open snapshot.
@@ -349,6 +359,31 @@ func (c *Client) ListSnapshots(ctx context.Context) ([]Snapshot, error) {
 		return nil, err
 	}
 	return out.Snapshots, nil
+}
+
+// FileVersion is one distinct appearance of a path across backups.
+type FileVersion struct {
+	Snapshot Snapshot `json:"snapshot"`
+	Entry    Entry    `json:"entry"`
+}
+
+// FileVersions lists distinct content versions of a path on this device.
+func (c *Client) FileVersions(ctx context.Context, path string, limit int) ([]FileVersion, error) {
+	q := url.Values{}
+	q.Set("path", path)
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	var out struct {
+		Versions []FileVersion `json:"versions"`
+	}
+	if err := c.postJSON(ctx, http.MethodGet, PathFileVersions+"?"+q.Encode(), nil, &out); err != nil {
+		return nil, err
+	}
+	if out.Versions == nil {
+		return []FileVersion{}, nil
+	}
+	return out.Versions, nil
 }
 
 // EntryQuery selects a page of snapshot entries.

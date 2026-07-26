@@ -81,6 +81,9 @@ function PolicyCard({ initial }: { initial: Settings }) {
             disabled={state.busy}
             onChange={(e) => save({ retention_days: Number(e.target.value) })}
           >
+            {![7, 30, 90, 365, 0].includes(settings.retention_days) && (
+              <option value={settings.retention_days}>{settings.retention_days} days</option>
+            )}
             <option value={7}>7 days</option>
             <option value={30}>30 days</option>
             <option value={90}>90 days</option>
@@ -187,12 +190,12 @@ function PasswordChange() {
           required
         />
       </Field>
-      <Field label="New password">
+      <Field label="New password" hint="At least 10 characters.">
         <input
           className={inputClass}
           type="password"
           autoComplete="new-password"
-          minLength={12}
+          minLength={10}
           value={next}
           onChange={(e) => setNext(e.target.value)}
           required
@@ -270,6 +273,16 @@ function IgnoreRulesCard({ rules }: { rules: IgnoreRules }) {
               ))}
             </div>
           </div>
+          {rules.max_file_size != null && rules.max_file_size > 0 && (
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-muted)]">
+                Large files
+              </h3>
+              <p className="mt-2 text-sm text-[var(--color-ink-muted)]">
+                Files larger than {bytes(rules.max_file_size)} are skipped.
+              </p>
+            </div>
+          )}
         </div>
       )}
     </Card>

@@ -4,11 +4,6 @@ function Bone({ className = '' }: { className?: string }) {
   return <div className={`skeleton-bone ${className}`} aria-hidden />
 }
 
-/** Generic block used for simple lists and nested cards. */
-export function Skeleton({ className = '' }: { className?: string }) {
-  return <Bone className={className} />
-}
-
 export function OverviewSkeleton() {
   return (
     <div className="space-y-8" role="status" aria-label="Loading overview">

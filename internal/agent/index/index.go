@@ -166,13 +166,64 @@ func (i *Index) Delete(ctx context.Context, path string) error {
 }
 
 // DeleteTree forgets a path and everything beneath it, used when a folder is
-// removed or a root is dropped.
+// removed or a root is dropped. Paths are matched in both slash forms because
+// Windows indexes historically stored backslashes while the range upper-bound
+// trick only works with '/'.
 func (i *Index) DeleteTree(ctx context.Context, prefix string) error {
-	prefix = strings.TrimSuffix(prefix, "/")
-	_, err := i.db.ExecContext(ctx,
-		`DELETE FROM files WHERE path = ? OR (path >= ? AND path < ?)`,
-		prefix, prefix+"/", prefix+"0")
+	slash := strings.Trim(filepath.ToSlash(filepath.Clean(prefix)), "/")
+	if slash == "" || slash == "." {
+		return nil
+	}
+	// Rebuild a native absolute prefix for legacy rows.
+	native := filepath.FromSlash(slash)
+	if filepath.IsAbs(prefix) || strings.Contains(prefix, `:\`) || strings.HasPrefix(prefix, `\\`) {
+		native = filepath.Clean(prefix)
+	}
+	_, err := i.db.ExecContext(ctx, `
+		DELETE FROM files WHERE path = ? OR path = ?
+		 OR path LIKE ? ESCAPE '\'
+		 OR path LIKE ? ESCAPE '\'`,
+		slash, native,
+		likePrefix(slash+"/"),
+		likePrefix(native+string(filepath.Separator)),
+	)
 	return err
+}
+
+func likePrefix(prefix string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(prefix) + "%"
+}
+
+// PathsUnder lists indexed paths at or under prefix (slash-normalized match plus
+// native separator match for older Windows rows).
+func (i *Index) PathsUnder(ctx context.Context, prefix string) ([]string, error) {
+	slash := strings.Trim(filepath.ToSlash(filepath.Clean(prefix)), "/")
+	native := filepath.FromSlash(slash)
+	if filepath.IsAbs(prefix) || strings.Contains(prefix, `:\`) || strings.HasPrefix(prefix, `\\`) {
+		native = filepath.Clean(prefix)
+	}
+	rows, err := i.db.QueryContext(ctx, `
+		SELECT path FROM files WHERE path = ? OR path = ?
+		 OR path LIKE ? ESCAPE '\'
+		 OR path LIKE ? ESCAPE '\'`,
+		slash, native,
+		likePrefix(slash+"/"),
+		likePrefix(native+string(filepath.Separator)),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 // Stale returns paths that were not seen in the given scan generation, i.e. the

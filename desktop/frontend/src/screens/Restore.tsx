@@ -17,6 +17,8 @@ export function Restore() {
   const [versionsPath, setVersionsPath] = useState('')
   const [progress, setProgress] = useState<RestoreProgress | null>(null)
   const [tab, setTab] = useState<'files' | 'history'>('files')
+  const [extra, setExtra] = useState<{ key: string; entries: Entry[]; cursor: string }>()
+  const more = useAction()
   const action = useAction()
 
   const snapshots = useAsync(() => api.snapshots(), [])
@@ -26,7 +28,10 @@ export function Restore() {
   const viewingOlder = Boolean(snapshot && completed[0] && snapshot !== completed[0].id)
 
   const page = useAsync(
-    () => (activeSnapshot ? api.browse(activeSnapshot, prefix) : Promise.resolve({ entries: [] })),
+    () =>
+      activeSnapshot
+        ? api.browse(activeSnapshot, prefix)
+        : Promise.resolve({ entries: [] as Entry[], next_cursor: '' }),
     [activeSnapshot, prefix],
   )
 
@@ -63,7 +68,17 @@ export function Restore() {
       })
     })
 
-  const entries = results ?? page.data?.entries ?? []
+  const openFolder = (path: string) => {
+    setResults(null)
+    setVersionsPath('')
+    setExtra(undefined)
+    setPrefix(path.replace(/\/+$/, ''))
+  }
+
+  const pageKey = `${activeSnapshot}:${prefix}`
+  const appended = extra?.key === pageKey ? extra.entries : []
+  const cursor = extra?.key === pageKey ? extra.cursor : page.data?.next_cursor || ''
+  const entries = results ?? [...(page.data?.entries ?? []), ...appended]
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-5">
@@ -89,6 +104,7 @@ export function Restore() {
             setPrefix('')
             setResults(null)
             setVersionsPath('')
+            setExtra(undefined)
             setTab('files')
           }}
         />
@@ -109,6 +125,7 @@ export function Restore() {
                 onClick={() => {
                   setSnapshot('')
                   setVersionsPath('')
+                  setExtra(undefined)
                 }}
               >
                 Back to latest
@@ -158,12 +175,12 @@ export function Restore() {
               <button
                 className="text-brand hover:underline disabled:text-ink-muted disabled:no-underline"
                 disabled={!prefix}
-                onClick={() => setPrefix(parentPath(prefix))}
+                onClick={() => openFolder(parentPath(prefix).replace(/\/+$/, ''))}
               >
                 Up
               </button>
               <span className="selectable truncate text-ink-muted" title={prefix || '/'}>
-                {prefix ? `/${prefix.replace(/\/$/, '')}` : 'All backed-up folders'}
+                {prefix ? `/${prefix}` : 'All backed-up folders'}
               </span>
             </div>
           )}
@@ -184,49 +201,69 @@ export function Restore() {
             </Empty>
           ) : (
             <div className={versionsPath ? 'grid gap-4 lg:grid-cols-[1fr_16rem]' : ''}>
-              <Rows>
-                {entries.map((entry) => (
-                  <div key={entry.path} className="flex items-center justify-between gap-4 py-2.5">
-                    <button
-                      className="flex min-w-0 items-center gap-2.5 text-left"
-                      onClick={() => {
-                        if (entry.type === 'dir') {
-                          setResults(null)
-                          setVersionsPath('')
-                          setPrefix(entry.path.endsWith('/') ? entry.path : `${entry.path}/`)
-                        } else {
-                          setVersionsPath(entry.path)
-                        }
-                      }}
-                    >
-                      <Icon dir={entry.type === 'dir'} />
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm text-ink">{fileName(entry.path)}</span>
-                        <span className="block truncate text-xs text-ink-muted">
-                          {entry.type === 'dir'
-                            ? 'Folder'
-                            : `${bytes(entry.size)} · ${when(entry.mtime)}`}
-                          {results ? ` · /${parentPath(entry.path) || ''}` : ''}
-                        </span>
-                      </span>
-                    </button>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {entry.type !== 'dir' && (
-                        <Button tone="quiet" onClick={() => setVersionsPath(entry.path)}>
-                          Versions
-                        </Button>
-                      )}
-                      <Button
-                        tone="quiet"
-                        disabled={progress?.running}
-                        onClick={() => restore(entry.path)}
+              <div>
+                <Rows>
+                  {entries.map((entry) => (
+                    <div key={entry.path} className="flex items-center justify-between gap-4 py-2.5">
+                      <button
+                        className="flex min-w-0 items-center gap-2.5 text-left"
+                        onClick={() => {
+                          if (entry.type === 'dir') {
+                            openFolder(entry.path)
+                          } else {
+                            setVersionsPath(entry.path)
+                          }
+                        }}
                       >
-                        Restore
-                      </Button>
+                        <Icon dir={entry.type === 'dir'} />
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm text-ink">{fileName(entry.path)}</span>
+                          <span className="block truncate text-xs text-ink-muted">
+                            {entry.type === 'dir'
+                              ? 'Folder'
+                              : `${bytes(entry.size)} · ${when(entry.mtime)}`}
+                            {results ? ` · /${parentPath(entry.path).replace(/\/+$/, '') || ''}` : ''}
+                          </span>
+                        </span>
+                      </button>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {entry.type !== 'dir' && (
+                          <Button tone="quiet" onClick={() => setVersionsPath(entry.path)}>
+                            Versions
+                          </Button>
+                        )}
+                        <Button
+                          tone="quiet"
+                          disabled={progress?.running}
+                          onClick={() => restore(entry.path)}
+                        >
+                          Restore
+                        </Button>
+                      </div>
                     </div>
+                  ))}
+                </Rows>
+                {cursor && !results && (
+                  <div className="mt-3 text-center">
+                    <Button
+                      tone="quiet"
+                      busy={more.busy}
+                      onClick={() =>
+                        void more.run(async () => {
+                          const next = await api.browse(activeSnapshot, prefix, cursor)
+                          setExtra({
+                            key: pageKey,
+                            entries: [...appended, ...(next.entries ?? [])],
+                            cursor: next.next_cursor ?? '',
+                          })
+                        })
+                      }
+                    >
+                      Show more
+                    </Button>
                   </div>
-                ))}
-              </Rows>
+                )}
+              </div>
 
               {versionsPath && (
                 <VersionPanel
@@ -236,19 +273,14 @@ export function Restore() {
                   onRestore={(snapId) => restore(versionsPath, snapId)}
                   onBrowse={(snapId) => {
                     setSnapshot(snapId)
-                    setPrefix(parentPath(versionsPath))
+                    setPrefix(parentPath(versionsPath).replace(/\/+$/, ''))
                     setResults(null)
+                    setExtra(undefined)
                   }}
                   restoring={Boolean(progress?.running)}
                 />
               )}
             </div>
-          )}
-
-          {page.data?.next_cursor && !results && (
-            <p className="mt-3 text-xs text-ink-muted">
-              Showing the first {entries.length} items in this folder.
-            </p>
           )}
         </Card>
       )}
@@ -320,6 +352,7 @@ function VersionPanel({
   restoring?: boolean
 }) {
   const versions = useAsync(() => api.fileVersions(path), [path])
+  const list = versions.data ?? []
 
   return (
     <aside className="rounded-xl border border-border-subtle bg-surface-muted/40 p-3">
@@ -342,21 +375,21 @@ function VersionPanel({
           <Spinner /> Loading...
         </div>
       )}
-      {versions.data && versions.data.length === 0 && (
+      {!versions.loading && !versions.error && list.length === 0 && (
         <Empty title="No versions found">This path is not in any completed backup.</Empty>
       )}
-      {versions.data && versions.data.length === 1 && (
+      {list.length === 1 && (
         <p className="mb-2 text-xs text-ink-muted">
           Only one version — the file has not changed across backups yet.
         </p>
       )}
-      {versions.data && versions.data.length > 0 && (
+      {list.length > 0 && (
         <ul className="space-y-2">
-          {versions.data.map((version: FileVersion, index: number) => (
+          {list.map((version: FileVersion, index: number) => (
             <li key={version.snapshot.id} className="rounded-lg border border-border-subtle bg-surface p-2.5">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-ink">
-                  {index === 0 ? 'Current' : `Version ${versions.data!.length - index}`}
+                  {index === 0 ? 'Current' : `Version ${list.length - index}`}
                 </span>
                 {version.snapshot.id === currentSnapshotId && <Badge>viewing</Badge>}
               </div>
