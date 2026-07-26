@@ -1,27 +1,26 @@
 /**
- * Overview answers the only question most visitors have: is my data safe right
- * now? The health of the least healthy device therefore comes first, ahead of any
- * storage statistics.
+ * Home: status first, then the user's backed-up content as openable tiles —
+ * closer to a file library than a metrics dashboard.
  */
 
 import type { ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api, type Device, type Snapshot, type Usage } from '@/lib/api'
 import { bytes, count, platformLabel, relative } from '@/lib/format'
 import { useLoader } from '@/lib/use-loader'
 import { HealthBadge } from '@/components/health-badge'
-import { Card, Empty, ErrorNote, Meter, Stat } from '@/components/ui'
+import { Empty, ErrorNote, FolderGlyph, Meter, Stat } from '@/components/ui'
 import { OverviewSkeleton } from '@/components/skeleton'
 
 type Overview = { devices: Device[]; usage: Usage; snapshots: Snapshot[] }
 
 export default function OverviewPage() {
+  const navigate = useNavigate()
   const { data, error, loading } = useLoader<Overview>(
     async () => {
       const [devices, usage, snapshots] = await Promise.all([api.devices(), api.usage(), api.snapshots()])
       return { devices, usage, snapshots }
     },
-    // Refresh while the page is open so a running backup is visible.
     { pollMs: 15000 },
   )
 
@@ -34,12 +33,56 @@ export default function OverviewPage() {
     (best, s) => (s.status === 'complete' && (!best || s.started_at > best.started_at) ? s : best),
     undefined,
   )
+  const recent = snapshots.filter((s) => s.status === 'complete').slice(0, 8)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <HealthBanner devices={devices} newest={newest} />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section>
+        <div className="mb-3 flex items-end justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight">Your content</h2>
+            <p className="text-sm text-[var(--color-ink-muted)]">Open a backup to browse folders and files</p>
+          </div>
+          <Link to="/backups" className="text-sm font-semibold text-[var(--color-brand)] hover:underline">
+            See all
+          </Link>
+        </div>
+
+        {recent.length === 0 ? (
+          <div className="panel">
+            <Empty
+              title="No files backed up yet"
+              hint="Connect a device, run a backup, and your folders will appear here."
+            />
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {recent.map((snapshot) => (
+              <button
+                key={snapshot.id}
+                type="button"
+                className="content-tile"
+                onClick={() => navigate(`/backups?id=${snapshot.id}`)}
+              >
+                <FolderGlyph large />
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold">{snapshot.device_name ?? 'Backup'}</div>
+                  <div className="mt-0.5 truncate text-xs text-[var(--color-ink-muted)]">
+                    {count(snapshot.file_count)} items · {bytes(snapshot.total_bytes)}
+                  </div>
+                  <div className="mt-2 text-[0.7rem] font-medium text-[var(--color-ink-muted)]">
+                    {relative(snapshot.started_at)}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Devices" value={count(devices.length)} hint={`${problems.length} needing attention`} />
         <Stat
           label="Files protected"
@@ -49,128 +92,95 @@ export default function OverviewPage() {
         <Stat
           label="Stored on server"
           value={bytes(usage.stored_bytes)}
-          hint={`${bytes(usage.logical_bytes)} of files, ${usage.dedup_ratio.toFixed(1)}× saved`}
+          hint={`${bytes(usage.logical_bytes)} logical · ${usage.dedup_ratio.toFixed(1)}× saved`}
           tone="good"
         />
-        <Stat
-          label="Backups kept"
-          value={count(usage.snapshot_count)}
-          hint={`${count(usage.chunk_count)} unique blocks`}
-        />
-      </div>
+        <Stat label="Backups kept" value={count(usage.snapshot_count)} hint={`${count(usage.chunk_count)} unique blocks`} />
+      </section>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card title="Devices" className="lg:col-span-2">
+      <section className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
+        <div className="panel overflow-hidden">
+          <header className="flex items-center justify-between border-b border-[var(--color-border-subtle)] px-5 py-3.5">
+            <h2 className="text-sm font-semibold">Devices</h2>
+            <Link to="/devices" className="text-xs font-semibold text-[var(--color-brand)] hover:underline">
+              Manage
+            </Link>
+          </header>
           {devices.length === 0 ? (
-            <Empty title="No devices yet" hint="Add one from the Devices page to get a connection code." />
+            <Empty title="No devices yet" hint="Create a connection code on the Devices page." />
           ) : (
-            <ul className="divide-y divide-[var(--color-border-subtle)]">
+            <ul>
               {devices.map((device) => (
-                <li key={device.id} className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <li
+                  key={device.id}
+                  className="flex items-center justify-between gap-4 border-b border-[var(--color-border-subtle)] px-5 py-3.5 last:border-0"
+                >
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate text-sm font-medium">{device.name}</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-sm font-semibold">{device.name}</span>
                       <HealthBadge health={device.health} state={device.state} />
                     </div>
                     <div className="mt-0.5 truncate text-xs text-[var(--color-ink-muted)]">
                       {platformLabel(device.platform)} · last seen {relative(device.last_seen)}
-                      {device.state_reason ? ` · ${device.state_reason}` : ''}
                     </div>
                   </div>
                   <div className="text-right text-xs text-[var(--color-ink-muted)]">
-                    <div className="tabular text-sm text-[var(--color-ink)]">{bytes(device.logical_bytes)}</div>
-                    <div>backed up {relative(device.last_backup_at)}</div>
+                    <div className="tabular text-sm font-semibold text-[var(--color-ink)]">
+                      {bytes(device.logical_bytes)}
+                    </div>
+                    <div>{relative(device.last_backup_at)}</div>
                   </div>
                 </li>
               ))}
             </ul>
           )}
-        </Card>
-
-        <div className="space-y-6">
-          <Card title="Storage">
-            <div className="space-y-4">
-              <div>
-                <div className="flex items-baseline justify-between text-sm">
-                  <span className="text-[var(--color-ink-muted)]">Used</span>
-                  <span className="tabular font-medium">
-                    {bytes(usage.stored_bytes)}
-                    {usage.quota_bytes > 0 ? ` of ${bytes(usage.quota_bytes)}` : ''}
-                  </span>
-                </div>
-                {usage.quota_bytes > 0 ? (
-                  <div className="mt-2">
-                    <Meter value={usage.stored_bytes} max={usage.quota_bytes} />
-                  </div>
-                ) : (
-                  <p className="mt-1 text-xs text-[var(--color-ink-muted)]">No quota set.</p>
-                )}
-              </div>
-              {usage.free_disk_bytes >= 0 && (
-                <div className="text-sm">
-                  <span className="text-[var(--color-ink-muted)]">Free space on server: </span>
-                  <span className="tabular font-medium">{bytes(usage.free_disk_bytes)}</span>
-                </div>
-              )}
-              <div className="rounded-lg bg-[var(--color-surface-muted)] px-3 py-2.5 text-xs text-[var(--color-ink-muted)]">
-                Deduplication and compression have saved{' '}
-                <strong className="text-[var(--color-ink)]">
-                  {bytes(Math.max(usage.logical_bytes - usage.stored_bytes, 0))}
-                </strong>{' '}
-                so far.
-              </div>
-            </div>
-          </Card>
-
-          <Card
-            title="Latest backups"
-            action={
-              <Link className="text-xs text-[var(--color-brand)]" to="/backups">
-                All
-              </Link>
-            }
-          >
-            {snapshots.length === 0 ? (
-              <Empty title="Nothing backed up yet" />
-            ) : (
-              <ul className="space-y-2.5">
-                {snapshots.slice(0, 5).map((snapshot) => (
-                  <li key={snapshot.id} className="text-sm">
-                    <Link className="hover:underline" to={`/backups?id=${snapshot.id}`}>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate">{snapshot.device_name ?? 'device'}</span>
-                        <span className="text-xs text-[var(--color-ink-muted)]">{relative(snapshot.started_at)}</span>
-                      </div>
-                      <div className="text-xs text-[var(--color-ink-muted)]">
-                        {count(snapshot.file_count)} files · {bytes(snapshot.total_bytes)}
-                      </div>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
         </div>
-      </div>
+
+        <div className="panel p-5">
+          <h2 className="text-sm font-semibold">Storage</h2>
+          <div className="mt-4 space-y-4">
+            <div className="flex items-baseline justify-between text-sm">
+              <span className="text-[var(--color-ink-muted)]">Used</span>
+              <span className="tabular font-semibold">
+                {bytes(usage.stored_bytes)}
+                {usage.quota_bytes > 0 ? ` of ${bytes(usage.quota_bytes)}` : ''}
+              </span>
+            </div>
+            {usage.quota_bytes > 0 ? (
+              <Meter value={usage.stored_bytes} max={usage.quota_bytes} />
+            ) : (
+              <p className="text-xs text-[var(--color-ink-muted)]">No quota set — using available disk.</p>
+            )}
+            {usage.free_disk_bytes >= 0 && (
+              <p className="text-sm">
+                <span className="text-[var(--color-ink-muted)]">Free on server · </span>
+                <span className="tabular font-semibold">{bytes(usage.free_disk_bytes)}</span>
+              </p>
+            )}
+            <p className="rounded-xl bg-[var(--color-surface-muted)] px-3 py-2.5 text-xs leading-relaxed text-[var(--color-ink-muted)]">
+              Dedup + compression saved{' '}
+              <strong className="text-[var(--color-ink)]">
+                {bytes(Math.max(usage.logical_bytes - usage.stored_bytes, 0))}
+              </strong>{' '}
+              so far.
+            </p>
+          </div>
+        </div>
+      </section>
     </div>
   )
 }
 
-/**
- * HealthBanner states the overall situation in one sentence. Nobody should have
- * to interpret a table to find out whether their backups are working.
- */
 function HealthBanner({ devices, newest }: { devices: Device[]; newest?: Snapshot }) {
   if (devices.length === 0) {
     return (
-      <Banner tone="brand" title="No devices are connected yet.">
+      <Banner tone="brand" title="Ready when you are">
         Go to{' '}
-        <Link className="underline" to="/devices">
+        <Link className="font-semibold underline" to="/devices">
           Devices
         </Link>{' '}
-        to create a connection code, then run{' '}
-        <code className="rounded bg-[var(--color-surface-muted)] px-1 py-0.5 text-xs">openbackup connect</code> on the
-        computer you want to back up.
+        for a connection code, then run{' '}
+        <code className="rounded-md bg-[var(--color-surface)] px-1.5 py-0.5 font-mono text-xs">openbackup connect</code>.
       </Banner>
     )
   }
@@ -181,28 +191,28 @@ function HealthBanner({ devices, newest }: { devices: Device[]; newest?: Snapsho
 
   if (failing.length > 0) {
     return (
-      <Banner tone="bad" title={`${failing.length} device${failing.length === 1 ? '' : 's'} reported an error.`}>
-        {failing[0].last_error || 'Check the Activity page for details.'}
+      <Banner tone="bad" title={`${failing.length} device${failing.length === 1 ? '' : 's'} reported an error`}>
+        {failing[0].last_error || 'Check Activity for details.'}
       </Banner>
     )
   }
   if (stale.length > 0) {
     return (
-      <Banner tone="warn" title={`${stale.length} device${stale.length === 1 ? '' : 's'} has not backed up recently.`}>
-        {stale.map((d) => d.name).join(', ')} — the machine may be switched off, or the agent may have stopped.
+      <Banner tone="warn" title={`${stale.length} device${stale.length === 1 ? '' : 's'} out of date`}>
+        {stale.map((d) => d.name).join(', ')} may be offline or the agent stopped.
       </Banner>
     )
   }
   if (never.length > 0) {
     return (
-      <Banner tone="warn" title="A device is connected but has not backed up yet.">
-        The first backup can take a while. It will appear here as soon as it finishes.
+      <Banner tone="warn" title="First backup still running">
+        It will show under Your content when finished.
       </Banner>
     )
   }
   return (
-    <Banner tone="good" title="Everything is backed up.">
-      The most recent backup finished {relative(newest?.started_at)} and covers {count(newest?.file_count)} files.
+    <Banner tone="good" title="Everything is backed up">
+      Latest finished {relative(newest?.started_at)} · {count(newest?.file_count)} files protected.
     </Banner>
   )
 }
@@ -219,16 +229,16 @@ function Banner({
   const color = `var(--color-${tone})`
   return (
     <div
-      className="rounded-xl border px-5 py-4"
+      className="rounded-2xl border px-5 py-4"
       style={{
-        borderColor: `color-mix(in oklch, ${color} 35%, transparent)`,
-        background: `color-mix(in oklch, ${color} 8%, var(--color-surface))`,
+        borderColor: `color-mix(in oklch, ${color} 28%, transparent)`,
+        background: `linear-gradient(135deg, color-mix(in oklch, ${color} 10%, var(--color-surface)), var(--color-surface))`,
       }}
     >
       <div className="flex items-start gap-3">
-        <span className="mt-1.5 size-2 shrink-0 rounded-full" style={{ background: color }} />
+        <span className="mt-1.5 size-2.5 shrink-0 rounded-full" style={{ background: color }} />
         <div>
-          <p className="text-sm font-semibold">{title}</p>
+          <p className="text-sm font-semibold tracking-tight">{title}</p>
           <p className="mt-0.5 text-sm text-[var(--color-ink-muted)]">{children}</p>
         </div>
       </div>

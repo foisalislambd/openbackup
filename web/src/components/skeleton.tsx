@@ -11,65 +11,25 @@ export function Skeleton({ className = '' }: { className?: string }) {
 
 export function OverviewSkeleton() {
   return (
-    <div className="space-y-6" role="status" aria-label="Loading overview">
-      <Bone className="h-20 w-full rounded-xl" />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="space-y-8" role="status" aria-label="Loading overview">
+      <Bone className="h-20 w-full rounded-2xl" />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 4 }, (_, i) => (
-          <div
-            key={i}
-            className="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-5 py-4"
-          >
+          <div key={i} className="panel space-y-3 p-4">
+            <Bone className="size-10 rounded-xl" />
+            <Bone className="h-4 w-32 rounded" />
+            <Bone className="h-3 w-24 rounded" />
+          </div>
+        ))}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }, (_, i) => (
+          <div key={i} className="panel px-5 py-4">
             <Bone className="h-3 w-16 rounded" />
             <Bone className="mt-3 h-7 w-24 rounded" />
             <Bone className="mt-2 h-3 w-28 rounded" />
           </div>
         ))}
-      </div>
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface)] lg:col-span-2">
-          <div className="border-b border-[var(--color-border-subtle)] px-5 py-3.5">
-            <Bone className="h-4 w-20 rounded" />
-          </div>
-          <div className="space-y-4 px-5 py-4">
-            {Array.from({ length: 4 }, (_, i) => (
-              <div key={i} className="flex items-center justify-between gap-4">
-                <div className="min-w-0 flex-1 space-y-2">
-                  <Bone className="h-4 w-40 max-w-full rounded" />
-                  <Bone className="h-3 w-56 max-w-full rounded" />
-                </div>
-                <div className="space-y-2">
-                  <Bone className="ml-auto h-4 w-16 rounded" />
-                  <Bone className="ml-auto h-3 w-24 rounded" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="space-y-6">
-          <div className="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface)]">
-            <div className="border-b border-[var(--color-border-subtle)] px-5 py-3.5">
-              <Bone className="h-4 w-16 rounded" />
-            </div>
-            <div className="space-y-4 px-5 py-4">
-              <Bone className="h-3 w-full rounded" />
-              <Bone className="h-2 w-full rounded-full" />
-              <Bone className="h-12 w-full rounded-lg" />
-            </div>
-          </div>
-          <div className="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface)]">
-            <div className="border-b border-[var(--color-border-subtle)] px-5 py-3.5">
-              <Bone className="h-4 w-28 rounded" />
-            </div>
-            <div className="space-y-3 px-5 py-4">
-              {Array.from({ length: 3 }, (_, i) => (
-                <div key={i} className="space-y-2">
-                  <Bone className="h-4 w-full rounded" />
-                  <Bone className="h-3 w-40 rounded" />
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   )
@@ -227,22 +187,32 @@ export function SettingsSkeleton() {
 /** Compact shell placeholder while bootstrap runs. */
 export function ShellSkeleton() {
   return (
-    <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 p-4 sm:p-6" role="status" aria-label="Starting">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Bone className="size-9 rounded-xl" />
+    <div className="app-shell" role="status" aria-label="Starting">
+      <aside className="app-sidebar">
+        <div className="flex items-center gap-3 px-2">
+          <Bone className="size-10 rounded-2xl" />
           <div className="space-y-2">
             <Bone className="h-4 w-28 rounded" />
-            <Bone className="h-3 w-16 rounded" />
+            <Bone className="h-3 w-14 rounded" />
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="space-y-2">
           {Array.from({ length: 5 }, (_, i) => (
-            <Bone key={i} className="h-8 w-16 rounded-lg" />
+            <Bone key={i} className="h-10 w-full rounded-xl" />
           ))}
         </div>
+      </aside>
+      <div className="app-main">
+        <div className="app-topbar">
+          <div className="space-y-2">
+            <Bone className="h-7 w-40 rounded" />
+            <Bone className="h-4 w-56 rounded" />
+          </div>
+        </div>
+        <div className="app-content">
+          <OverviewSkeleton />
+        </div>
       </div>
-      <OverviewSkeleton />
     </div>
   )
 }

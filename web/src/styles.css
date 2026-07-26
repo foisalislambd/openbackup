@@ -1,59 +1,207 @@
 @import 'tailwindcss';
 
 /*
- * The palette is intentionally calm. A backup dashboard gets opened when someone
- * is worried, so the resting state should read as "everything is fine" without
- * shouting, and a problem should be the only thing using a warm colour.
- *
- * Colours are declared once as theme tokens and then re-pointed for dark mode:
- * Tailwind v4 resolves @theme at build time, so the dark values have to arrive
- * as plain custom properties rather than a second @theme block.
+ * Cloud-canvas palette: calm cool neutrals with a clear sky accent.
+ * Resting state feels open and roomy (like a file library); problems still
+ * use warm colour so they are the only loud signal.
  */
 @theme {
-  --color-surface: oklch(100% 0 0);
-  --color-surface-muted: oklch(98% 0.004 250);
-  --color-border-subtle: oklch(92% 0.006 250);
-  --color-ink: oklch(24% 0.02 260);
-  --color-ink-muted: oklch(52% 0.015 260);
-  --color-brand: oklch(56% 0.16 250);
-  --color-brand-soft: oklch(96% 0.03 250);
-  --color-good: oklch(62% 0.14 155);
-  --color-warn: oklch(72% 0.15 75);
-  --color-bad: oklch(58% 0.19 25);
+  --color-canvas: oklch(96.5% 0.008 240);
+  --color-surface: oklch(99.5% 0.004 240);
+  --color-surface-muted: oklch(94.5% 0.01 240);
+  --color-sidebar: oklch(98.2% 0.01 235);
+  --color-border-subtle: oklch(90% 0.012 240);
+  --color-ink: oklch(28% 0.03 250);
+  --color-ink-muted: oklch(50% 0.02 250);
+  --color-brand: oklch(55% 0.14 235);
+  --color-brand-soft: oklch(94% 0.04 235);
+  --color-brand-strong: oklch(45% 0.14 235);
+  --color-good: oklch(58% 0.13 155);
+  --color-warn: oklch(70% 0.14 75);
+  --color-bad: oklch(55% 0.18 25);
+  --color-folder: oklch(72% 0.12 85);
+  --color-file: oklch(62% 0.08 235);
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, monospace;
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --shadow-panel: 0 1px 0 oklch(28% 0.03 250 / 0.04), 0 8px 24px oklch(28% 0.03 250 / 0.04);
+  --shadow-lift: 0 4px 20px oklch(45% 0.08 235 / 0.1);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-surface: oklch(21% 0.015 265);
-    --color-surface-muted: oklch(17% 0.012 265);
-    --color-border-subtle: oklch(32% 0.015 265);
-    --color-ink: oklch(96% 0.005 260);
-    --color-ink-muted: oklch(72% 0.015 260);
-    --color-brand: oklch(70% 0.14 250);
-    --color-brand-soft: oklch(30% 0.05 250);
-    --color-good: oklch(70% 0.14 155);
-    --color-warn: oklch(78% 0.15 75);
-    --color-bad: oklch(66% 0.18 25);
+    --color-canvas: oklch(18% 0.02 250);
+    --color-surface: oklch(22% 0.02 250);
+    --color-surface-muted: oklch(26% 0.02 250);
+    --color-sidebar: oklch(20% 0.022 250);
+    --color-border-subtle: oklch(32% 0.02 250);
+    --color-ink: oklch(96% 0.01 240);
+    --color-ink-muted: oklch(72% 0.02 240);
+    --color-brand: oklch(72% 0.12 230);
+    --color-brand-soft: oklch(30% 0.05 230);
+    --color-brand-strong: oklch(78% 0.12 230);
+    --color-good: oklch(70% 0.13 155);
+    --color-warn: oklch(78% 0.14 75);
+    --color-bad: oklch(68% 0.16 25);
+    --color-folder: oklch(78% 0.1 85);
+    --color-file: oklch(72% 0.08 235);
+    --shadow-panel: 0 1px 0 oklch(100% 0 0 / 0.04), 0 10px 28px oklch(0% 0 0 / 0.35);
+    --shadow-lift: 0 8px 28px oklch(0% 0 0 / 0.4);
   }
 }
 
 html,
+body,
+#root {
+  min-height: 100%;
+}
+
+html,
 body {
-  background: var(--color-surface-muted);
+  background:
+    radial-gradient(1200px 600px at 0% -10%, color-mix(in oklch, var(--color-brand) 12%, transparent), transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, color-mix(in oklch, var(--color-brand) 8%, transparent), transparent 50%),
+    var(--color-canvas);
+  background-attachment: fixed;
   color: var(--color-ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
-/* Numbers in tables must line up, or comparing sizes becomes guesswork. */
 .tabular {
   font-variant-numeric: tabular-nums;
 }
 
-/* Soft shimmer for skeleton loaders. Reduced-motion users get a static block. */
+.app-shell {
+  display: grid;
+  grid-template-columns: 17rem 1fr;
+  min-height: 100vh;
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .app-sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    border-right: none !important;
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+
+  .app-sidebar-nav {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 0.25rem;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+  }
+
+  .app-sidebar-nav a {
+    white-space: nowrap;
+  }
+
+  .app-sidebar-foot {
+    display: none !important;
+  }
+}
+
+.app-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.25rem 1rem;
+  background: color-mix(in oklch, var(--color-sidebar) 92%, transparent);
+  backdrop-filter: blur(12px);
+  border-right: 1px solid var(--color-border-subtle);
+}
+
+.app-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 100vh;
+}
+
+.app-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.15rem 1.75rem 0.85rem;
+  animation: rise-in 0.45s ease both;
+}
+
+.app-content {
+  flex: 1;
+  padding: 0.5rem 1.75rem 2rem;
+  animation: rise-in 0.55s ease both;
+}
+
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 1rem;
+  box-shadow: var(--shadow-panel);
+}
+
+.file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7rem 8rem 9rem;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.7rem 1rem;
+  border-radius: 0.75rem;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.file-row:hover {
+  background: var(--color-surface-muted);
+}
+
+@media (max-width: 720px) {
+  .file-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .file-row-meta {
+    display: none !important;
+  }
+}
+
+.content-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1.1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-panel);
+  text-align: left;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.content-tile:hover {
+  border-color: color-mix(in oklch, var(--color-brand) 35%, var(--color-border-subtle));
+  box-shadow: var(--shadow-lift);
+  transform: translateY(-2px);
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .skeleton-bone {
   background: linear-gradient(
     90deg,
@@ -85,5 +233,9 @@ body {
   .skeleton-bone {
     background: var(--color-border-subtle);
     animation: none;
+  }
+
+  .content-tile:hover {
+    transform: none;
   }
 }
