@@ -6,6 +6,9 @@
 # commit message. You can also run this workflow manually (Actions → Release)
 # and optionally set an exact tag like v0.3.0.
 #
+# Auto versioning: patch runs 0–9, then the minor bumps
+# (v0.1.9 → v0.2.0, v0.2.9 → v0.3.0).
+#
 # Docker Hub push needs repository secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN.
 name: Release
 
@@ -15,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Exact tag (e.g. v0.3.0). Leave empty to auto-bump patch.'
+        description: 'Exact tag (e.g. v0.2.0). Leave empty to auto-bump (…9 → next minor.0).'
         required: false
         type: string
 
@@ -67,7 +70,9 @@ jobs:
             if [ -z "$last" ]; then
               tag="v0.1.0"
             else
-              # vMAJOR.MINOR.PATCH → bump PATCH
+              # vMAJOR.MINOR.PATCH — patch stays 0–9; after .9 bump minor
+              # (v0.1.9 → v0.2.0, v0.2.9 → v0.3.0). Also rolls up if last
+              # patch is already ≥9 (e.g. a leftover v0.1.10 → v0.2.0).
               ver=${last#v}
               major=${ver%%.*}
               rest=${ver#*.}
@@ -75,7 +80,12 @@ jobs:
               patch=${rest#*.}
               patch=${patch%%[!0-9]*}
               if [ -z "$patch" ]; then patch=0; fi
-              tag="v${major}.${minor}.$((patch + 1))"
+              next_patch=$((patch + 1))
+              if [ "$next_patch" -gt 9 ]; then
+                minor=$((minor + 1))
+                next_patch=0
+              fi
+              tag="v${major}.${minor}.${next_patch}"
             fi
           fi
 

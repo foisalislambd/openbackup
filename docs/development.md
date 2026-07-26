@@ -136,12 +136,15 @@ in the pipeline.
 ## Release
 
 Pushing to `main` runs [`.github/workflows/release.yml`](../.github/workflows/release.yml):
-it bumps the patch version (`v0.1.0` → `v0.1.1`), creates a git tag, and publishes
-a GitHub Release with:
+it auto-bumps the version, creates a git tag, and publishes a GitHub Release.
+
+Patch numbers run `0`–`9`, then the minor version increases
+(`v0.1.9` → `v0.2.0`, `v0.2.9` → `v0.3.0`). Each release includes:
 
 - cross-compiled **agent + server** binaries (`make release`)
 - **Windows** desktop app + NSIS installer
 - **Linux** desktop app (`amd64`, built with `webkit2_41`)
+- **Docker Hub** image `foisalislambd/openbackup` (`latest` + version tags)
 
 Put `[skip release]` in the commit message to push without publishing. You can
 also run **Actions → Release → Run workflow** and set an exact tag (e.g. `v0.2.0`).
