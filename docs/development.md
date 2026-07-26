@@ -135,17 +135,29 @@ in the pipeline.
 
 ## Release
 
-Version metadata is injected at link time, so nothing generated lives in the tree:
+Pushing to `main` runs [`.github/workflows/release.yml`](../.github/workflows/release.yml):
+it bumps the patch version (`v0.1.0` → `v0.1.1`), creates a git tag, and publishes
+a GitHub Release with:
+
+- cross-compiled **agent + server** binaries (`make release`)
+- **Windows** desktop app + NSIS installer
+- **Linux** desktop app (`amd64`, built with `webkit2_41`)
+
+Put `[skip release]` in the commit message to push without publishing. You can
+also run **Actions → Release → Run workflow** and set an exact tag (e.g. `v0.2.0`).
+
+Locally:
 
 ```bash
-make release        # cross-compiled binaries and SHA256SUMS in ./dist
-make docker         # container image
+make release                 # CLI binaries + SHA256SUMS in ./dist
+make desktop                 # desktop for this machine
+make desktop-linux-package   # Linux release-named binary + .desktop
+make docker                  # container image
 ```
 
-Tag with a semantic version; `git describe` supplies it to the build. The desktop
-apps are built per platform (there is no cross-compiling a native webview), which CI
-does for Windows and Linux. Update [`CHANGELOG.md`](../CHANGELOG.md) as part of the
-release, not afterwards.
+Version metadata is injected at link time via `-ldflags` (`git describe` /
+the release tag). Update [`CHANGELOG.md`](../CHANGELOG.md) when you cut a
+meaningful release, not afterwards.
 
 ## Where to start reading
 
