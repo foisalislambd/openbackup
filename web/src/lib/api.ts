@@ -41,7 +41,8 @@ export type Snapshot = {
   file_count: number
   dir_count?: number
   total_bytes: number
-  uploaded_bytes?: number
+  /** Bytes actually uploaded for this run after dedup (new data this backup). */
+  uploaded_bytes: number
 }
 
 export type Entry = {

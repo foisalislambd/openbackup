@@ -1153,6 +1153,7 @@ func (e *Engine) resetProgress() {
 	e.progress.BytesUploaded = 0
 	e.progress.BytesSkipped = 0
 	e.progress.StartedAt = time.Now()
+	e.up.ResetStats()
 }
 
 // onProgress receives uploader progress.

@@ -244,7 +244,7 @@ function DeviceFolders({
       <div className="file-row border-b border-gray-200 dark:border-gray-800 text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-gray-500">
         <span>Name</span>
         <span className="file-row-meta">Last backup</span>
-        <span className="file-row-meta">Size</span>
+        <span className="file-row-meta">Library</span>
         <span className="text-right">Actions</span>
       </div>
       <ul>
@@ -307,10 +307,12 @@ function HistoryList({
 
   return (
     <div className="admin-card overflow-hidden">
-      <div className="border-b border-gray-200 dark:border-gray-800 px-5 py-4">
+      <div className="border-b border-gray-200 px-5 py-4 dark:border-gray-800">
         <h2 className="text-sm font-semibold">Backup history</h2>
         <p className="mt-1 text-xs text-gray-500 sm:text-sm">
-          {filterDevice ? `History for ${filterDevice.name}.` : 'Open a point in time to browse files.'}
+          {filterDevice
+            ? `History for ${filterDevice.name}. “This backup” is new data uploaded that run.`
+            : '“This backup” is new data uploaded that run — not the whole library again.'}
         </p>
         {filterDevice && (
           <button
@@ -321,6 +323,12 @@ function HistoryList({
             Show all computers
           </button>
         )}
+      </div>
+      <div className="file-row border-b border-gray-200 text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-gray-500 dark:border-gray-800">
+        <span>Name</span>
+        <span className="file-row-meta">Files</span>
+        <span className="file-row-meta">This backup</span>
+        <span className="text-right">Actions</span>
       </div>
       <ul>
         {snapshots.map((snapshot, index) => {
@@ -334,6 +342,7 @@ function HistoryList({
                 : index === firstComplete
                   ? 'Latest backup'
                   : 'Earlier backup'
+          const uploaded = snapshot.uploaded_bytes ?? 0
 
           return (
             <li key={snapshot.id}>
@@ -355,7 +364,7 @@ function HistoryList({
                     <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
                       {absolute(snapshot.started_at)}
                       {snapshot.kind === 'delta' && <Badge>changes only</Badge>}
-                      {snapshot.kind === 'full' && <Badge>full</Badge>}
+                      {snapshot.kind === 'full' && <Badge>full scan</Badge>}
                       {snapshot.status === 'running' && <Badge tone="warn">running</Badge>}
                       {snapshot.status === 'failed' && <Badge tone="bad">failed</Badge>}
                     </span>
@@ -364,8 +373,19 @@ function HistoryList({
                 <span className="file-row-meta tabular text-sm text-gray-500">
                   {complete ? count(snapshot.file_count) : '—'}
                 </span>
-                <span className="file-row-meta tabular text-sm text-gray-500">
-                  {complete ? bytes(snapshot.total_bytes) : '—'}
+                <span className="file-row-meta min-w-0 text-sm text-gray-500">
+                  {complete ? (
+                    <span className="block text-right sm:text-left">
+                      <span className="tabular font-medium text-gray-800 dark:text-gray-200">
+                        {uploaded > 0 ? bytes(uploaded) : '0 B'}
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-gray-400">
+                        new · library {bytes(snapshot.total_bytes)}
+                      </span>
+                    </span>
+                  ) : (
+                    '—'
+                  )}
                 </span>
                 <div className="flex items-center justify-end gap-2">
                   {complete && <Button onClick={() => onOpen(snapshot)}>Browse</Button>}
@@ -466,8 +486,9 @@ function FileBrowser({
         <div className="min-w-0">
           <div className="truncate text-lg font-semibold tracking-tight">{deviceName}</div>
           <div className="mt-0.5 text-sm text-gray-500">
-            As of {absolute(snapshot.started_at)} · {count(snapshot.file_count)} files ·{' '}
+            As of {absolute(snapshot.started_at)} · {count(snapshot.file_count)} files · library{' '}
             {bytes(snapshot.total_bytes)}
+            {snapshot.uploaded_bytes > 0 ? ` · ${bytes(snapshot.uploaded_bytes)} new that run` : ''}
           </div>
         </div>
         <Button onClick={() => void download(() => downloadSnapshotArchive(snapshotId, prefix))}>

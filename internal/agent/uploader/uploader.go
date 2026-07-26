@@ -100,8 +100,20 @@ func New(opts Options) (*Uploader, error) {
 	}, nil
 }
 
-// Stats exposes the running totals.
+// Stats exposes the running totals for the current backup.
 func (u *Uploader) Stats() *Stats { return &u.stats }
+
+// ResetStats clears per-run counters so the next backup reports only its own
+// uploads. Without this, CompleteSnapshot would store a cumulative total and
+// the dashboard would show every later backup as if it re-uploaded old data.
+func (u *Uploader) ResetStats() {
+	u.stats.FilesUploaded.Store(0)
+	u.stats.ChunksUploaded.Store(0)
+	u.stats.ChunksSkipped.Store(0)
+	u.stats.BytesRead.Store(0)
+	u.stats.BytesUploaded.Store(0)
+	u.stats.BytesDeduplicated.Store(0)
+}
 
 // FileResult describes an uploaded file.
 type FileResult struct {
