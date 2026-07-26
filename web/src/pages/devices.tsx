@@ -9,7 +9,8 @@ import { api, type Device } from '@/lib/api'
 import { bytes, count, platformLabel, relative } from '@/lib/format'
 import { useAction, useLoader } from '@/lib/use-loader'
 import { HealthBadge } from '@/components/health-badge'
-import { Badge, Button, Card, Empty, ErrorNote, inputClass, Spinner } from '@/components/ui'
+import { Badge, Button, Card, Empty, ErrorNote, inputClass } from '@/components/ui'
+import { DevicesSkeleton } from '@/components/skeleton'
 
 export default function DevicesPage() {
   const { data: devices, error, loading, reload } = useLoader<Device[]>(() => api.devices(), { pollMs: 15000 })
@@ -61,7 +62,7 @@ export default function DevicesPage() {
 
       <Card title="Connected devices">
         {loading ? (
-          <Spinner />
+          <DevicesSkeleton />
         ) : !devices || devices.length === 0 ? (
           <Empty title="No devices yet" hint="Create a connection code above." />
         ) : (

@@ -53,13 +53,37 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Respect a user's reduced-motion preference: the only animation here is a
-   loading spinner, and it is not worth making anyone ill. */
+/* Soft shimmer for skeleton loaders. Reduced-motion users get a static block. */
+.skeleton-bone {
+  background: linear-gradient(
+    90deg,
+    var(--color-border-subtle) 0%,
+    color-mix(in oklch, var(--color-surface) 70%, var(--color-border-subtle)) 50%,
+    var(--color-border-subtle) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
+  }
+
+  .skeleton-bone {
+    background: var(--color-border-subtle);
+    animation: none;
   }
 }

@@ -10,7 +10,8 @@ import { useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { api, type Bootstrap } from '@/lib/api'
 import { message, useLoader } from '@/lib/use-loader'
-import { Button, ErrorNote, Field, inputClass, Spinner } from './ui'
+import { Button, ErrorNote, Field, inputClass } from './ui'
+import { ShellSkeleton } from './skeleton'
 
 const navigation = [
   { href: '/', label: 'Overview' },
@@ -32,11 +33,7 @@ export function Shell({ children }: { children: ReactNode }) {
     )
   }
   if (loading || !state) {
-    return (
-      <main className="mx-auto max-w-md p-6">
-        <Spinner label="Starting" />
-      </main>
-    )
+    return <ShellSkeleton />
   }
   if (state.needs_setup) {
     return <FirstRun onDone={reload} />

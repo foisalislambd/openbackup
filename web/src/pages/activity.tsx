@@ -9,14 +9,15 @@ import { useState } from 'react'
 import { api, type ActivityEvent } from '@/lib/api'
 import { absolute, relative } from '@/lib/format'
 import { useLoader } from '@/lib/use-loader'
-import { Badge, Card, Empty, ErrorNote, Spinner } from '@/components/ui'
+import { Badge, Card, Empty, ErrorNote } from '@/components/ui'
+import { ActivitySkeleton } from '@/components/skeleton'
 
 export default function ActivityPage() {
   const { data: events, error, loading } = useLoader<ActivityEvent[]>(() => api.events(200), { pollMs: 20000 })
   const [filter, setFilter] = useState<'all' | 'problems'>('all')
 
   if (error) return <ErrorNote>{error}</ErrorNote>
-  if (loading || !events) return <Spinner />
+  if (loading || !events) return <ActivitySkeleton />
 
   const shown = filter === 'all' ? events : events.filter((e) => e.level === 'warn' || e.level === 'error')
 

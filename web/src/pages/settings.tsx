@@ -9,7 +9,8 @@ import { useState } from 'react'
 import { api, type IgnoreRules, type Me, type Settings } from '@/lib/api'
 import { bytes } from '@/lib/format'
 import { message, useLoader } from '@/lib/use-loader'
-import { Button, Card, ErrorNote, Field, inputClass, Spinner } from '@/components/ui'
+import { Button, Card, ErrorNote, Field, inputClass } from '@/components/ui'
+import { SettingsSkeleton } from '@/components/skeleton'
 
 type Data = { settings: Settings; me: Me; rules: IgnoreRules }
 
@@ -20,7 +21,7 @@ export default function SettingsPage() {
   })
 
   if (error) return <ErrorNote>{error}</ErrorNote>
-  if (loading || !data) return <Spinner />
+  if (loading || !data) return <SettingsSkeleton />
 
   return (
     <div className="space-y-6">

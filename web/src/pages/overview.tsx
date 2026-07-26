@@ -10,7 +10,8 @@ import { api, type Device, type Snapshot, type Usage } from '@/lib/api'
 import { bytes, count, platformLabel, relative } from '@/lib/format'
 import { useLoader } from '@/lib/use-loader'
 import { HealthBadge } from '@/components/health-badge'
-import { Card, Empty, ErrorNote, Meter, Spinner, Stat } from '@/components/ui'
+import { Card, Empty, ErrorNote, Meter, Stat } from '@/components/ui'
+import { OverviewSkeleton } from '@/components/skeleton'
 
 type Overview = { devices: Device[]; usage: Usage; snapshots: Snapshot[] }
 
@@ -25,7 +26,7 @@ export default function OverviewPage() {
   )
 
   if (error) return <ErrorNote>{error}</ErrorNote>
-  if (loading || !data) return <Spinner />
+  if (loading || !data) return <OverviewSkeleton />
 
   const { devices, usage, snapshots } = data
   const problems = devices.filter((d) => d.health === 'error' || d.health === 'stale')

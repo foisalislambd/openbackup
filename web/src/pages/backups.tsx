@@ -11,7 +11,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, archiveUrl, downloadUrl, type Entry, type Snapshot } from '@/lib/api'
 import { absolute, baseName, bytes, count, parentPath, relative } from '@/lib/format'
 import { useAction, useLoader } from '@/lib/use-loader'
-import { Badge, Button, Card, Empty, ErrorNote, Spinner } from '@/components/ui'
+import { Badge, Button, Card, Empty, ErrorNote } from '@/components/ui'
+import { BackupsSkeleton, BrowseSkeleton } from '@/components/skeleton'
 
 export default function BackupsPage() {
   const [params] = useSearchParams()
@@ -36,7 +37,7 @@ export default function BackupsPage() {
   }
 
   if (error) return <ErrorNote>{error}</ErrorNote>
-  if (loading || !snapshots) return <Spinner />
+  if (loading || !snapshots) return <BackupsSkeleton />
   if (snapshots.length === 0) {
     return <Empty title="No backups yet" hint="They will appear here after the first backup finishes." />
   }
@@ -117,7 +118,7 @@ function SnapshotBrowser({
   const more = useAction()
 
   if (error) return <ErrorNote>{error}</ErrorNote>
-  if (loading || !data) return <Spinner label="Opening" />
+  if (loading || !data) return <BrowseSkeleton />
 
   const key = `${snapshotId}:${prefix}`
   const appended = extra?.key === key ? extra.entries : []

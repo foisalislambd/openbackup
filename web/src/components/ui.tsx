@@ -149,15 +149,6 @@ export function Empty({ title, hint }: { title: string; hint?: string }) {
   )
 }
 
-export function Spinner({ label = 'Loading' }: { label?: string }) {
-  return (
-    <div className="flex items-center gap-2 py-8 text-sm text-[var(--color-ink-muted)]">
-      <span className="size-3.5 animate-spin rounded-full border-2 border-[var(--color-border-subtle)] border-t-[var(--color-brand)]" />
-      {label}…
-    </div>
-  )
-}
-
 export function ErrorNote({ children }: { children: ReactNode }) {
   return (
     <div className="rounded-lg border border-[var(--color-bad)] bg-[color-mix(in_oklch,var(--color-bad)_8%,transparent)] px-3.5 py-2.5 text-sm text-[var(--color-bad)]">
