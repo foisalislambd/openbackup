@@ -91,7 +91,7 @@ try_release_desktop() {
 
 try_local_desktop() {
 	# Running from a clone after `make desktop`.
-	here=$(CDPATH= cd -- "$(dirname "$0")" 2>/dev/null && pwd) || return 1
+	here=$(CDPATH='' cd -- "$(dirname "$0")" 2>/dev/null && pwd) || return 1
 	candidate="$here/../desktop/build/bin/openbackup-desktop"
 	if [ -x "$candidate" ]; then
 		cp "$candidate" "$tmp/openbackup-desktop"
@@ -129,7 +129,8 @@ On Fedora:
 	if ! have wails; then
 		say "Installing Wails CLI ${WAILS_VERSION}..."
 		go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}"
-		export PATH="$(go env GOPATH)/bin:$PATH"
+		gopath_bin="$(go env GOPATH)/bin"
+		export PATH="$gopath_bin:$PATH"
 	fi
 	have wails || die "could not install the Wails CLI"
 }
