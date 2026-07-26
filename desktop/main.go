@@ -1,10 +1,8 @@
-// Command openbackup-desktop is the OpenBackup window for Windows, macOS and
-// Linux.
+// Command openbackup-desktop is the OpenBackup app for Windows, macOS and Linux.
 //
-// It is a client, not the backup engine. The engine runs as a background service
-// that keeps working when this window is closed, or never opened at all; this app
-// shows what it is doing and lets a person change it. That separation is the
-// whole point: a backup that only happens while an app is open is not a backup.
+// One binary is the window and the background agent: open it for the UI, and the
+// same executable is what the OS service manager runs when backups happen with
+// the window closed. Closing the window never stops backups.
 package main
 
 import (
@@ -39,6 +37,16 @@ var appVersion = version.Version
 
 func main() {
 	log := newLogger()
+
+	// When the OS service manager launches this binary (or someone runs
+	// `openbackup-desktop service …`), run the agent without opening the window.
+	if agentMode(os.Args[1:]) {
+		if err := runAgentMode(os.Args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// A production Windows build has no console, so a panic would otherwise leave
 	// the user with a window that vanished and no explanation anywhere.

@@ -10,8 +10,8 @@ go 1.26.5
 
 require (
 	github.com/energye/systray v1.0.3
-	github.com/gen2brain/beeep v0.11.2
 	github.com/foisalislambd/openbackup v0.0.0
+	github.com/gen2brain/beeep v0.11.2
 	github.com/wailsapp/wails/v2 v2.13.0
 	golang.org/x/sys v0.47.0
 )
@@ -30,6 +30,7 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/jackmordaunt/icns/v3 v3.0.1 // indirect
 	github.com/jchv/go-winloader v0.0.0-20210711035445-715c2860da7e // indirect
+	github.com/kardianos/service v1.3.0 // indirect
 	github.com/klauspost/compress v1.19.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/labstack/echo/v4 v4.13.3 // indirect

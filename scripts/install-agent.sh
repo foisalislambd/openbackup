@@ -189,6 +189,15 @@ EOF
 		update-desktop-database "$applications" >/dev/null 2>&1 || true
 	fi
 
+	# After connect, the desktop app registers itself as the OS service. Point
+	# the CLI name at it when people type `openbackup service …` so they do not
+	# need two different binaries in their head — the desktop binary understands
+	# service/run. Full CLI commands (connect, backup, …) stay on openbackup.
+	if [ -x "$bindir/openbackup" ] && [ -x "$bindir/openbackup-desktop" ]; then
+		say "Tip: start the background service from the app (Start service), or:"
+		say "  $bindir/openbackup-desktop service install"
+	fi
+
 	# Runtime WebKitGTK is required to open the window.
 	if ! ldconfig -p 2>/dev/null | grep -q 'libwebkit2gtk-4\.1\.so'; then
 		if [ ! -e /usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.1.so.0 ] &&

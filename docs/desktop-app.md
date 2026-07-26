@@ -1,16 +1,17 @@
 # The desktop app
 
-A window for the machine being backed up, for people who would rather not use a
-terminal. It connects a device, shows whether the files are safe, browses and
-restores backups, changes limits and encryption, and runs the same diagnostics as
-`openbackup doctor`.
+One app for the machine being backed up: the window **and** the background
+agent. Connect a device, see whether files are safe, browse and restore, change
+limits and encryption, and run diagnostics. Closing the window does not stop
+backups — the same binary keeps running as an OS service.
 
 Available for Windows, macOS and Linux. Same screens and design on every platform.
 
-- **Windows:** download the installer from the
-  [releases page](https://github.com/foisalislambd/openbackup/releases).
-- **Linux:** the agent installer asks if you want the desktop GUI after the
-  CLI is installed:
+- **Windows:** download the installer (or the portable `.exe`) from the
+  [releases page](https://github.com/foisalislambd/openbackup/releases). That
+  single app is enough — you do **not** install a separate agent.
+- **Linux:** the installer asks if you want the desktop app after the CLI is
+  installed (CLI is optional for servers/headless):
 
   ```bash
   curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
@@ -22,21 +23,19 @@ Available for Windows, macOS and Linux. Same screens and design on every platfor
   `make desktop`.
 - **macOS:** build with `make desktop` for now (same Wails app).
 
-## It is a client, not the backup
+## One binary, two roles
 
-The backing up is done by the agent service in the background. The window is
-optional: closing it stops nothing, and it hides to the notification area rather
-than quitting. If the service is not installed, the app says so and offers to
-install it — that is the correct behaviour, not a failure.
+| How you start it | What happens |
+| --- | --- |
+| Double-click / app menu | Opens the window |
+| OS service (`… service run`) | Runs the backup agent with no window |
+| **Start service** in the app | Registers **this** binary with Windows/systemd/launchd |
 
-Anything changed in the window is applied to the running service straight away,
-because the window and the CLI go through the same control layer. A folder added
-here and a folder added with `openbackup folders add` take exactly the same path.
+A backup that only happens while a window is open is not a backup — so the agent
+keeps working when you close the UI. The tray icon is how you get back.
 
-Installing, starting and stopping the service is the one thing the app does not
-reimplement: it runs the `openbackup` command, found next to itself or on your
-`PATH`. One implementation of "install the service" means one set of bugs, and the
-window and the terminal stay in agreement.
+Anything changed in the window is applied to the running agent straight away
+(same control layer as the optional `openbackup` CLI).
 
 ## What each screen does
 
@@ -75,10 +74,10 @@ make desktop-linux-package   # Linux only: release-named binary + .desktop + ico
 
 On Windows, `./scripts/build.ps1 -Desktop`, or `-Installer` to package it with
 NSIS. On Linux, `scripts/install-agent.sh` installs a released desktop binary
-alongside the agent when one is published. Each platform's app is built
-on that platform: there is no cross-compiling a native webview.
+when one is published. Each platform's app is built on that platform: there is
+no cross-compiling a native webview.
 
 Built with [Wails](https://wails.io) — Go for the logic, React and TypeScript for
 the window, sharing the dashboard's design system. It lives in
 [`desktop/`](../desktop/README.md) as its own Go module so that the server and agent
-stay pure-Go cross-compiles.
+CLI stay pure-Go cross-compiles.

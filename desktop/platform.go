@@ -13,67 +13,14 @@ import (
 
 	"github.com/gen2brain/beeep"
 
+	"github.com/foisalislambd/openbackup/internal/agent/appsvc"
 	"github.com/foisalislambd/openbackup/internal/agent/config"
 )
 
-// agentCommand locates the openbackup command line tool.
-//
-// The app deliberately drives the real tool for anything that touches the
-// operating system's service manager, instead of carrying its own copy of that
-// logic. One implementation of "install the service" means one set of bugs, and
-// the terminal and the window stay in agreement.
-func agentCommand() (string, error) {
-	name := "openbackup"
-	if runtime.GOOS == "windows" {
-		name = "openbackup.exe"
-	}
-	// Next to this executable first: an installed app ships both binaries in the
-	// same directory, and that copy is guaranteed to match this app's version.
-	if self, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(self), name)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-	if path, err := exec.LookPath(name); err == nil {
-		return path, nil
-	}
-	return "", fmt.Errorf("could not find the %s command; reinstall OpenBackup to repair it", name)
-}
-
-// runAgent runs an agent subcommand and returns its output on failure, because
-// the tool's own message is more useful than "exit status 1".
-func runAgent(args ...string) error {
-	bin, err := agentCommand()
-	if err != nil {
-		return err
-	}
-	cmd := exec.Command(bin, args...)
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		return nil
-	}
-	message := strings.TrimSpace(string(out))
-	if message == "" {
-		return err
-	}
-	return errors.New(message)
-}
-
-// installService makes sure backups run in the background, then starts them.
-//
-// Installing a service needs administrator rights on Windows; when that is
-// refused the error says so, since a user who dismissed the prompt needs to know
-// that nothing is being backed up.
+// installService registers this desktop binary as the background agent and
+// starts it. No separate openbackup.exe is required.
 func installService() error {
-	if err := runAgent("service", "install"); err != nil {
-		// Already installed is the common case on a second run; starting it is
-		// still worth attempting.
-		if !strings.Contains(strings.ToLower(err.Error()), "already") {
-			return err
-		}
-	}
-	return runAgent("service", "start")
+	return appsvc.InstallOrStart(appsvc.Options{})
 }
 
 // reveal opens a folder in the system file manager.
@@ -156,7 +103,6 @@ func singleInstance() (release func(), ok bool) {
 		_ = os.Remove(path)
 		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
-			// Another copy won the race in the meantime, which is the answer.
 			return func() {}, false
 		}
 		fmt.Fprintf(file, "%d\n%s\n", os.Getpid(), time.Now().Format(time.RFC3339))

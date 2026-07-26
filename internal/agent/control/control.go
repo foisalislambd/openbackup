@@ -919,7 +919,7 @@ func (a *Agent) Diagnose(ctx context.Context) []Check {
 		checks = append(checks, Check{
 			Name:   "Background service",
 			OK:     false,
-			Detail: "Not running, so nothing is being backed up. Install it with 'openbackup service install'.",
+			Detail: "Not running, so nothing is being backed up. Start it from the OpenBackup app (or 'openbackup service install').",
 		})
 	}
 

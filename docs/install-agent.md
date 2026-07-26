@@ -51,14 +51,18 @@ add.
 
 ## Windows
 
-Download the installer from the
-[releases page](https://github.com/foisalislambd/openbackup/releases) and run it, then
-let the desktop app walk you through connecting the device — there is nothing to
-type.
+Download **one** of these from the
+[releases page](https://github.com/foisalislambd/openbackup/releases):
 
-The app drives the `openbackup` command for anything that touches the service
-manager, and looks for it next to itself or on your `PATH`. If you prefer the
-terminal, or you are setting up a machine remotely, use it directly:
+- `openbackup-desktop-windows-amd64-setup.exe` (recommended installer), or
+- `openbackup-desktop-windows-amd64.exe` (portable)
+
+That single app is the window **and** the background agent. Open it, connect with
+a dashboard code, then use **Start service** when asked — you do not install a
+separate `openbackup.exe`.
+
+If you prefer the terminal (or a headless machine), the optional CLI is still
+available:
 
 ```powershell
 openbackup connect --server https://backup.example.com --code ABCD-EFGH-JKLM

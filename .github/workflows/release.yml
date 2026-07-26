@@ -275,14 +275,14 @@ jobs:
             "Automated release from \`main\`." \
             "" \
             "### Downloads" \
-            "- **Windows desktop:** \`openbackup-desktop-windows-amd64-setup.exe\` (installer) or \`.exe\` (portable)" \
-            "- **Linux desktop:** \`openbackup-desktop-linux-amd64\` (+ \`.desktop\` + \`openbackup.png\`)" \
-            "- **Agent / server CLI:** \`openbackup-<os>-<arch>\` and \`openbackup-server-<os>-<arch>\`" \
+            "- **Windows desktop:** \`openbackup-desktop-windows-amd64-setup.exe\` (installer) or \`.exe\` (portable) — window + background agent in one binary" \
+            "- **Linux desktop:** \`openbackup-desktop-linux-amd64\` (+ \`.desktop\` + \`openbackup.png\`) — same: GUI + agent in one binary" \
+            "- **Agent / server CLI:** \`openbackup-<os>-<arch>\` and \`openbackup-server-<os>-<arch>\` (optional; for headless/servers or the terminal)" \
             "" \
             "### Notes" \
             "- Linux desktop needs WebKitGTK 4.1 at runtime (\`libwebkit2gtk-4.1-0\` on Debian/Ubuntu)." \
             "- macOS desktop is not built in CI yet — use \`make desktop\` on a Mac." \
-            "- Agent/server binaries are static; desktop apps are native per OS." \
+            "- Agent/server CLI binaries are static; desktop apps are native per OS." \
           )
 
           gh release create "$TAG" release/* \

@@ -104,7 +104,7 @@ In the dashboard:
 
 ### Step 3 — Connect each computer
 
-**Windows:** download the installer from [Releases](https://github.com/foisalislambd/openbackup/releases) and follow the app.
+**Windows:** download the desktop installer from [Releases](https://github.com/foisalislambd/openbackup/releases) and follow the app (one install — window + background agent).
 
 **Mac / Linux:**
 
