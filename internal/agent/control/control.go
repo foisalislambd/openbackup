@@ -28,6 +28,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/foisalislambd/openbackup/internal/agent/config"
@@ -48,6 +49,17 @@ var ErrNotConnected = errors.New("this device is not connected to a server yet")
 type Agent struct {
 	cfg      *config.Config
 	stateDir string
+
+	// Short-lived caches so the desktop poller (every few seconds) does not
+	// reopen SQLite and re-download the snapshot list on every tick.
+	cacheMu       sync.Mutex
+	cachedIndex   index.Stats
+	cachedIndexAt time.Time
+	cachedIndexOK bool
+	snapshots     []api.Snapshot
+	snapshotsErr  string
+	snapshotsAt   time.Time
+	snapshotsHave bool
 }
 
 // Open loads the agent's configuration. An empty path uses the default location.
@@ -197,12 +209,10 @@ func (a *Agent) Overview(ctx context.Context) Overview {
 
 	// Server view: what actually arrived? This is the only trustworthy answer to
 	// "am I backed up", since a local agent can believe it succeeded and be wrong.
-	if client, err := a.client(); err == nil {
-		snapshots, err := client.ListSnapshots(ctx)
-		switch {
-		case err != nil:
-			o.ServerError = err.Error()
-		default:
+	if snapshots, errMsg, ok := a.cachedSnapshots(ctx); ok {
+		if errMsg != "" {
+			o.ServerError = errMsg
+		} else {
 			o.SnapshotCount = len(snapshots)
 			if newest := newestComplete(snapshots); newest != nil {
 				at := newest.StartedAt
@@ -256,6 +266,15 @@ func describe(o Overview) (health, headline, detail string) {
 }
 
 func (a *Agent) indexStats(ctx context.Context) (index.Stats, error) {
+	const ttl = 10 * time.Second
+	a.cacheMu.Lock()
+	if a.cachedIndexOK && time.Since(a.cachedIndexAt) < ttl {
+		stats := a.cachedIndex
+		a.cacheMu.Unlock()
+		return stats, nil
+	}
+	a.cacheMu.Unlock()
+
 	// Opening the index read-only alongside a running daemon is safe: SQLite is
 	// in WAL mode, so a reader never blocks the writer.
 	ix, err := index.Open(ctx, indexPath(a.stateDir))
@@ -263,7 +282,58 @@ func (a *Agent) indexStats(ctx context.Context) (index.Stats, error) {
 		return index.Stats{}, err
 	}
 	defer ix.Close()
-	return ix.Stats(ctx)
+	stats, err := ix.Stats(ctx)
+	if err != nil {
+		return index.Stats{}, err
+	}
+
+	a.cacheMu.Lock()
+	a.cachedIndex = stats
+	a.cachedIndexAt = time.Now()
+	a.cachedIndexOK = true
+	a.cacheMu.Unlock()
+	return stats, nil
+}
+
+// cachedSnapshots returns the device's snapshot list, refreshing at most about
+// once a minute. ok is false when this device has no API client yet.
+func (a *Agent) cachedSnapshots(ctx context.Context) (snapshots []api.Snapshot, errMsg string, ok bool) {
+	const ttl = 60 * time.Second
+	a.cacheMu.Lock()
+	if a.snapshotsHave && time.Since(a.snapshotsAt) < ttl {
+		snapshots = a.snapshots
+		errMsg = a.snapshotsErr
+		a.cacheMu.Unlock()
+		return snapshots, errMsg, true
+	}
+	a.cacheMu.Unlock()
+
+	client, err := a.client()
+	if err != nil {
+		return nil, "", false
+	}
+	list, err := client.ListSnapshots(ctx)
+	errMsg = ""
+	if err != nil {
+		errMsg = err.Error()
+		list = nil
+	}
+	a.cacheMu.Lock()
+	a.snapshots = list
+	a.snapshotsErr = errMsg
+	a.snapshotsAt = time.Now()
+	a.snapshotsHave = true
+	a.cacheMu.Unlock()
+	return list, errMsg, true
+}
+
+// InvalidateOverviewCache drops cached server/index data so the next Overview
+// call reflects a just-finished backup or folder change.
+func (a *Agent) InvalidateOverviewCache() {
+	a.cacheMu.Lock()
+	defer a.cacheMu.Unlock()
+	a.cachedIndexOK = false
+	a.snapshotsHave = false
 }
 
 func newestComplete(snapshots []api.Snapshot) *api.Snapshot {

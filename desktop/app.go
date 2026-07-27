@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -58,6 +59,9 @@ type App struct {
 	startHidden bool
 	// forceQuit allows OnBeforeClose to actually exit (tray Quit).
 	forceQuit bool
+	// windowVisible is false while the window is hidden to the tray. The status
+	// poller slows down and skips WebView events then, which cuts RAM growth.
+	windowVisible bool
 }
 
 // restoreJob tracks a running restore so the window can show progress and the
@@ -93,6 +97,9 @@ func newApp(log *slog.Logger) *App {
 // startup is called by Wails once the window exists.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.mu.Lock()
+	a.windowVisible = !a.startHidden
+	a.mu.Unlock()
 	if a.startHidden {
 		runtime.WindowHide(ctx)
 	}
@@ -105,21 +112,37 @@ func (a *App) startup(ctx context.Context) {
 	go a.pollStatus(ctx)
 }
 
+// SetWindowVisible records whether the UI is on screen (vs tray-only).
+func (a *App) SetWindowVisible(visible bool) {
+	a.mu.Lock()
+	a.windowVisible = visible
+	a.mu.Unlock()
+}
+
+func (a *App) isWindowVisible() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.windowVisible
+}
+
 // pollStatus keeps the window's status fresh and pushes changes to the frontend.
 //
-// Polling rather than a subscription keeps the agent's control channel simple,
-// and two seconds is frequent enough to feel live while costing nothing
-// measurable. The loop stops when the window closes.
+// When the window is hidden we poll less often, skip WebView events, and ask Go
+// to return unused heap to the OS — that is what keeps tray-only RAM low.
 func (a *App) pollStatus(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
 	var lastHealth string
+	var lastFinger string
+	var lastTrim time.Time
+	wasVisible := a.isWindowVisible()
 	for {
+		visible := a.isWindowVisible()
+		becameVisible := visible && !wasVisible
+		wasVisible = visible
+
 		if a.agent != nil {
-			// The configuration can be changed by the command line, so it is
-			// re-read before each poll; otherwise the window would show a stale
-			// folder list.
 			if err := a.agent.Reload(); err != nil {
 				a.log.Debug("reload configuration", "error", err)
 			}
@@ -127,16 +150,43 @@ func (a *App) pollStatus(ctx context.Context) {
 			overview := a.agent.Overview(pollCtx)
 			cancel()
 
+			// After a backup finishes, drop the snapshot cache so the home
+			// screen picks up the new count without waiting a full minute.
+			if lastHealth == "working" && overview.Health != "working" {
+				a.agent.InvalidateOverviewCache()
+				pollCtx2, cancel2 := context.WithTimeout(ctx, 15*time.Second)
+				overview = a.agent.Overview(pollCtx2)
+				cancel2()
+			}
+
 			a.mu.Lock()
 			a.overview = overview
 			a.mu.Unlock()
 
-			runtime.EventsEmit(ctx, "status", overview)
+			finger := overviewFingerprint(overview)
+			if visible && (becameVisible || finger != lastFinger) {
+				runtime.EventsEmit(ctx, "status", overview)
+				lastFinger = finger
+			}
 			if overview.Health != lastHealth {
 				a.announce(overview, lastHealth)
 				lastHealth = overview.Health
+			} else {
+				a.setTrayState(overview)
 			}
 		}
+
+		if !visible && time.Since(lastTrim) > 2*time.Minute {
+			debug.FreeOSMemory()
+			lastTrim = time.Now()
+		}
+
+		interval := 2 * time.Second
+		if !visible {
+			interval = 15 * time.Second
+		}
+		ticker.Reset(interval)
+
 		select {
 		case <-ctx.Done():
 			return
@@ -145,11 +195,25 @@ func (a *App) pollStatus(ctx context.Context) {
 	}
 }
 
+func overviewFingerprint(o control.Overview) string {
+	last := ""
+	agoMin := ""
+	if o.LastBackupAt != nil {
+		last = o.LastBackupAt.UTC().Format(time.RFC3339)
+		agoMin = fmt.Sprintf("%d", int(time.Since(*o.LastBackupAt).Minutes()))
+	}
+	return fmt.Sprintf("%s|%s|%t|%s|%d/%d|%d|%s|%s|%s|%d|%s|%s|%s|%s",
+		o.Health, o.State, o.Paused, o.PauseReason, o.FilesDone, o.FilesTotal,
+		o.BytesDone, o.CurrentPath, o.LastError, o.ServerError, o.SnapshotCount,
+		last, agoMin, o.Headline, o.Detail)
+}
+
 // announce raises a notification for the state changes worth interrupting
 // someone for. Success is deliberately silent: a backup tool that congratulates
 // itself every hour gets muted, and then the one message that mattered is missed
 // too.
 func (a *App) announce(o control.Overview, previous string) {
+	a.setTrayState(o)
 	if previous == "" {
 		return
 	}
@@ -161,7 +225,6 @@ func (a *App) announce(o control.Overview, previous string) {
 	case "stale":
 		a.notify("Your backup is out of date", o.Detail)
 	}
-	a.setTrayState(o)
 }
 
 // -----------------------------------------------------------------------------
@@ -341,6 +404,7 @@ func (a *App) BackupNow() error {
 	if a.agent == nil {
 		return a.configError()
 	}
+	a.agent.InvalidateOverviewCache()
 	return a.agent.BackupNow(a.context())
 }
 
@@ -633,7 +697,10 @@ func (a *App) OpenLogFolder() error { return reveal(filepath.Dir(logPath())) }
 // -----------------------------------------------------------------------------
 
 // MinimiseToTray hides the window. Backups keep running in this process until Quit.
-func (a *App) MinimiseToTray() { runtime.WindowHide(a.context()) }
+func (a *App) MinimiseToTray() {
+	a.SetWindowVisible(false)
+	runtime.WindowHide(a.context())
+}
 
 // Quit stops backups in this process and closes the app.
 func (a *App) Quit() {

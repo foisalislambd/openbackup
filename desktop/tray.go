@@ -120,6 +120,7 @@ func (t *tray) show() {
 	if t.ctx == nil {
 		return
 	}
+	t.app.SetWindowVisible(true)
 	wruntime.WindowShow(t.ctx)
 	wruntime.WindowUnminimise(t.ctx)
 }

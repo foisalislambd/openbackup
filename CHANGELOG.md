@@ -17,6 +17,9 @@ older agent keeps working against a newer server, so upgrade the server first.
 
 ### Fixed
 
+- Desktop RAM: disable WebView GPU/Mica, slow status polling while tray-only,
+  skip redundant WebView status events, cache snapshot/index reads used by the
+  home screen, and return idle Go heap to the OS.
 - After the agent can reach the server again, sticky connection errors are
   cleared from `/devices`, Home, and the desktop app (they remain in Logs).
   The server also ignores those sticky network errors on heartbeat, so the

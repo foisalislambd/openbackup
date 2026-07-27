@@ -89,16 +89,6 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		OnStartup: func(ctx context.Context) {
-			app.startup(ctx)
-			// The tray runs its own message loop, so it gets its own goroutine;
-			// blocking here would stop the window from ever appearing.
-			go trayIcon.start(ctx)
-			listenForRaise(ctx, func() {
-				wruntime.WindowShow(ctx)
-				wruntime.WindowUnminimise(ctx)
-			})
-		},
 		OnBeforeClose: func(ctx context.Context) bool {
 			app.mu.Lock()
 			quit := app.forceQuit
@@ -108,8 +98,20 @@ func main() {
 			}
 			// Closing the window hides it instead of quitting, because backups
 			// continue in this process and the tray icon is how the user gets back.
+			app.SetWindowVisible(false)
 			wruntime.WindowHide(ctx)
 			return true
+		},
+		OnStartup: func(ctx context.Context) {
+			app.startup(ctx)
+			// The tray runs its own message loop, so it gets its own goroutine;
+			// blocking here would stop the window from ever appearing.
+			go trayIcon.start(ctx)
+			listenForRaise(ctx, func() {
+				app.SetWindowVisible(true)
+				wruntime.WindowShow(ctx)
+				wruntime.WindowUnminimise(ctx)
+			})
 		},
 		OnShutdown: func(context.Context) {
 			app.stopEmbeddedAgent()
@@ -117,15 +119,18 @@ func main() {
 		},
 		Bind: []any{app},
 		Windows: &windows.Options{
-			BackdropType:         windows.Mica,
+			// Mica/Acrylic keep extra compositor buffers; plain backdrop uses less RAM.
+			BackdropType:         windows.None,
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,
+			// GPU process is often the bulk of WebView2 working set on low-RAM PCs.
+			WebviewGpuIsDisabled: true,
 		},
 		Linux: &linux.Options{
 			Icon:                notificationIcon,
 			WindowIsTranslucent: false,
 			ProgramName:         "OpenBackup",
-			WebviewGpuPolicy:    linux.WebviewGpuPolicyOnDemand,
+			WebviewGpuPolicy:    linux.WebviewGpuPolicyNever,
 		},
 	})
 	if err != nil {

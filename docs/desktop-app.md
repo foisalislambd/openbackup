@@ -75,8 +75,12 @@ notification every few minutes saying nothing happened.
 
 ## Resource use
 
-While the app is open (or in the tray), it runs the backup engine in-process.
-About tens of MB of RAM depending on activity; idle cost is low.
+The window uses WebView2 (a Chromium engine), so open-window RAM is higher than a
+pure tray tool — typically a few hundred MB on Windows, not tens. With the window
+hidden to the tray the app polls less often, skips UI events, and releases unused
+Go heap. GPU acceleration and Mica backdrop are off to favour low-RAM machines.
+
+While backing up, chunk upload buffers add a modest amount on top of that baseline.
 
 ## Building it
 
