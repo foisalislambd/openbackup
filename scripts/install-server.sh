@@ -162,22 +162,6 @@ ensure_compose
 say "Docker is ready."
 
 # ---------------------------------------------------------------------------
-# Firewall: only if one is already active, so we do not invent a policy
-# ---------------------------------------------------------------------------
-
-open_port() {
-	if have ufw && ufw status 2>/dev/null | grep -qi 'Status: active'; then
-		say "Opening TCP port ${PORT} in ufw..."
-		ufw allow "${PORT}/tcp" comment 'OpenBackup' >/dev/null 2>&1 || ufw allow "${PORT}/tcp" || true
-	elif have firewall-cmd && firewall-cmd --state 2>/dev/null | grep -qi running; then
-		say "Opening TCP port ${PORT} in firewalld..."
-		firewall-cmd --permanent --add-port="${PORT}/tcp" >/dev/null 2>&1 || true
-		firewall-cmd --reload >/dev/null 2>&1 || true
-	fi
-}
-open_port
-
-# ---------------------------------------------------------------------------
 # Generate what the user should not have to invent
 # ---------------------------------------------------------------------------
 
@@ -198,6 +182,9 @@ if [ -f .env ]; then
 	. ./.env
 	admin_email="${OPENBACKUP_ADMIN_EMAIL:-}"
 	admin_password=""
+	# Re-runs must honour the saved public URL (HTTPS domain), not only a
+	# one-shot OPENBACKUP_PUBLIC_URL on the command line.
+	PUBLIC_URL="${OPENBACKUP_PUBLIC_URL:-${PUBLIC_URL:-}}"
 else
 	admin_email="${ADMIN_EMAIL:-admin@localhost}"
 	admin_password=$(random)
@@ -211,19 +198,50 @@ else
 	chmod 600 .env
 fi
 
+# Behind HTTPS (Caddy/nginx) the container should only listen on localhost, and
+# we must not punch 18200 through the firewall on every upgrade.
+PORT_BIND="${PORT}:18200"
+case "${PUBLIC_URL}" in
+https://*|HTTPS://*)
+	PORT_BIND="127.0.0.1:${PORT}:18200"
+	;;
+esac
+
 # ---------------------------------------------------------------------------
-# Image: pull first, build from git if the published image is missing
+# Firewall: only if one is already active, so we do not invent a policy
+# ---------------------------------------------------------------------------
+
+open_port() {
+	case "${PUBLIC_URL}" in
+	https://*|HTTPS://*)
+		say "PUBLIC_URL is HTTPS — leaving port ${PORT} closed to the internet (proxy on this host)."
+		return 0
+		;;
+	esac
+	if have ufw && ufw status 2>/dev/null | grep -qi 'Status: active'; then
+		say "Opening TCP port ${PORT} in ufw..."
+		ufw allow "${PORT}/tcp" comment 'OpenBackup' >/dev/null 2>&1 || ufw allow "${PORT}/tcp" || true
+	elif have firewall-cmd && firewall-cmd --state 2>/dev/null | grep -qi running; then
+		say "Opening TCP port ${PORT} in firewalld..."
+		firewall-cmd --permanent --add-port="${PORT}/tcp" >/dev/null 2>&1 || true
+		firewall-cmd --reload >/dev/null 2>&1 || true
+	fi
+}
+open_port
+
+# ---------------------------------------------------------------------------
+# Image: always pull so re-running this script upgrades; build only if needed
 # ---------------------------------------------------------------------------
 
 use_build=0
 build_version=dev
 build_commit=unknown
 build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-say "Looking for ${IMAGE}..."
-if docker image inspect "$IMAGE" >/dev/null 2>&1; then
-	say "Using the image already on this machine."
-elif docker pull "$IMAGE" >/dev/null 2>&1; then
-	say "Pulled ${IMAGE}."
+say "Checking for updates to ${IMAGE}..."
+if docker pull "$IMAGE"; then
+	say "Using ${IMAGE} from the registry."
+elif docker image inspect "$IMAGE" >/dev/null 2>&1; then
+	say "Could not reach the registry; using the image already on this machine."
 else
 	use_build=1
 	say "Published image not found — building from ${REPO} (${REF})."
@@ -267,7 +285,7 @@ services:
     container_name: openbackup
     restart: unless-stopped
     ports:
-      - '${PORT}:18200'
+      - '${PORT_BIND}'
     volumes:
       - openbackup-data:/data
     env_file:
@@ -291,7 +309,7 @@ services:
     container_name: openbackup
     restart: unless-stopped
     ports:
-      - '${PORT}:18200'
+      - '${PORT_BIND}'
     volumes:
       - openbackup-data:/data
     env_file:
@@ -308,7 +326,8 @@ YAML
 fi
 
 say "Starting OpenBackup..."
-$compose up -d
+# Recreate so a newly pulled :latest digest actually replaces the running container.
+$compose up -d --force-recreate --remove-orphans
 
 # ---------------------------------------------------------------------------
 # Wait until it actually answers, so failures surface here and not later
@@ -384,6 +403,6 @@ say "  Manage later:"
 say "    cd ${DIR}"
 say "    ${compose} logs -f      # watch logs"
 say "    ${compose} restart      # restart"
-say "    ${compose} pull && ${compose} up -d   # upgrade"
+say "    ${compose} pull && ${compose} up -d --force-recreate   # upgrade (or re-run this installer)"
 say "    ${compose} down         # stop (keeps your backups)"
 say ""
