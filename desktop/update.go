@@ -27,10 +27,10 @@ type UpdateCheck struct {
 }
 
 type githubRelease struct {
-	TagName string         `json:"tag_name"`
-	HTMLURL string         `json:"html_url"`
-	Name    string         `json:"name"`
-	Assets  []githubAsset  `json:"assets"`
+	TagName string        `json:"tag_name"`
+	HTMLURL string        `json:"html_url"`
+	Name    string        `json:"name"`
+	Assets  []githubAsset `json:"assets"`
 }
 
 type githubAsset struct {
