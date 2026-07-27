@@ -1091,7 +1091,7 @@ func (e *Engine) clearRecoveredErrors() bool {
 	defer e.mu.Unlock()
 
 	changed := false
-	if e.progress.LastError != "" && isConnectivityError(e.progress.LastError) {
+	if e.progress.LastError != "" && api.IsConnectivityError(e.progress.LastError) {
 		e.progress.LastError = ""
 		changed = true
 	}
@@ -1099,7 +1099,7 @@ func (e *Engine) clearRecoveredErrors() bool {
 	if e.state == api.StateError {
 		msg := e.progress.Message
 		switch {
-		case isConnectivityError(msg):
+		case api.IsConnectivityError(msg):
 			e.state = api.StateIdle
 			e.progress.Message = ""
 			// Message and LastError are usually the same string; clear both so
@@ -1114,49 +1114,6 @@ func (e *Engine) clearRecoveredErrors() bool {
 		}
 	}
 	return changed
-}
-
-// isConnectivityError reports whether msg looks like a network / DNS failure
-// rather than a permanent backup problem (quota, corrupt data, etc.).
-func isConnectivityError(msg string) bool {
-	if msg == "" {
-		return false
-	}
-	lower := strings.ToLower(msg)
-	needles := []string{
-		"no such host",
-		"server misbehaving",
-		"dial tcp",
-		"connect: connection refused",
-		"connection refused",
-		"connection reset",
-		"i/o timeout",
-		"tls handshake",
-		"tls: ",
-		"x509:",
-		"certificate verify",
-		"network is unreachable",
-		"temporary failure in name resolution",
-		"name or service not known",
-		"unexpected eof",
-		"broken pipe",
-		"http2: client connection lost",
-		"connection timed out",
-		"timeout awaiting response",
-		"wsarecv",
-		"wsasend",
-		"forcibly closed",
-		"failed to respond",
-		"lookup ",
-		"context deadline exceeded",
-		"client.timeout exceeded",
-	}
-	for _, n := range needles {
-		if strings.Contains(lower, n) {
-			return true
-		}
-	}
-	return false
 }
 
 func livePath(state api.AgentState, path string) string {

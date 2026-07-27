@@ -1,6 +1,10 @@
-package engine
+package api_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/foisalislambd/openbackup/internal/api"
+)
 
 func TestIsConnectivityError(t *testing.T) {
 	t.Parallel()
@@ -21,8 +25,8 @@ func TestIsConnectivityError(t *testing.T) {
 		{"missing encryption certificate material", false},
 	}
 	for _, tc := range cases {
-		if got := isConnectivityError(tc.msg); got != tc.want {
-			t.Errorf("isConnectivityError(%q) = %v, want %v", tc.msg, got, tc.want)
+		if got := api.IsConnectivityError(tc.msg); got != tc.want {
+			t.Errorf("IsConnectivityError(%q) = %v, want %v", tc.msg, got, tc.want)
 		}
 	}
 }

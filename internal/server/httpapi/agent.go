@@ -168,6 +168,10 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request, device 
 		writeError(w, http.StatusBadRequest, "", "invalid request body")
 		return
 	}
+	// A successful heartbeat means the device can reach us. Sticky DNS/dial
+	// errors from an older agent build would otherwise keep the dashboard red
+	// even while uploads succeed again.
+	sanitizeHeartbeatConnectivity(&req)
 	if err := s.db.TouchDevice(r.Context(), device.ID, req); err != nil {
 		writeStoreError(w, err)
 		return
@@ -182,6 +186,18 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request, device 
 		Commands:   s.takeCommands(device.ID),
 		ServerTime: time.Now().UTC(),
 	})
+}
+
+// sanitizeHeartbeatConnectivity drops stale network errors once the agent is
+// talking to us again. Quota and other permanent failures are left alone.
+func sanitizeHeartbeatConnectivity(req *api.HeartbeatRequest) {
+	if api.IsConnectivityError(req.LastError) {
+		req.LastError = ""
+	}
+	if req.State == api.StateError && api.IsConnectivityError(req.StateReason) {
+		req.State = api.StateIdle
+		req.StateReason = ""
+	}
 }
 
 // queueCommand adds a pending instruction for a device.

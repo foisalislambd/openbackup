@@ -14,6 +14,8 @@ older agent keeps working against a newer server, so upgrade the server first.
 
 - After the agent can reach the server again, sticky connection errors are
   cleared from `/devices`, Home, and the desktop app (they remain in Logs).
+  The server also ignores those sticky network errors on heartbeat, so the
+  dashboard clears even before every agent is upgraded.
 - `install-server.sh` always pulls `latest` on re-run (it used to keep a stale
   local image), recreates the container, honours HTTPS `OPENBACKUP_PUBLIC_URL`
   for bind address / firewall, and prints that URL after upgrade.

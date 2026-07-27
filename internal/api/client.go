@@ -87,6 +87,49 @@ func IsNotFound(err error) bool {
 	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound
 }
 
+// IsConnectivityError reports whether msg looks like a network / DNS failure
+// rather than a permanent backup problem (quota, corrupt data, etc.).
+func IsConnectivityError(msg string) bool {
+	if msg == "" {
+		return false
+	}
+	lower := strings.ToLower(msg)
+	needles := []string{
+		"no such host",
+		"server misbehaving",
+		"dial tcp",
+		"connect: connection refused",
+		"connection refused",
+		"connection reset",
+		"i/o timeout",
+		"tls handshake",
+		"tls: ",
+		"x509:",
+		"certificate verify",
+		"network is unreachable",
+		"temporary failure in name resolution",
+		"name or service not known",
+		"unexpected eof",
+		"broken pipe",
+		"http2: client connection lost",
+		"connection timed out",
+		"timeout awaiting response",
+		"wsarecv",
+		"wsasend",
+		"forcibly closed",
+		"failed to respond",
+		"lookup ",
+		"context deadline exceeded",
+		"client.timeout exceeded",
+	}
+	for _, n := range needles {
+		if strings.Contains(lower, n) {
+			return true
+		}
+	}
+	return false
+}
+
 // NewClient builds a client for a server base URL such as
 // https://backup.example.com.
 func NewClient(baseURL, token string) (*Client, error) {
