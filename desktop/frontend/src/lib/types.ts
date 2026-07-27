@@ -155,6 +155,16 @@ export interface AppInfo {
   log_path: string
 }
 
+/** Result of asking GitHub whether a newer desktop build exists. */
+export interface UpdateCheck {
+  current: string
+  latest: string
+  update_available: boolean
+  release_url: string
+  download_url?: string
+  name?: string
+}
+
 export interface ActivityEvent {
   at: string
   level: string

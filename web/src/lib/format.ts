@@ -15,6 +15,14 @@ export function bytes(n?: number | null): string {
   return `${value.toFixed(1)} EB`
 }
 
+/** formatVersion shows a release tag once — avoids "vv0.2.1" when the value already has v. */
+export function formatVersion(v?: string | null): string {
+  if (!v) return '—'
+  const t = v.trim()
+  if (!t) return '—'
+  return t.startsWith('v') || t.startsWith('V') ? t : `v${t}`
+}
+
 /**
  * relative renders a timestamp as "4 minutes ago".
  *

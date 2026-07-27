@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 
-import { api } from '../lib/bridge'
+import { api, message } from '../lib/bridge'
 import { parseRate, rate } from '../lib/format'
 import { useAction, useAsync } from '../lib/use-status'
-import type { Overview, Settings as SettingsData } from '../lib/types'
+import type { Overview, Settings as SettingsData, UpdateCheck } from '../lib/types'
 import { Button, Card, Field, Input, Notice, Toggle } from '../components/ui'
 
 /** Settings holds the few things worth changing.
@@ -343,6 +343,22 @@ function Encryption({
 function About() {
   const info = useAsync(() => api.info(), [])
   const action = useAction()
+  const [update, setUpdate] = useState<UpdateCheck | null>(null)
+  const [updateError, setUpdateError] = useState('')
+  const [checking, setChecking] = useState(false)
+
+  async function checkUpdates() {
+    setChecking(true)
+    setUpdateError('')
+    try {
+      setUpdate(await api.checkForUpdates())
+    } catch (err) {
+      setUpdate(null)
+      setUpdateError(message(err))
+    } finally {
+      setChecking(false)
+    }
+  }
 
   return (
     <Card title="About this app">
@@ -358,7 +374,46 @@ function About() {
           </dd>
         </div>
       </dl>
+
+      {updateError && (
+        <div className="mt-3">
+          <Notice tone="warn" title="Could not check for updates">
+            {updateError}
+          </Notice>
+        </div>
+      )}
+      {update && !update.update_available && (
+        <div className="mt-3">
+          <Notice tone="good" title="You are up to date">
+            This app is {update.current}. Latest release is {update.latest}.
+          </Notice>
+        </div>
+      )}
+      {update?.update_available && (
+        <div className="mt-3">
+          <Notice tone="info" title={`Update available: ${update.latest}`}>
+            You have {update.current}. Download the new installer, run it, and it will replace this
+            app (including the built-in agent). Your connection settings stay on this PC unless you
+            uninstall.
+          </Notice>
+        </div>
+      )}
+
       <div className="mt-4 flex flex-wrap gap-2">
+        <Button disabled={checking} onClick={() => void checkUpdates()}>
+          {checking ? 'Checking…' : 'Check for updates'}
+        </Button>
+        {update?.update_available && (
+          <Button
+            onClick={() =>
+              action.run(() =>
+                api.openUpdateDownload(update.download_url || update.release_url),
+              )
+            }
+          >
+            Download update
+          </Button>
+        )}
         <Button onClick={() => action.run(api.openLogFolder)}>Open log folder</Button>
         <Button onClick={() => action.run(api.openDashboard)}>Open web dashboard</Button>
         <Button tone="quiet" onClick={() => action.run(api.minimiseToTray)}>
@@ -367,7 +422,8 @@ function About() {
       </div>
       <p className="mt-3 text-xs text-ink-muted">
         Closing this window does not stop backups — they keep running until you Quit
-        from the tray. The app also starts at login after you connect.
+        from the tray. The app also starts at login after you connect. To remove the app and
+        agent completely, use Windows Apps → Uninstall (or the Start Menu uninstaller).
       </p>
     </Card>
   )

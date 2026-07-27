@@ -19,6 +19,7 @@ import type {
   RestoreRequest,
   Settings,
   Snapshot,
+  UpdateCheck,
 } from './types'
 
 type Bound = Record<string, (...args: unknown[]) => Promise<unknown>>
@@ -97,6 +98,8 @@ export const api = {
 
   openDashboard: () => call<void>('OpenDashboard'),
   openLogFolder: () => call<void>('OpenLogFolder'),
+  checkForUpdates: () => call<UpdateCheck>('CheckForUpdates'),
+  openUpdateDownload: (url: string) => call<void>('OpenUpdateDownload', url),
   minimiseToTray: () => call<void>('MinimiseToTray'),
   quit: () => call<void>('Quit'),
 }

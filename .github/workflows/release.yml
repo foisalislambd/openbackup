@@ -168,9 +168,20 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ needs.version.outputs.tag }}
+          PRODUCT_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -eu
           command -v makensis
+          # Keep Windows file version / NSIS DisplayVersion in sync with the GitHub tag.
+          node -e "
+            const fs = require('fs');
+            const path = 'wails.json';
+            const j = JSON.parse(fs.readFileSync(path, 'utf8'));
+            j.info = j.info || {};
+            j.info.productVersion = process.env.PRODUCT_VERSION;
+            fs.writeFileSync(path, JSON.stringify(j, null, 2) + '\n');
+            console.log('wails productVersion=', j.info.productVersion);
+          "
           LDFLAGS="-s -w -X github.com/foisalislambd/openbackup/internal/version.Version=${VERSION} -X github.com/foisalislambd/openbackup/internal/version.Commit=${GITHUB_SHA::7} -X github.com/foisalislambd/openbackup/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           # One -nsis build produces both the app and the installer.
           wails build -nsis -trimpath -ldflags "$LDFLAGS"

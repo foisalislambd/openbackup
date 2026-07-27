@@ -113,6 +113,15 @@ if ($Desktop -or $Installer) {
     }
     Push-Location (Join-Path $root 'desktop')
     try {
+        $productVersion = ($Version -replace '^v', '')
+        if (-not $productVersion) { $productVersion = '0.0.0' }
+        $wailsJsonPath = Join-Path (Get-Location) 'wails.json'
+        $wailsJson = Get-Content $wailsJsonPath -Raw | ConvertFrom-Json
+        if (-not $wailsJson.info) { $wailsJson | Add-Member -NotePropertyName info -NotePropertyValue (@{}) }
+        $wailsJson.info.productVersion = $productVersion
+        ($wailsJson | ConvertTo-Json -Depth 10) + "`n" | Set-Content -Path $wailsJsonPath -NoNewline
+        Write-Host "  wails productVersion=$productVersion"
+
         # Wails runs the frontend build itself, per desktop/wails.json.
         $wailsArgs = @('build', '-trimpath', '-ldflags', $ldflags)
         if ($Installer) {

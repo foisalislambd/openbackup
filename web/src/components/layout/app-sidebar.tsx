@@ -5,6 +5,7 @@ import { useSidebar } from '@/context/sidebar-context'
 import { SIDEBAR_WIDTH_COLLAPSED, SIDEBAR_WIDTH_EXPANDED } from '@/lib/sidebar'
 import { isNavActive, navItems } from '@/lib/nav'
 import { cn } from '@/lib/cn'
+import { formatVersion } from '@/lib/format'
 
 export function AppSidebar({
   version,
@@ -47,7 +48,7 @@ export function AppSidebar({
           {showLabels && (
             <div className="min-w-0 leading-tight">
               <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">OpenBackup</p>
-              <p className="truncate text-[11px] text-gray-500">v{version}</p>
+              <p className="truncate text-[11px] text-gray-500">{formatVersion(version)}</p>
             </div>
           )}
         </Link>

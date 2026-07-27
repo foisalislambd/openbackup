@@ -10,6 +10,11 @@ older agent keeps working against a newer server, so upgrade the server first.
 
 ## Unreleased
 
+### Added
+
+- Desktop **Check for updates** (Settings → About): compares this build to the
+  latest GitHub Release and opens the Windows installer download in the browser.
+
 ### Fixed
 
 - After the agent can reach the server again, sticky connection errors are
@@ -19,6 +24,11 @@ older agent keeps working against a newer server, so upgrade the server first.
 - `install-server.sh` always pulls `latest` on re-run (it used to keep a stale
   local image), recreates the container, honours HTTPS `OPENBACKUP_PUBLIC_URL`
   for bind address / firewall, and prints that URL after upgrade.
+- Windows installer stops the running app before upgrade, and uninstall removes
+  login autostart plus local OpenBackup data (the in-process agent goes with the
+  app). Release builds set NSIS/file `productVersion` from the GitHub tag.
+- Device badges no longer show a doubled `vv` prefix when the agent version
+  already includes `v`.
 
 ## [0.2.0] - 2026-07-26
 

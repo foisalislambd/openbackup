@@ -4,7 +4,7 @@
 
 import { useState } from 'react'
 import { api, type Device } from '@/lib/api'
-import { bytes, count, platformLabel, relative, until } from '@/lib/format'
+import { bytes, count, formatVersion, platformLabel, relative, until } from '@/lib/format'
 import { useAction, useLoader } from '@/lib/use-loader'
 import { HealthBadge } from '@/components/health-badge'
 import { Badge, Button, Card, Empty, ErrorNote, inputClass } from '@/components/ui'
@@ -112,7 +112,9 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
             <div className="flex flex-wrap items-center gap-2">
               <span className="truncate text-sm font-medium">{device.name}</span>
               <HealthBadge health={device.health} state={device.state} />
-              {device.agent_version && <Badge>v{device.agent_version}</Badge>}
+              {device.agent_version && (
+                <Badge>{formatVersion(device.agent_version)}</Badge>
+              )}
             </div>
           )}
           <div className="mt-1 truncate text-xs text-gray-500">

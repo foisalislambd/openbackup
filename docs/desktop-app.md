@@ -46,8 +46,22 @@ LaunchAgent). Headless / server installs can still use `openbackup service`.
 | **Overview** | The one answer that matters: everything is backed up, or here is what is wrong. Last backup, files protected, size, versions kept. Back up now, pause for an hour |
 | **Folders** | What is backed up, with the folders found on this computer that are not yet included and a button for each. Pause or remove one, or open it in the file manager |
 | **Restore** | Browse any backup one folder at a time, search by name, restore to a folder you pick, with progress and a cancel button |
-| **Settings** | Upload ceiling, the CPU threshold, and the pause rules for metered connections, battery and full-screen apps. End-to-end encryption, including the recovery code. **Log out** to disconnect this device |
+| **Settings** | Upload ceiling, the CPU threshold, and the pause rules for metered connections, battery and full-screen apps. End-to-end encryption, including the recovery code. **Check for updates** downloads the latest installer from GitHub Releases. **Log out** to disconnect this device |
 | **Diagnostics** | The same checks as `openbackup doctor`: configuration, service, server, folders, backups. Plus a link to the logs and to the dashboard |
+
+## Updating on Windows
+
+1. In the app: **Settings → Check for updates → Download update**, or get
+   `openbackup-desktop-windows-amd64-setup.exe` from
+   [Releases](https://github.com/foisalislambd/openbackup/releases).
+2. Run the new installer. It stops the running app (window + agent), replaces
+   the files, and keeps your connection settings.
+3. **Uninstall** (Windows Apps or Start Menu) stops the app, removes login
+   autostart, and deletes local OpenBackup data on that PC. Server-side backups
+   are not deleted.
+
+The installer and the in-app version string both use the GitHub release tag
+(for example `v0.2.1` / product version `0.2.1`).
 
 ## The tray icon
 

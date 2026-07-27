@@ -12,6 +12,7 @@
   "info": {
     "companyName": "OpenBackup",
     "productName": "OpenBackup",
+    "productVersion": "0.0.0",
     "comments": "Automatic backup for your files"
   }
 }

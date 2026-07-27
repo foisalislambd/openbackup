@@ -116,6 +116,8 @@ web-check:
 desktop:
 	@command -v wails >/dev/null || \
 		(echo "install the Wails CLI: go install github.com/wailsapp/wails/v2/cmd/wails@latest" && exit 1)
+	@pv=$$(printf '%s' "$(VERSION)" | sed 's/^v//'); \
+	node -e "const fs=require('fs');const p='desktop/wails.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.info=j.info||{};j.info.productVersion=process.argv[1];fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');" "$$pv"
 	@if [ "$$(uname -s)" = Linux ]; then \
 		cd desktop && wails build -trimpath -ldflags '$(LDFLAGS)' -tags webkit2_41; \
 	else \

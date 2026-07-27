@@ -2,6 +2,8 @@ Unicode true
 
 ####
 ## OpenBackup Windows installer — one binary is both the window and the agent.
+## Installing over an older copy replaces files (after stopping the running app).
+## Uninstall removes the app, login autostart, and local agent state.
 ####
 !include "wails_tools.nsh"
 
@@ -29,6 +31,7 @@ ManifestDPIAware true
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 
+!insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 
 !insertmacro MUI_LANGUAGE "English"
@@ -46,12 +49,29 @@ OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe"
 !endif
 ShowInstDetails show
 
+; Stop the running app (window + in-process agent) so files can be replaced
+; or removed. Ignores "not found" — that is the usual case on a clean install.
+Function StopOpenBackup
+  DetailPrint "Stopping OpenBackup if it is running..."
+  nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /IM ${PRODUCT_EXECUTABLE} /T'
+  Pop $0
+  Sleep 800
+FunctionEnd
+
+; Remove the per-user login Run key so the agent does not come back after uninstall.
+Function ClearLoginAutostart
+  DetailPrint "Removing login autostart..."
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "OpenBackup"
+FunctionEnd
+
 Function .onInit
    !insertmacro wails.checkArchitecture
 FunctionEnd
 
 Section
     !insertmacro wails.setShellContext
+
+    Call StopOpenBackup
 
     !insertmacro wails.webview2runtime
 
@@ -71,7 +91,15 @@ SectionEnd
 Section "uninstall"
     !insertmacro wails.setShellContext
 
-    RMDir /r "$AppData\${PRODUCT_EXECUTABLE}"
+    Call un.StopOpenBackup
+    Call un.ClearLoginAutostart
+
+    ; Local config, index, and logs (not the server-side backups).
+    RMDir /r "$APPDATA\OpenBackup"
+    RMDir /r "$LOCALAPPDATA\OpenBackup"
+
+    ; Legacy / mistaken path from older installers.
+    RMDir /r "$APPDATA\${PRODUCT_EXECUTABLE}"
 
     RMDir /r $INSTDIR
 
@@ -83,3 +111,15 @@ Section "uninstall"
 
     !insertmacro wails.deleteUninstaller
 SectionEnd
+
+Function un.StopOpenBackup
+  DetailPrint "Stopping OpenBackup if it is running..."
+  nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /IM ${PRODUCT_EXECUTABLE} /T'
+  Pop $0
+  Sleep 800
+FunctionEnd
+
+Function un.ClearLoginAutostart
+  DetailPrint "Removing login autostart..."
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "OpenBackup"
+FunctionEnd
