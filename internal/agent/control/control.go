@@ -218,8 +218,8 @@ func (a *Agent) Overview(ctx context.Context) Overview {
 }
 
 // describe turns the raw state into the sentence a worried person wants to read.
-// Ordering is by severity: a stopped agent matters more than a stale backup,
-// which matters more than an error from a run that later succeeded.
+// Ordering is by severity: a stopped agent matters more than active work, which
+// matters more than a past failure that has not been cleared yet.
 func describe(o Overview) (health, headline, detail string) {
 	switch {
 	case !o.AgentRunning:
@@ -231,8 +231,6 @@ func describe(o Overview) (health, headline, detail string) {
 			reason = "Backups are paused until you resume them."
 		}
 		return "paused", "Paused", reason
-	case o.LastError != "":
-		return "error", "The last backup did not finish", o.LastError
 	case o.State == string(api.StateUploading) || o.State == string(api.StateScanning):
 		detail := "Checking your folders for changes."
 		if o.State == string(api.StateUploading) {
@@ -242,6 +240,8 @@ func describe(o Overview) (health, headline, detail string) {
 			}
 		}
 		return "working", "Backing up now", detail
+	case o.LastError != "":
+		return "error", "The last backup did not finish", o.LastError
 	case o.LastBackupAt == nil:
 		return "never_run", "No backup yet",
 			"The first backup has not finished. It can take a while, and it will appear here when it does."

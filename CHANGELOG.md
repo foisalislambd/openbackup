@@ -10,6 +10,11 @@ older agent keeps working against a newer server, so upgrade the server first.
 
 ## Unreleased
 
+### Fixed
+
+- After the agent can reach the server again, sticky connection errors are
+  cleared from `/devices`, Home, and the desktop app (they remain in Logs).
+
 ## [0.2.0] - 2026-07-26
 
 ### Changed

@@ -1039,6 +1039,37 @@ func (e *Engine) heartbeat(ctx context.Context) error {
 		return err
 	}
 
+	// Reaching the server again means transient network failures are over.
+	// Clear them and immediately report so /devices, home, and the desktop app
+	// drop the stale error without waiting for the next interval. The failure
+	// already remains in the activity log.
+	if e.clearRecoveredErrors() {
+		cleared := e.Status()
+		clearedState, clearedReason := cleared.State, cleared.Message
+		if cleared.Paused {
+			clearedState = api.StatePaused
+			clearedReason = cleared.PauseReason
+		}
+		if _, reportErr := e.client.Heartbeat(ctx, api.HeartbeatRequest{
+			State:         clearedState,
+			StateReason:   clearedReason,
+			QueuedFiles:   idxStats.Files,
+			QueuedBytes:   idxStats.Bytes,
+			UploadedBytes: e.up.Stats().BytesUploaded.Load(),
+			CPUPercent:    machine.CPUPercent,
+			MemoryBytes:   currentMemoryBytes(),
+			AgentVersion:  version.Version,
+			BatteryPct:    machine.Battery.Percent,
+			OnMetered:     machine.Metered,
+			LastError:     cleared.LastError,
+			CurrentPath:   livePath(clearedState, cleared.CurrentPath),
+			FilesDone:     liveCount(clearedState, cleared.FilesDone),
+			FilesTotal:    liveCount(clearedState, cleared.FilesTotal),
+		}); reportErr != nil {
+			e.log.Debug("could not report recovered status", "error", reportErr)
+		}
+	}
+
 	e.policyMu.Lock()
 	e.policy = resp.Policy
 	e.policyMu.Unlock()
@@ -1049,6 +1080,83 @@ func (e *Engine) heartbeat(ctx context.Context) error {
 	}
 	e.flushEvents(ctx)
 	return nil
+}
+
+// clearRecoveredErrors drops sticky UI errors that a successful heartbeat
+// proves are no longer true (DNS/dial/timeouts, and "unauthorised" once the
+// token works again). Quota errors stay until the user frees space.
+// It returns true when something changed and the server should be told.
+func (e *Engine) clearRecoveredErrors() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	changed := false
+	if e.progress.LastError != "" && isConnectivityError(e.progress.LastError) {
+		e.progress.LastError = ""
+		changed = true
+	}
+
+	if e.state == api.StateError {
+		msg := e.progress.Message
+		switch {
+		case isConnectivityError(msg):
+			e.state = api.StateIdle
+			e.progress.Message = ""
+			// Message and LastError are usually the same string; clear both so
+			// health cannot stay red from a leftover LastError.
+			e.progress.LastError = ""
+			changed = true
+		case strings.Contains(msg, "no longer authorised"):
+			// Heartbeat authenticated, so the device is enrolled again.
+			e.state = api.StateIdle
+			e.progress.Message = ""
+			changed = true
+		}
+	}
+	return changed
+}
+
+// isConnectivityError reports whether msg looks like a network / DNS failure
+// rather than a permanent backup problem (quota, corrupt data, etc.).
+func isConnectivityError(msg string) bool {
+	if msg == "" {
+		return false
+	}
+	lower := strings.ToLower(msg)
+	needles := []string{
+		"no such host",
+		"server misbehaving",
+		"dial tcp",
+		"connect: connection refused",
+		"connection refused",
+		"connection reset",
+		"i/o timeout",
+		"tls handshake",
+		"tls: ",
+		"x509:",
+		"certificate verify",
+		"network is unreachable",
+		"temporary failure in name resolution",
+		"name or service not known",
+		"unexpected eof",
+		"broken pipe",
+		"http2: client connection lost",
+		"connection timed out",
+		"timeout awaiting response",
+		"wsarecv",
+		"wsasend",
+		"forcibly closed",
+		"failed to respond",
+		"lookup ",
+		"context deadline exceeded",
+		"client.timeout exceeded",
+	}
+	for _, n := range needles {
+		if strings.Contains(lower, n) {
+			return true
+		}
+	}
+	return false
 }
 
 func livePath(state api.AgentState, path string) string {
@@ -1153,6 +1261,9 @@ func (e *Engine) resetProgress() {
 	e.progress.BytesUploaded = 0
 	e.progress.BytesSkipped = 0
 	e.progress.StartedAt = time.Now()
+	// A new attempt is underway; do not keep painting the previous failure on
+	// the dashboard while this run is in progress.
+	e.progress.LastError = ""
 	e.up.ResetStats()
 }
 
