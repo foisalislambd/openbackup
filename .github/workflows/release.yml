@@ -1,6 +1,6 @@
 # Auto-release: every push to main creates a version tag and a GitHub Release
-# with CLI binaries (cross-compiled), Windows and Linux desktop apps, and a
-# Docker Hub image (foisalislambd/openbackup:latest + version tags).
+# with CLI binaries (cross-compiled), Windows and Linux desktop apps, and
+# container images on Docker Hub and GHCR (latest + version tags).
 #
 # Skip a release for a docs-only / WIP commit by including [skip release] in the
 # commit message. You can also run this workflow manually (Actions → Release)
@@ -10,6 +10,7 @@
 # (v0.1.9 → v0.2.0, v0.2.9 → v0.3.0).
 #
 # Docker Hub push needs repository secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN.
+# GHCR push uses GITHUB_TOKEN (packages: write).
 name: Release
 
 on:
@@ -24,6 +25,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 concurrency:
   group: release-main
@@ -273,12 +275,34 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Version metadata
         id: meta
         run: |
-          echo "version=${{ needs.version.outputs.tag }}" >> "$GITHUB_OUTPUT"
-          echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          set -eu
+          # GHCR requires lowercase names; official form is ghcr.io/<owner>/<repo>.
+          image=$(echo 'ghcr.io/${{ github.repository }}' | tr '[:upper:]' '[:lower:]')
+          tag='${{ needs.version.outputs.tag }}'
+          ver='${{ needs.version.outputs.version }}'
+          {
+            echo "version=${tag}"
+            echo "commit=$(git rev-parse --short HEAD)"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "tags<<EOF"
+            echo "foisalislambd/openbackup:latest"
+            echo "foisalislambd/openbackup:${tag}"
+            echo "foisalislambd/openbackup:${ver}"
+            echo "${image}:latest"
+            echo "${image}:${tag}"
+            echo "${image}:${ver}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v7
@@ -286,10 +310,13 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: |
-            foisalislambd/openbackup:latest
-            foisalislambd/openbackup:${{ needs.version.outputs.tag }}
-            foisalislambd/openbackup:${{ needs.version.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.title=openbackup
+            org.opencontainers.image.description=OpenBackup server
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
             COMMIT=${{ steps.meta.outputs.commit }}
@@ -348,7 +375,8 @@ jobs:
             "- **Windows desktop:** \`openbackup-desktop-windows-amd64-setup.exe\` (installer) or \`.exe\` (portable) — window + background agent in one binary" \
             "- **Linux desktop:** \`openbackup-desktop-linux-amd64\` (+ \`.desktop\` + \`openbackup.png\`) — same: GUI + agent in one binary" \
             "- **Agent / server CLI:** \`openbackup-<os>-<arch>\` and \`openbackup-server-<os>-<arch>\` (optional; for headless/servers or the terminal)" \
-            "- **Server container:** \`docker pull foisalislambd/openbackup:${TAG}\` (also tagged \`latest\`)" \
+            "- **Server container (Docker Hub):** \`docker pull foisalislambd/openbackup:${TAG}\` (also tagged \`latest\`)" \
+            "- **Server container (GHCR):** \`docker pull ghcr.io/foisalislambd/openbackup:${TAG}\` (also tagged \`latest\`)" \
             "" \
             "### Notes" \
             "- Linux desktop needs WebKitGTK 4.1 at runtime (\`libwebkit2gtk-4.1-0\` on Debian/Ubuntu)." \

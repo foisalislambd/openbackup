@@ -144,7 +144,8 @@ Patch numbers run `0`–`9`, then the minor version increases
 - cross-compiled **agent + server** binaries (`make release`)
 - **Windows** desktop app + NSIS installer
 - **Linux** desktop app (`amd64`, built with `webkit2_41`)
-- **Docker Hub** image `foisalislambd/openbackup` (`latest` + version tags)
+- **Docker Hub** image `foisalislambd/openbackup` and **GHCR** image
+  `ghcr.io/foisalislambd/openbackup` (`latest` + version tags)
 
 Put `[skip release]` in the commit message to push without publishing. You can
 also run **Actions → Release → Run workflow** and set an exact tag (e.g. `v0.2.0`).

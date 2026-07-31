@@ -114,14 +114,19 @@ every release target, the dashboard's types and lint, the desktop app on Windows
 and Linux, and a container smoke test. It is thorough, but it cannot tell you
 whether a restore produced the right bytes.
 
-## Docker Hub releases
+## Container image releases
 
-Pushes to `main` that create a GitHub Release also build and push
-`foisalislambd/openbackup` (`latest` plus the version tag) for
-`linux/amd64` and `linux/arm64`.
+Pushes to `main` that create a GitHub Release also build and push the server
+image for `linux/amd64` and `linux/arm64` to both registries (`latest` plus the
+version tag):
 
-Maintainers need these repository secrets (Settings → Secrets and variables →
-Actions):
+| Registry | Image |
+| --- | --- |
+| Docker Hub | `foisalislambd/openbackup` |
+| GHCR | `ghcr.io/foisalislambd/openbackup` |
+
+GHCR uses `GITHUB_TOKEN` (`packages: write`). Docker Hub needs these repository
+secrets (Settings → Secrets and variables → Actions):
 
 | Secret | Value |
 | --- | --- |
@@ -129,6 +134,10 @@ Actions):
 | `DOCKERHUB_TOKEN` | Hub Access Token with read/write on the `openbackup` repo |
 
 Create the token at https://hub.docker.com/settings/security (Access Tokens).
+
+If the GHCR package is still private after the first release (unusual for a
+public repo — new packages normally inherit the repo’s visibility), set it to
+Public under the package’s settings.
 
 ## Pull request expectations
 

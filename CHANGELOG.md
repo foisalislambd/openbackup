@@ -12,6 +12,8 @@ older agent keeps working against a newer server, so upgrade the server first.
 
 ### Added
 
+- Release workflow also publishes the server image to GHCR as
+  `ghcr.io/foisalislambd/openbackup` (`latest` + version tags), alongside Docker Hub.
 - Desktop **Check for updates** (Settings → About): compares this build to the
   latest GitHub Release and opens the Windows installer download in the browser.
 
