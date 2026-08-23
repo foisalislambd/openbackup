@@ -40,7 +40,7 @@ export default function DevicesPage() {
         {code ? (
           <div className="space-y-4">
             <p className="text-sm text-gray-500">
-              Open the desktop app on that computer and paste these in. Code expires {until(code.expires_at)}.
+              Paste into the desktop app. Expires {until(code.expires_at)}.
             </p>
             <CopyRow label="Connection code" action="Copy code" text={code.code} emphasize />
             <CopyRow label="Server address" action="Copy address" text={code.server_url} />
@@ -54,10 +54,7 @@ export default function DevicesPage() {
             </div>
           </div>
         ) : (
-          <p className="text-sm text-gray-500">
-            One-time code per device. Paste the code and server address into the desktop app, or use
-            the CLI if you prefer.
-          </p>
+          <p className="text-sm text-gray-500">Paste the code into the desktop app.</p>
         )}
       </Card>
 

@@ -6,7 +6,7 @@ import { cn } from '@/lib/cn'
 export function PageTitle({ title }: { title: string }) {
   return (
     <div className="min-w-0 leading-tight">
-      <h1 className="truncate text-base font-semibold tracking-tight text-gray-900 dark:text-white sm:text-lg">
+      <h1 className="truncate text-[0.9375rem] font-semibold tracking-tight text-gray-900 dark:text-white">
         {title}
       </h1>
     </div>

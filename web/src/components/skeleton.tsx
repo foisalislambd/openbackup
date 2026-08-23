@@ -162,10 +162,7 @@ export function ShellSkeleton() {
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="admin-topbar flex items-center px-6">
-          <div className="space-y-2">
-            <Bone className="h-6 w-40 rounded" />
-            <Bone className="h-3 w-56 rounded" />
-          </div>
+          <Bone className="h-4 w-32 rounded" />
         </div>
         <div className="flex-1 p-6">
           <OverviewSkeleton />
