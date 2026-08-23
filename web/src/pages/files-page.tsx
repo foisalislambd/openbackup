@@ -2,21 +2,15 @@
  * My files: computers first, then that device's folders and versions.
  */
 
-import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import {
-  api,
-  downloadSnapshotArchive,
-  downloadSnapshotFile,
-  type Device,
-  type Entry,
-  type FileVersion,
-  type Snapshot,
-} from '@/lib/api'
-import { absolute, baseName, bytes, count, parentPath, relative } from '@/lib/format'
-import { message, useAction, useLoader } from '@/lib/use-loader'
-import { Badge, Button, Empty, ErrorNote, FileGlyph, FolderGlyph } from '@/components/ui'
-import { BackupsSkeleton, BrowseSkeleton } from '@/components/skeleton'
+import { api, type Device, type Snapshot } from '@/lib/api'
+import { absolute, bytes, count, relative } from '@/lib/format'
+import { isEncryptedDevice } from '@/lib/file-kind'
+import { useAction, useLoader } from '@/lib/use-loader'
+import { Badge, Button, Empty, ErrorNote } from '@/components/ui'
+import { BackupsSkeleton } from '@/components/skeleton'
+import { EntryIcon, LockBadge } from '@/components/file-icon'
+import { FileBrowser } from '@/components/file-browser'
 
 type Catalog = { devices: Device[]; snapshots: Snapshot[] }
 
@@ -179,11 +173,13 @@ export default function FilesPage() {
         </div>
       ) : (
         <FileBrowser
+          key={`${latest.id}:${prefix}`}
           snapshot={latest}
           deviceName={activeDevice?.name || latest.device_name || 'This computer'}
           prefix={prefix}
           versionsPath={versionsPath}
           viewingOlder={viewingOlderSnapshot}
+          encrypted={Boolean(latest.encrypted || isEncryptedDevice(activeDevice))}
           onBackToDevices={() =>
             setQuery({ device: undefined, path: undefined, file: undefined, id: undefined })
           }
@@ -250,45 +246,40 @@ function DeviceFolders({
 
   return (
     <div className="admin-card overflow-hidden">
-      <div className="border-b border-gray-200 dark:border-gray-800 px-5 py-4">
+      <div className="border-b border-gray-200 px-5 py-4 dark:border-gray-800">
         <h2 className="text-sm font-semibold">Computers</h2>
-        <p className="mt-1 text-xs text-gray-500 sm:text-sm">One folder per device.</p>
+        <p className="mt-1 text-xs text-gray-500 sm:text-sm">
+          Open a computer like a folder. Encrypted devices show a lock — names are visible, contents are not.
+        </p>
       </div>
-      <div className="file-row border-b border-gray-200 dark:border-gray-800 text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-gray-500">
-        <span>Name</span>
-        <span className="file-row-meta">Last backup</span>
-        <span className="file-row-meta">Library</span>
-        <span className="text-right">Actions</span>
-      </div>
-      <ul>
+      <div className="file-grid p-4">
         {devices.map((device) => {
           const snaps = snapshots.filter((s) => s.device_id === device.id)
           const latest = snaps[0]
+          const locked = isEncryptedDevice(device) || Boolean(latest?.encrypted)
           return (
-            <li key={device.id}>
-              <button type="button" className="file-row w-full text-left" onClick={() => onOpen(device.id)}>
-                <span className="flex min-w-0 items-center gap-3">
-                  <FolderGlyph />
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-semibold">{device.name}</span>
-                    <span className="mt-0.5 block text-xs text-gray-500">
-                      {count(snaps.length)} backup{snaps.length === 1 ? '' : 's'}
-                      {device.platform ? ` · ${device.platform}` : ''}
-                    </span>
+            <button
+              key={device.id}
+              type="button"
+              className="file-tile"
+              onClick={() => onOpen(device.id)}
+            >
+              <EntryIcon path={device.name} type="dir" locked={locked} large />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-semibold">{device.name}</span>
+                <span className="mt-0.5 block text-xs text-gray-500">
+                  {latest ? relative(latest.started_at) : 'No backup yet'}
+                </span>
+                {locked && (
+                  <span className="mt-1 inline-flex">
+                    <LockBadge />
                   </span>
-                </span>
-                <span className="file-row-meta text-sm text-gray-500">
-                  {latest ? absolute(latest.started_at) : '—'}
-                </span>
-                <span className="file-row-meta tabular text-sm text-gray-500">
-                  {latest ? bytes(latest.total_bytes) : '—'}
-                </span>
-                <span className="text-right text-sm text-gray-500">Open</span>
-              </button>
-            </li>
+                )}
+              </span>
+            </button>
           )
         })}
-      </ul>
+      </div>
     </div>
   )
 }
@@ -366,7 +357,7 @@ function HistoryList({
                   disabled={!complete}
                   onClick={() => onOpen(snapshot)}
                 >
-                  <FolderGlyph />
+                  <EntryIcon path={snapshot.device_name || 'backup'} type="dir" />
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-semibold group-hover:text-brand-500">
                       {title}
@@ -415,355 +406,3 @@ function HistoryList({
   )
 }
 
-function FileBrowser({
-  snapshot,
-  deviceName,
-  prefix,
-  versionsPath,
-  viewingOlder,
-  onBackToDevices,
-  onNavigate,
-  onOpenVersions,
-  onCloseVersions,
-  onUseLatest,
-  deviceId,
-}: {
-  snapshot: Snapshot
-  deviceName: string
-  prefix: string
-  versionsPath: string
-  viewingOlder: boolean
-  onBackToDevices: () => void
-  onNavigate: (path: string) => void
-  onOpenVersions: (path: string) => void
-  onCloseVersions: () => void
-  onUseLatest: () => void
-  deviceId: string
-}) {
-  const snapshotId = snapshot.id
-  const { data, error, loading } = useLoader(
-    async () => {
-      const page = await api.browse(snapshotId, prefix)
-      return { entries: page.entries ?? [], cursor: page.next_cursor ?? '' }
-    },
-    { deps: [snapshotId, prefix] },
-  )
-  const [extra, setExtra] = useState<{ key: string; entries: Entry[]; cursor: string }>()
-  const [dlError, setDlError] = useState<string>()
-  const more = useAction()
-
-  if (error && !data) return <ErrorNote>{error}</ErrorNote>
-  if (loading || !data) return <BrowseSkeleton />
-
-  const key = `${snapshotId}:${prefix}`
-  const appended = extra?.key === key ? extra.entries : []
-  const cursor = extra?.key === key ? extra.cursor : data.cursor
-  const entries = [...data.entries, ...appended]
-  const folders = entries
-    .filter((e) => e.type === 'dir')
-    .slice()
-    .sort((a, b) => a.path.localeCompare(b.path))
-  const files = entries
-    .filter((e) => e.type !== 'dir')
-    .slice()
-    .sort((a, b) => a.path.localeCompare(b.path))
-
-  const download = async (fn: () => Promise<void>) => {
-    setDlError(undefined)
-    try {
-      await fn()
-    } catch (err) {
-      setDlError(message(err, 'Download failed'))
-    }
-  }
-
-  const goUp = () => {
-    if (prefix) onNavigate(parentPath(prefix))
-    else onBackToDevices()
-  }
-
-  return (
-    <div className="space-y-4">
-      {viewingOlder && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-warning-500/30 bg-warning-50 dark:bg-warning-500/10 px-4 py-3 text-sm">
-          <span>
-            Viewing older backup from {absolute(snapshot.started_at)}.
-          </span>
-          <Button onClick={onUseLatest}>Back to latest</Button>
-        </div>
-      )}
-
-      {(dlError || error) && <ErrorNote>{dlError || error}</ErrorNote>}
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-lg font-semibold tracking-tight">{deviceName}</div>
-          <div className="mt-0.5 text-sm text-gray-500">
-            As of {absolute(snapshot.started_at)} · {count(snapshot.file_count)} files · library{' '}
-            {bytes(snapshot.total_bytes)}
-            {snapshot.uploaded_bytes > 0 ? ` · ${bytes(snapshot.uploaded_bytes)} new that run` : ''}
-          </div>
-        </div>
-        <Button onClick={() => void download(() => downloadSnapshotArchive(snapshotId, prefix))}>
-          Download {prefix ? baseName(prefix) : 'all'} ZIP
-        </Button>
-      </div>
-
-      <nav className="flex flex-wrap items-center gap-1 text-sm">
-        <button
-          type="button"
-          className="rounded-lg px-2 py-1 font-semibold text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/15"
-          onClick={onBackToDevices}
-        >
-          Computers
-        </button>
-        <span className="text-gray-500">/</span>
-        {prefix ? (
-          <button
-            type="button"
-            className="rounded-lg px-2 py-1 font-semibold text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/15"
-            onClick={() => onNavigate('')}
-          >
-            {deviceName}
-          </button>
-        ) : (
-          <span className="rounded-lg px-2 py-1 font-semibold">{deviceName}</span>
-        )}
-        {prefix
-          .split('/')
-          .filter(Boolean)
-          .map((segment, index, all) => {
-            const path = all.slice(0, index + 1).join('/')
-            const isLast = index === all.length - 1
-            return (
-              <span key={path} className="flex items-center gap-1">
-                <span className="text-gray-500">/</span>
-                {isLast ? (
-                  <span className="rounded-lg px-2 py-1 font-semibold">{segment}</span>
-                ) : (
-                  <button
-                    type="button"
-                    className="rounded-lg px-2 py-1 font-semibold text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/15"
-                    onClick={() => onNavigate(path)}
-                  >
-                    {segment}
-                  </button>
-                )}
-              </span>
-            )
-          })}
-      </nav>
-
-      <div className={`grid gap-4 ${versionsPath ? 'xl:grid-cols-[1fr_20rem]' : ''}`}>
-        <div className="admin-card overflow-hidden">
-          <div className="file-row border-b border-gray-200 dark:border-gray-800 text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-gray-500">
-            <span>Name</span>
-            <span className="file-row-meta">Type</span>
-            <span className="file-row-meta">Size</span>
-            <span className="text-right">Actions</span>
-          </div>
-          <ul>
-            <li>
-              <button type="button" className="file-row w-full text-left" onClick={goUp}>
-                <span className="flex items-center gap-3 text-sm font-semibold text-gray-500">
-                  <span className="grid size-7 place-items-center rounded-lg bg-gray-100 dark:bg-gray-800">
-                    ↑
-                  </span>
-                  {prefix ? 'Parent folder' : 'All computers'}
-                </span>
-              </button>
-            </li>
-            {folders.length === 0 && files.length === 0 ? (
-              <li className="px-5 py-8">
-                <Empty title="This folder is empty in the backup" />
-              </li>
-            ) : (
-              <>
-                {folders.map((folder) => (
-                  <li key={folder.path}>
-                    <button
-                      type="button"
-                      className="file-row w-full text-left"
-                      onClick={() => onNavigate(folder.path)}
-                    >
-                      <span className="flex min-w-0 items-center gap-3">
-                        <FolderGlyph />
-                        <span className="truncate text-sm font-semibold">{baseName(folder.path)}</span>
-                      </span>
-                      <span className="file-row-meta text-sm text-gray-500">Folder</span>
-                      <span className="file-row-meta text-sm text-gray-500">—</span>
-                      <span className="text-right text-sm text-gray-500">Open</span>
-                    </button>
-                  </li>
-                ))}
-                {files.map((file) => (
-                  <li key={file.path}>
-                    <div
-                      className={`file-row ${versionsPath === file.path ? 'bg-brand-50 dark:bg-brand-500/15' : ''}`}
-                    >
-                      <button
-                        type="button"
-                        className="flex min-w-0 items-center gap-3 text-left"
-                        onClick={() => (file.type === 'file' ? onOpenVersions(file.path) : undefined)}
-                        disabled={file.type !== 'file'}
-                      >
-                        <FileGlyph />
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-semibold">{baseName(file.path)}</span>
-                          <span className="mt-0.5 block text-xs text-gray-500">
-                            {file.type === 'symlink'
-                              ? `Link → ${file.link_target || '?'}`
-                              : `Changed ${relative(file.mtime)}`}
-                          </span>
-                        </span>
-                      </button>
-                      <span className="file-row-meta text-sm text-gray-500">
-                        {file.type === 'symlink' ? 'Link' : 'File'}
-                      </span>
-                      <span className="file-row-meta tabular text-sm text-gray-500">
-                        {file.type === 'symlink' ? '—' : bytes(file.size)}
-                      </span>
-                      <div className="flex items-center justify-end gap-2">
-                        {file.type === 'file' && (
-                          <>
-                            <Button onClick={() => onOpenVersions(file.path)}>Versions</Button>
-                            <Button
-                              onClick={() =>
-                                void download(() => downloadSnapshotFile(snapshotId, file.path))
-                              }
-                            >
-                              Download
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </>
-            )}
-          </ul>
-          {cursor && (
-            <div className="border-t border-gray-200 dark:border-gray-800 px-5 py-4 text-center">
-              <Button
-                disabled={more.busy === 'more'}
-                onClick={() => {
-                  void more.run('more', async () => {
-                    const page = await api.browse(snapshotId, prefix, cursor)
-                    setExtra({
-                      key,
-                      entries: [...appended, ...(page.entries ?? [])],
-                      cursor: page.next_cursor ?? '',
-                    })
-                  })
-                }}
-              >
-                {more.busy === 'more' ? 'Loading…' : 'Show more'}
-              </Button>
-            </div>
-          )}
-        </div>
-
-        {versionsPath && (
-          <VersionPanel
-            path={versionsPath}
-            deviceId={deviceId}
-            currentSnapshotId={snapshotId}
-            onClose={onCloseVersions}
-          />
-        )}
-      </div>
-    </div>
-  )
-}
-
-function VersionPanel({
-  path,
-  deviceId,
-  currentSnapshotId,
-  onClose,
-}: {
-  path: string
-  deviceId: string
-  currentSnapshotId: string
-  onClose: () => void
-}) {
-  const navigate = useNavigate()
-  const [dlError, setDlError] = useState<string>()
-  const { data, error, loading } = useLoader<FileVersion[]>(
-    () => api.fileVersions(path, deviceId || undefined),
-    { deps: [path, deviceId] },
-  )
-
-  return (
-    <aside className="admin-card flex max-h-[70vh] flex-col overflow-hidden">
-      <div className="border-b border-gray-200 dark:border-gray-800 px-4 py-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold">{baseName(path)}</h2>
-            <p className="mt-0.5 truncate text-xs text-gray-500" title={path}>
-              Version history
-            </p>
-          </div>
-          <Button variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-      </div>
-      <div className="flex-1 overflow-y-auto p-3">
-        {(error || dlError) && <ErrorNote>{dlError || error}</ErrorNote>}
-        {loading && !data && <p className="text-sm text-gray-500">Loading versions…</p>}
-        {data && data.length === 0 && (
-          <Empty title="No versions found" hint="This path is not in any completed backup." />
-        )}
-        {data && data.length === 1 && (
-          <p className="mb-2 text-xs text-gray-500">
-            Only one version so far.
-          </p>
-        )}
-        {data && data.length > 0 && (
-          <ul className="space-y-2">
-            {data.map((version, index) => (
-              <li
-                key={version.snapshot.id}
-                className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold">
-                    {index === 0 ? 'Latest content' : `Older · ${absolute(version.snapshot.started_at)}`}
-                  </span>
-                  {version.snapshot.id === currentSnapshotId && <Badge>viewing</Badge>}
-                </div>
-                <p className="mt-1 text-xs text-gray-500">
-                  {absolute(version.snapshot.started_at)} · {bytes(version.entry.size)}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    onClick={() => {
-                      setDlError(undefined)
-                      void downloadSnapshotFile(version.snapshot.id, path).catch((err) =>
-                        setDlError(message(err, 'Download failed')),
-                      )
-                    }}
-                  >
-                    Download
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() =>
-                      navigate(
-                        `/files?id=${version.snapshot.id}&path=${encodeURIComponent(parentPath(path))}&file=${encodeURIComponent(path)}${deviceId ? `&device=${deviceId}` : ''}`,
-                      )
-                    }
-                  >
-                    Browse then
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </aside>
-  )
-}

@@ -6,9 +6,11 @@ import { useState } from 'react'
 import { api, type Device } from '@/lib/api'
 import { bytes, count, formatVersion, platformLabel, relative, until } from '@/lib/format'
 import { useAction, useLoader } from '@/lib/use-loader'
+import { isEncryptedDevice } from '@/lib/file-kind'
 import { HealthBadge } from '@/components/health-badge'
 import { Badge, Button, Card, Empty, ErrorNote, inputClass } from '@/components/ui'
 import { DevicesSkeleton } from '@/components/skeleton'
+import { LockBadge } from '@/components/file-icon'
 
 export default function DevicesPage() {
   const { data: devices, error, loading, reload } = useLoader<Device[]>(() => api.devices(), { pollMs: 15000 })
@@ -112,6 +114,7 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
             <div className="flex flex-wrap items-center gap-2">
               <span className="truncate text-sm font-medium">{device.name}</span>
               <HealthBadge health={device.health} state={device.state} />
+              {isEncryptedDevice(device) && <LockBadge />}
               {device.agent_version && (
                 <Badge>{formatVersion(device.agent_version)}</Badge>
               )}
@@ -130,6 +133,7 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <Button href={`/files?device=${encodeURIComponent(device.id)}`}>Browse files</Button>
           <Button
             disabled={!!busy}
             onClick={() => void run('backup', () => api.sendCommand(device.id, 'backup_now'), onChanged)}

@@ -30,6 +30,7 @@ export default function LogsPage() {
     { pollMs: 8000 },
   )
   const [filter, setFilter] = useState<'all' | 'problems' | 'files'>('all')
+  const [query, setQuery] = useState('')
 
   const live = useMemo(
     () => (data ? data.devices.filter((d) => isLiveDevice(d, data.fetchedAt)) : []),
@@ -41,9 +42,11 @@ export default function LogsPage() {
   if (loading || !data) return <ActivitySkeleton />
 
   const shown = data.events.filter((e) => {
-    if (filter === 'problems') return e.level === 'warn' || e.level === 'error'
-    if (filter === 'files') return Boolean(e.path) || /back(ing|ed) up|restor|skipped|could not read/i.test(e.message)
-    return true
+    if (filter === 'problems' && e.level !== 'warn' && e.level !== 'error') return false
+    if (filter === 'files' && !(e.path || /back(ing|ed) up|restor|skipped|could not read/i.test(e.message))) return false
+    const needle = query.trim().toLowerCase()
+    if (!needle) return true
+    return [e.message, e.path, e.reason, e.device_name].some((v) => (v || '').toLowerCase().includes(needle))
   })
 
   return (
@@ -90,7 +93,14 @@ export default function LogsPage() {
       <Card
         title="Log"
         action={
-          <div className="flex items-center gap-1 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search logs"
+              className="h-8 w-40 rounded-md border border-gray-200 bg-transparent px-2 text-xs outline-none focus:border-brand-400 dark:border-gray-700 sm:w-52"
+            />
+            <div className="flex items-center gap-1 text-xs">
             {(['all', 'files', 'problems'] as const).map((option) => (
               <button
                 key={option}
@@ -104,6 +114,7 @@ export default function LogsPage() {
                 {option === 'all' ? 'Everything' : option === 'files' ? 'Files' : 'Problems'}
               </button>
             ))}
+            </div>
           </div>
         }
       >

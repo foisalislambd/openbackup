@@ -7,8 +7,10 @@ import { api, type Device, type Snapshot, type Usage } from '@/lib/api'
 import { bytes, count, platformLabel, relative } from '@/lib/format'
 import { useLoader } from '@/lib/use-loader'
 import { HealthBadge } from '@/components/health-badge'
-import { Empty, ErrorNote, FolderGlyph, Meter, Stat } from '@/components/ui'
+import { Empty, ErrorNote, Meter, Stat } from '@/components/ui'
 import { OverviewSkeleton } from '@/components/skeleton'
+import { EntryIcon, LockBadge } from '@/components/file-icon'
+import { isEncryptedDevice } from '@/lib/file-kind'
 
 type Overview = { devices: Device[]; usage: Usage; snapshots: Snapshot[] }
 
@@ -65,7 +67,10 @@ export default function HomePage() {
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {latestByDevice.map((snapshot) => (
+            {latestByDevice.map((snapshot) => {
+              const device = devices.find((d) => d.id === snapshot.device_id)
+              const locked = Boolean(snapshot.encrypted || isEncryptedDevice(device))
+              return (
               <button
                 key={snapshot.device_id}
                 type="button"
@@ -74,10 +79,13 @@ export default function HomePage() {
                   navigate(`/files?device=${encodeURIComponent(snapshot.device_id)}`)
                 }
               >
-                <FolderGlyph large />
+                <EntryIcon path={snapshot.device_name ?? 'Computer'} type="dir" locked={locked} large />
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold">
-                    {snapshot.device_name ?? 'Computer'}
+                  <div className="flex items-center gap-2">
+                    <div className="truncate text-sm font-semibold">
+                      {snapshot.device_name ?? 'Computer'}
+                    </div>
+                    {locked && <LockBadge />}
                   </div>
                   <div className="mt-0.5 truncate text-xs text-gray-500">
                     {count(snapshot.file_count)} files · {bytes(snapshot.total_bytes)}
@@ -87,7 +95,8 @@ export default function HomePage() {
                   </div>
                 </div>
               </button>
-            ))}
+              )
+            })}
           </div>
         )}
       </section>

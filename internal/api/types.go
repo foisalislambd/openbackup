@@ -308,6 +308,9 @@ type Snapshot struct {
 	SkippedCount  int64          `json:"skipped_count"`
 	Roots         []SnapshotRoot `json:"roots"`
 	Error         string         `json:"error,omitempty"`
+	// Encrypted mirrors the device key: the server can list paths but cannot
+	// decode file bytes when this is true.
+	Encrypted bool `json:"encrypted"`
 }
 
 // Snapshot statuses.
@@ -335,20 +338,23 @@ type EventsRequest struct {
 
 // Device is the dashboard's view of a device.
 type Device struct {
-	ID           string     `json:"id"`
-	Name         string     `json:"name"`
-	Hostname     string     `json:"hostname"`
-	Platform     Platform   `json:"platform"`
-	OSVersion    string     `json:"os_version,omitempty"`
-	AgentVersion string     `json:"agent_version"`
-	KeyID        string     `json:"key_id,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	LastSeen     *time.Time `json:"last_seen,omitempty"`
-	State        string     `json:"state"`
-	StateReason  string     `json:"state_reason,omitempty"`
-	QueuedFiles  int64      `json:"queued_files"`
-	QueuedBytes  int64      `json:"queued_bytes"`
-	LastError    string     `json:"last_error,omitempty"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Hostname     string   `json:"hostname"`
+	Platform     Platform `json:"platform"`
+	OSVersion    string   `json:"os_version,omitempty"`
+	AgentVersion string   `json:"agent_version"`
+	KeyID        string   `json:"key_id,omitempty"`
+	// Encrypted is true when this device stores end-to-end encrypted blobs.
+	// The dashboard uses it to show a lock and to hide in-browser preview.
+	Encrypted   bool       `json:"encrypted"`
+	CreatedAt   time.Time  `json:"created_at"`
+	LastSeen    *time.Time `json:"last_seen,omitempty"`
+	State       string     `json:"state"`
+	StateReason string     `json:"state_reason,omitempty"`
+	QueuedFiles int64      `json:"queued_files"`
+	QueuedBytes int64      `json:"queued_bytes"`
+	LastError   string     `json:"last_error,omitempty"`
 	// CurrentPath is set while the device is actively backing up.
 	CurrentPath string `json:"current_path,omitempty"`
 	FilesDone   int64  `json:"files_done,omitempty"`

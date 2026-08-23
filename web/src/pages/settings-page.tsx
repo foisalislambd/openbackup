@@ -143,7 +143,10 @@ function PolicyCard({ initial }: { initial: Settings }) {
           </span>
         </Field>
 
-        <Field label="Require end-to-end encryption" hint="Reject devices that are not encrypted.">
+        <Field
+          label="Require end-to-end encryption"
+          hint="New devices must encrypt files on the computer before upload. The website can still list folders, but locked files cannot be opened in the browser."
+        >
           <label className="mt-2 flex items-center gap-2 text-sm">
             <input
               type="checkbox"

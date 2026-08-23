@@ -11,6 +11,7 @@ import { Button, ErrorNote, Field, inputClass } from '@/components/ui'
 export function AuthScreen({ mode, onDone }: { mode: 'setup' | 'signin'; onDone: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const setup = mode === 'setup'
@@ -25,7 +26,9 @@ export function AuthScreen({ mode, onDone }: { mode: 'setup' | 'signin'; onDone:
           {setup ? 'Set up OpenBackup' : 'Sign in'}
         </h1>
         <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-          {setup ? 'Create the owner account.' : 'Sign in to your backups.'}
+          {setup
+            ? 'This account owns the backup server. Use an email you check.'
+            : 'Sign in to browse backups, download files, and manage devices.'}
         </p>
 
         <form
@@ -67,14 +70,21 @@ export function AuthScreen({ mode, onDone }: { mode: 'setup' | 'signin'; onDone:
             <div className="relative mt-1.5">
               <Lock className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <input
-                className={`${inputClass} !mt-0 pl-10`}
-                type="password"
+                className={`${inputClass} !mt-0 pr-16 pl-10`}
+                type={showPassword ? 'text' : 'password'}
                 required
                 minLength={setup ? 10 : undefined}
                 autoComplete={setup ? 'new-password' : 'current-password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
+              <button
+                type="button"
+                className="absolute top-1/2 right-3 -translate-y-1/2 text-xs font-semibold text-gray-500 hover:text-gray-800"
+                onClick={() => setShowPassword((v) => !v)}
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
             </div>
           </Field>
           <Button type="submit" variant="primary" disabled={busy} className="h-11 w-full">

@@ -167,6 +167,34 @@ body {
   scrollbar-width: none;
 }
 
+.file-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: 0.5rem;
+}
+
+.file-tile {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  border-radius: 0.85rem;
+  padding: 0.9rem 0.6rem 0.75rem;
+  text-align: center;
+  transition: background 0.15s ease;
+}
+
+.file-tile:hover,
+.file-tile:focus-visible {
+  background: var(--color-gray-100);
+}
+
+.dark .file-tile:hover,
+.dark .file-tile:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .file-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 7rem 8rem 9rem;

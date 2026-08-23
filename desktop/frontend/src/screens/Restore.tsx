@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { api, on } from '../lib/bridge'
 import { bytes, count, fileName, parentPath, when } from '../lib/format'
-import { useAction, useAsync } from '../lib/use-status'
+import { useAction, useAsync, useStatus } from '../lib/use-status'
 import type { Entry, FileVersion, RestoreProgress, Snapshot } from '../lib/types'
 import { Badge, Button, Card, Empty, Notice, Rows, Spinner } from '../components/ui'
 
@@ -20,6 +20,8 @@ export function Restore() {
   const [extra, setExtra] = useState<{ key: string; entries: Entry[]; cursor: string }>()
   const more = useAction()
   const action = useAction()
+  const { status } = useStatus()
+  const encrypted = Boolean(status?.encrypted)
 
   const snapshots = useAsync(() => api.snapshots(), [])
   const completed = snapshots.data?.filter((snap) => snap.status === 'complete') ?? []
@@ -170,18 +172,39 @@ export function Restore() {
             </div>
           )}
 
+          {encrypted && (
+            <Notice tone="info" title="This backup is encrypted">
+              Files restore on this computer because it has the key. The website cannot open them.
+            </Notice>
+          )}
+
           {!results && (
-            <div className="mb-3 flex items-center gap-2 text-sm">
+            <div className="mb-3 flex flex-wrap items-center gap-1 text-sm">
               <button
-                className="text-brand hover:underline disabled:text-ink-muted disabled:no-underline"
-                disabled={!prefix}
-                onClick={() => openFolder(parentPath(prefix).replace(/\/+$/, ''))}
+                className="text-brand hover:underline"
+                onClick={() => openFolder('')}
               >
-                Up
+                This computer
               </button>
-              <span className="selectable truncate text-ink-muted" title={prefix || '/'}>
-                {prefix ? `/${prefix}` : 'All backed-up folders'}
-              </span>
+              {prefix
+                .split('/')
+                .filter(Boolean)
+                .map((segment, index, all) => {
+                  const path = all.slice(0, index + 1).join('/')
+                  const last = index === all.length - 1
+                  return (
+                    <span key={path} className="flex items-center gap-1">
+                      <span className="text-ink-muted">/</span>
+                      {last ? (
+                        <span className="font-medium text-ink">{segment}</span>
+                      ) : (
+                        <button className="text-brand hover:underline" onClick={() => openFolder(path)}>
+                          {segment}
+                        </button>
+                      )}
+                    </span>
+                  )
+                })}
             </div>
           )}
 

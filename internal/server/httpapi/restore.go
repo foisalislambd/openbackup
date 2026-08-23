@@ -60,7 +60,8 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request, user
 	}
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Length", strconv.FormatInt(entry.Size, 10))
-	w.Header().Set("Content-Disposition", contentDisposition(filename))
+	inline := r.URL.Query().Get("inline") == "1"
+	w.Header().Set("Content-Disposition", contentDisposition(filename, inline))
 	// Restores are private user data; never let a proxy or CDN keep a copy.
 	w.Header().Set("Cache-Control", "private, no-store")
 
@@ -93,7 +94,7 @@ func (s *Server) handleDownloadArchive(w http.ResponseWriter, r *http.Request, u
 
 	name := archiveName(snap, prefix)
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", contentDisposition(name))
+	w.Header().Set("Content-Disposition", contentDisposition(name, false))
 	w.Header().Set("Cache-Control", "private, no-store")
 	// The length is unknown up front, so the response is streamed chunked.
 	flusher, _ := w.(http.Flusher)
@@ -329,7 +330,11 @@ func sanitizeFilename(s string) string {
 
 // contentDisposition builds a header that works for both ASCII and Unicode
 // filenames, since browsers disagree about the plain form.
-func contentDisposition(filename string) string {
+func contentDisposition(filename string, inline bool) string {
 	safe := sanitizeFilename(filename)
-	return fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, safe, url.PathEscape(filename))
+	kind := "attachment"
+	if inline {
+		kind = "inline"
+	}
+	return fmt.Sprintf(`%s; filename="%s"; filename*=UTF-8''%s`, kind, safe, url.PathEscape(filename))
 }

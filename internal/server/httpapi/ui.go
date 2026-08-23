@@ -357,7 +357,8 @@ func (s *Server) handleDeleteSnapshot(w http.ResponseWriter, r *http.Request, us
 // picker walks.
 func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request, user *store.User) {
 	snapshotID := r.PathValue("id")
-	if _, err := s.db.SnapshotByID(r.Context(), user.ID, snapshotID); err != nil {
+	snap, err := s.db.SnapshotByID(r.Context(), user.ID, snapshotID)
+	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -366,7 +367,11 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request, user *stor
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": entries, "next_cursor": next})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"entries":     entries,
+		"next_cursor": next,
+		"encrypted":   snap.Encrypted,
+	})
 }
 
 // handleFileVersions lists distinct versions of a path across completed backups.

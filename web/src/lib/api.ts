@@ -13,6 +13,8 @@ export type Device = {
   platform: string
   os_version?: string
   agent_version?: string
+  key_id?: string
+  encrypted?: boolean
   created_at: string
   last_seen?: string | null
   state: string
@@ -43,6 +45,7 @@ export type Snapshot = {
   total_bytes: number
   /** Bytes actually uploaded for this run after dedup (new data this backup). */
   uploaded_bytes: number
+  encrypted?: boolean
 }
 
 export type Entry = {
@@ -210,11 +213,18 @@ export const api = {
     ).then((r) => r.snapshots ?? []),
   deleteSnapshot: (id: string) => request<void>(`/snapshots/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   browse: (id: string, prefix = '', cursor = '', limit = 200) =>
-    request<{ entries: Entry[]; next_cursor: string }>(
+    request<{ entries?: Entry[]; next_cursor?: string; encrypted?: boolean }>(
       `/snapshots/${encodeURIComponent(id)}/browse?children=1&prefix=${encodeURIComponent(
         prefix,
       )}&cursor=${encodeURIComponent(cursor)}&limit=${limit}`,
-    ),
+    ).then((r) => {
+      const extra = r as { entries?: Entry[]; next_cursor?: string }
+      return {
+        entries: r.entries ?? extra.entries ?? [],
+        next_cursor: r.next_cursor ?? extra.next_cursor ?? '',
+        encrypted: r.encrypted,
+      }
+    }),
 
   fileVersions: (path: string, deviceId?: string) =>
     request<{ path: string; versions: FileVersion[] }>(
@@ -251,6 +261,25 @@ function archiveUrl(snapshotId: string, prefix: string): string {
 /** downloadSnapshotFile fetches a file with credentials and surfaces API errors. */
 export async function downloadSnapshotFile(snapshotId: string, path: string): Promise<void> {
   await saveDownload(downloadUrl(snapshotId, path), baseNameOf(path))
+}
+
+/** fetchSnapshotFile loads file bytes for in-browser preview. */
+export async function fetchSnapshotFile(snapshotId: string, path: string): Promise<Blob> {
+  const response = await fetch(`${downloadUrl(snapshotId, path)}&inline=1`, { credentials: 'same-origin' })
+  if (!response.ok) {
+    const text = await response.text()
+    let message = `Could not open file (${response.status})`
+    let code: string | undefined
+    try {
+      const body = JSON.parse(text) as { error?: string; code?: string }
+      if (body.error) message = body.error
+      code = body.code
+    } catch {
+      /* keep status message */
+    }
+    throw new ApiError(message, response.status, code)
+  }
+  return response.blob()
 }
 
 /** downloadSnapshotArchive fetches a folder ZIP with credentials. */

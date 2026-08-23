@@ -140,6 +140,7 @@ func (db *DB) ListDevices(ctx context.Context, userID string) ([]api.Device, err
 			d.LastBackupAt = &t
 		}
 		d.Health = deviceHealth(d, fromMillis(lastComplete))
+		d.Encrypted = d.KeyID != ""
 		out = append(out, d)
 	}
 	return out, rows.Err()

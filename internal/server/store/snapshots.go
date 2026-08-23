@@ -285,7 +285,7 @@ const snapshotColumns = `s.id, s.device_id, s.kind, s.status, COALESCE(s.parent_
 // SnapshotByID reads one snapshot, scoped to an account.
 func (db *DB) SnapshotByID(ctx context.Context, userID, snapshotID string) (*api.Snapshot, error) {
 	row := db.sql.QueryRowContext(ctx,
-		`SELECT `+snapshotColumns+`, COALESCE(d.name, '') FROM snapshots s
+		`SELECT `+snapshotColumns+`, COALESCE(d.name, ''), COALESCE(d.key_id, '') FROM snapshots s
 		 LEFT JOIN devices d ON d.id = s.device_id
 		 WHERE s.id = ? AND s.user_id = ?`, snapshotID, userID)
 	var (
@@ -295,9 +295,11 @@ func (db *DB) SnapshotByID(ctx context.Context, userID, snapshotID string) (*api
 		completed  sql.NullInt64
 		roots      string
 		deviceName string
+		keyID      string
 	)
 	err := row.Scan(&s.ID, &s.DeviceID, &kind, &s.Status, &s.ParentID, &started, &completed,
-		&s.FileCount, &s.DirCount, &s.TotalBytes, &s.UploadedBytes, &s.SkippedCount, &roots, &s.Error, &deviceName)
+		&s.FileCount, &s.DirCount, &s.TotalBytes, &s.UploadedBytes, &s.SkippedCount, &roots, &s.Error,
+		&deviceName, &keyID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -308,6 +310,7 @@ func (db *DB) SnapshotByID(ctx context.Context, userID, snapshotID string) (*api
 	s.StartedAt = fromMillis(started)
 	s.CompletedAt = nullTime(completed)
 	s.DeviceName = deviceName
+	s.Encrypted = keyID != ""
 	_ = json.Unmarshal([]byte(roots), &s.Roots)
 	return &s, nil
 }
@@ -318,7 +321,7 @@ func (db *DB) ListSnapshots(ctx context.Context, userID, deviceID string, limit 
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	query := `SELECT ` + snapshotColumns + `, COALESCE(d.name, '') FROM snapshots s
+	query := `SELECT ` + snapshotColumns + `, COALESCE(d.name, ''), COALESCE(d.key_id, '') FROM snapshots s
 		LEFT JOIN devices d ON d.id = s.device_id
 		WHERE s.user_id = ?`
 	args := []any{userID}
@@ -344,16 +347,18 @@ func (db *DB) ListSnapshots(ctx context.Context, userID, deviceID string, limit 
 			completed  sql.NullInt64
 			roots      string
 			deviceName string
+			keyID      string
 		)
 		if err := rows.Scan(&s.ID, &s.DeviceID, &kind, &s.Status, &s.ParentID, &started, &completed,
 			&s.FileCount, &s.DirCount, &s.TotalBytes, &s.UploadedBytes, &s.SkippedCount, &roots, &s.Error,
-			&deviceName); err != nil {
+			&deviceName, &keyID); err != nil {
 			return nil, err
 		}
 		s.Kind = api.SnapshotKind(kind)
 		s.StartedAt = fromMillis(started)
 		s.CompletedAt = nullTime(completed)
 		s.DeviceName = deviceName
+		s.Encrypted = keyID != ""
 		_ = json.Unmarshal([]byte(roots), &s.Roots)
 		out = append(out, s)
 	}
