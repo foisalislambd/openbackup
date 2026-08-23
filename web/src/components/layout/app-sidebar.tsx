@@ -45,7 +45,7 @@ export function AppSidebar({
           onClick={closeMobileSidebar}
           className={cn('flex min-w-0 flex-1 items-center gap-3 no-underline', !showLabels && 'justify-center')}
         >
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-500 text-xs font-bold text-white shadow-theme-xs">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-500 text-sm font-bold text-white shadow-theme-xs">
             O
           </span>
           {showLabels && (
@@ -59,7 +59,7 @@ export function AppSidebar({
           <button
             type="button"
             onClick={closeMobileSidebar}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10"
             aria-label="Close menu"
           >
             <X className="h-5 w-5" />

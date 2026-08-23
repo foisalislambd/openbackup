@@ -22,7 +22,7 @@ export function AppHeader({
           type="button"
           onClick={toggleMobileSidebar}
           className={cn(
-            'flex h-8.5 w-8.5 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-600 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-white/5',
+            'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-600 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-white/5',
             isDesktop && 'lg:hidden',
           )}
           aria-label={!isDesktop && isMobileOpen ? 'Close menu' : 'Open menu'}
@@ -39,14 +39,14 @@ export function AppHeader({
           <button
             type="button"
             onClick={onToggleTheme}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-600 transition hover:bg-gray-50 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-white/5"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-600 transition hover:bg-gray-50 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-white/5"
             aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
           >
             {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </button>
           <Link
             to="/files"
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand-500 px-2.5 text-sm font-medium text-white shadow-theme-xs transition hover:bg-brand-600 sm:gap-2 sm:px-3"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-brand-500 px-2.5 text-sm font-medium text-white shadow-theme-xs transition hover:bg-brand-600 sm:gap-2 sm:px-3.5"
           >
             <FolderOpen className="h-4 w-4" />
             <span className="hidden sm:inline">Browse</span>

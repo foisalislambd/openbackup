@@ -49,10 +49,7 @@ export default function HomePage() {
 
       <section>
         <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-          <div className="min-w-0">
-            <h2 className="text-base font-semibold tracking-tight sm:text-lg">Your computers</h2>
-            <p className="text-xs text-gray-500 sm:text-sm">Open a computer to browse files</p>
-          </div>
+          <h2 className="min-w-0 text-base font-semibold tracking-tight sm:text-lg">Your computers</h2>
           <Link to="/files" className="shrink-0 text-sm font-semibold text-brand-500 hover:underline">
             Browse files
           </Link>
