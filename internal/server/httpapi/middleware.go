@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -13,14 +12,6 @@ import (
 	"github.com/foisalislambd/openbackup/internal/api"
 	"github.com/foisalislambd/openbackup/internal/server/auth"
 	"github.com/foisalislambd/openbackup/internal/server/store"
-)
-
-// contextKey is the private key type for request-scoped values.
-type contextKey string
-
-const (
-	ctxDevice contextKey = "device"
-	ctxUser   contextKey = "user"
 )
 
 // sessionCookieName is the dashboard session cookie.
@@ -45,8 +36,7 @@ func (s *Server) agentOnly(next func(http.ResponseWriter, *http.Request, *store.
 			writeStoreError(w, err)
 			return
 		}
-		ctx := context.WithValue(r.Context(), ctxDevice, device)
-		next(w, r.WithContext(ctx), device)
+		next(w, r, device)
 	})
 }
 
@@ -70,12 +60,20 @@ func (s *Server) userOnly(next func(http.ResponseWriter, *http.Request, *store.U
 		}
 		user, err := s.db.SessionUser(r.Context(), auth.HashToken(cookie.Value))
 		if err != nil {
-			s.clearSessionCookie(w)
-			writeError(w, http.StatusUnauthorized, api.CodeInvalidToken, "session expired")
+			if errors.Is(err, store.ErrNotFound) {
+				// A genuinely unknown or expired session: clear the cookie and
+				// answer 401 so the dashboard shows the sign-in form.
+				s.clearSessionCookie(w)
+				writeError(w, http.StatusUnauthorized, api.CodeInvalidToken, "session expired")
+				return
+			}
+			// A transient failure (SQLite busy, disk error) must not destroy
+			// the user's live session; that would mass-log-out every dashboard
+			// user on a brief database hiccup.
+			writeStoreError(w, err)
 			return
 		}
-		ctx := context.WithValue(r.Context(), ctxUser, user)
-		next(w, r.WithContext(ctx), user)
+		next(w, r, user)
 	})
 }
 
@@ -200,11 +198,16 @@ func (s *Server) withRecovery(next http.Handler) http.Handler {
 // clientIP resolves the caller address, honouring proxy headers only when the
 // deployment says a proxy is in front. Trusting them unconditionally would let
 // anyone spoof the address used for rate limiting.
+//
+// When a proxy is trusted we take the right-most X-Forwarded-For entry: proxies
+// append, so that entry is what the trusted proxy saw. The left-most entry is
+// fully client-controlled and would let an attacker rotate fake IPs to dodge
+// rate limiting.
 func (s *Server) clientIP(r *http.Request) string {
 	if s.cfg.TrustProxy {
 		if v := r.Header.Get("X-Forwarded-For"); v != "" {
-			if first, _, found := strings.Cut(v, ","); found {
-				return strings.TrimSpace(first)
+			if i := strings.LastIndex(v, ","); i >= 0 {
+				return strings.TrimSpace(v[i+1:])
 			}
 			return strings.TrimSpace(v)
 		}
@@ -243,9 +246,15 @@ func (l *attemptLimiter) Allow(key string) bool {
 			kept = append(kept, t)
 		}
 	}
-	// Opportunistically drop idle keys so the map cannot grow without bound.
+	// Opportunistically drop keys whose window has passed so the map cannot
+	// grow without bound. Evicting only expired keys — rather than wiping the
+	// whole map — keeps brute-force counters against active offenders intact.
 	if len(kept) == 0 && len(l.attempts) > 10000 {
-		l.attempts = make(map[string][]time.Time)
+		for k, ts := range l.attempts {
+			if len(ts) == 0 || !ts[len(ts)-1].After(cutoff) {
+				delete(l.attempts, k)
+			}
+		}
 	}
 	if len(kept) >= l.limit {
 		l.attempts[key] = kept

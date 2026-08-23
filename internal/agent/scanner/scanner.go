@@ -16,7 +16,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -299,26 +298,4 @@ func (r *Result) addError(msg string) {
 	if len(r.Errors) < maxErrors {
 		r.Errors = append(r.Errors, msg)
 	}
-}
-
-// TopSkipReasons summarises the sampled skips for a human-readable log line.
-func (r *Result) TopSkipReasons(limit int) []string {
-	counts := map[string]int{}
-	for _, s := range r.Samples {
-		counts[s.Reason]++
-	}
-	reasons := make([]string, 0, len(counts))
-	for reason := range counts {
-		reasons = append(reasons, reason)
-	}
-	sort.Slice(reasons, func(i, j int) bool {
-		if counts[reasons[i]] != counts[reasons[j]] {
-			return counts[reasons[i]] > counts[reasons[j]]
-		}
-		return reasons[i] < reasons[j]
-	})
-	if limit > 0 && len(reasons) > limit {
-		reasons = reasons[:limit]
-	}
-	return reasons
 }

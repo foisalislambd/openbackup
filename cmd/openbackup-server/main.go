@@ -219,7 +219,8 @@ func runServe(args []string) error {
 }
 
 // bootstrapAdmin creates the first account from the environment, which is what
-// lets a one-command install end with a usable login.
+// lets a one-command install end with a usable login. The conditional insert
+// makes "only if no account exists" atomic.
 func bootstrapAdmin(ctx context.Context, d *deps) error {
 	if d.cfg.AdminEmail == "" || d.cfg.AdminPassword == "" {
 		return nil
@@ -235,8 +236,12 @@ func bootstrapAdmin(ctx context.Context, d *deps) error {
 	if err != nil {
 		return fmt.Errorf("bootstrap admin: %w", err)
 	}
-	user, err := d.db.CreateUser(ctx, d.cfg.AdminEmail, hash, true)
+	user, err := d.db.CreateFirstUser(ctx, d.cfg.AdminEmail, hash)
 	if err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			// Another process created the first account while we were hashing.
+			return nil
+		}
 		return fmt.Errorf("bootstrap admin: %w", err)
 	}
 	d.log.Info("created the first administrator account", "email", user.Email)

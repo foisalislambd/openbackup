@@ -244,28 +244,6 @@ func StatusText(opt Options) (string, error) {
 	}
 }
 
-// InstallOrStart installs if needed, otherwise starts.
-func InstallOrStart(opt Options) error {
-	err := Install(opt)
-	if err == nil {
-		return WaitUntilRunning(20 * time.Second)
-	}
-	if errors.Is(err, ErrInstalledNotStarted) {
-		if err := Start(opt); err != nil {
-			return err
-		}
-		return nil
-	}
-	if strings.Contains(strings.ToLower(err.Error()), "already") {
-		_ = Uninstall(opt)
-		if err := Install(opt); err != nil {
-			return err
-		}
-		return WaitUntilRunning(20 * time.Second)
-	}
-	return err
-}
-
 // EnableLoginAutostart writes a login autostart entry (XDG .desktop / LaunchAgent).
 // It never calls systemd/launchd Stop — that would kill a desktop process that
 // was itself started at login.

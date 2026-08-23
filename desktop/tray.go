@@ -47,17 +47,24 @@ func newTray(app *App, log *slog.Logger) *tray {
 
 // start puts the icon in the notification area and keeps it up to date.
 func (t *tray) start(ctx context.Context) {
+	// Create the derived context under the lock before launching: stop() and
+	// the systray callbacks may otherwise read ctx/cancel while this goroutine
+	// is still assigning them.
+	t.mu.Lock()
 	t.ctx, t.cancel = context.WithCancel(ctx)
-	systray.Run(func() { t.onReady(t.ctx) }, func() {})
+	inner := t.ctx
+	t.mu.Unlock()
+	systray.Run(func() { t.onReady(inner) }, func() {})
 }
 
 // stop removes the icon.
 func (t *tray) stop() {
 	t.mu.Lock()
 	started := t.started
+	cancel := t.cancel
 	t.mu.Unlock()
-	if t.cancel != nil {
-		t.cancel()
+	if cancel != nil {
+		cancel()
 	}
 	if started {
 		systray.Quit()

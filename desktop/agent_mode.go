@@ -108,6 +108,15 @@ func runDesktopForeground(args []string, cfgPath string) error {
 	if err != nil {
 		return err
 	}
+	// Two engines would both rewrite the control file and fight over the same
+	// index; refuse instead of clobbering whichever got there first.
+	if appsvc.AgentRunning() {
+		if *once {
+			return errors.New("another OpenBackup agent is already running; " +
+				"use 'openbackup backup' to ask it for a backup now")
+		}
+		return errors.New("another OpenBackup agent is already running")
+	}
 	log := logx.New(logx.Options{
 		Level: cfg.LogLevel,
 		File:  filepath.Join(stateDir, "agent.log"),

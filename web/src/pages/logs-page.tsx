@@ -36,7 +36,8 @@ export default function LogsPage() {
     [data],
   )
 
-  if (error) return <ErrorNote>{error}</ErrorNote>
+  // Keep the feed on a failed poll rather than blanking the page.
+  if (error && !data) return <ErrorNote>{error}</ErrorNote>
   if (loading || !data) return <ActivitySkeleton />
 
   const shown = data.events.filter((e) => {
@@ -47,6 +48,7 @@ export default function LogsPage() {
 
   return (
     <div className="space-y-4">
+      {error && <ErrorNote>{error}</ErrorNote>}
       {live.length > 0 && (
         <Card title="Happening now">
           <ul className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -112,8 +114,8 @@ export default function LogsPage() {
           />
         ) : (
           <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-            {shown.map((event, index) => (
-              <li key={event.id ?? index} className="flex gap-3 py-3 first:pt-0 last:pb-0">
+            {shown.map((event) => (
+              <li key={event.id} className="flex gap-3 py-3 first:pt-0 last:pb-0">
                 <LevelDot level={event.level} />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-2">

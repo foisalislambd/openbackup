@@ -33,11 +33,6 @@
   --color-gray-950: #0c111d;
   --color-gray-dark: #1a2231;
 
-  --color-blue-light-50: #f0f9ff;
-  --color-blue-light-100: #e0f2fe;
-  --color-blue-light-500: #0ba5ec;
-  --color-blue-light-600: #0086c9;
-
   --color-success-50: #ecfdf3;
   --color-success-100: #d1fadf;
   --color-success-200: #a6f4c5;
@@ -70,47 +65,15 @@
   --shadow-theme-xs: 0px 1px 2px 0px rgba(16, 24, 40, 0.05);
   --shadow-theme-sm: 0px 1px 3px 0px rgba(16, 24, 40, 0.1), 0px 1px 2px 0px rgba(16, 24, 40, 0.06);
   --shadow-theme-md: 0px 4px 8px -2px rgba(16, 24, 40, 0.1), 0px 2px 4px -2px rgba(16, 24, 40, 0.06);
-  --shadow-focus-ring: 0px 0px 0px 4px rgba(70, 95, 255, 0.12);
 
-  /* Legacy aliases used by older page classes */
-  --color-canvas: #f9fafb;
-  --color-surface: #ffffff;
-  --color-surface-muted: #f2f4f7;
-  --color-sidebar: #ffffff;
-  --color-border-subtle: #e4e7ec;
-  --color-ink: #101828;
-  --color-ink-muted: #667085;
-  --color-brand: #465fff;
-  --color-brand-soft: #ecf3ff;
-  --color-brand-strong: #3641f5;
-  --color-good: #12b76a;
-  --color-warn: #f79009;
-  --color-bad: #f04438;
+  /* Icon colours for the file browser */
   --color-folder: #fdb022;
   --color-file: #7592ff;
-
-  --shadow-panel: var(--shadow-theme-xs);
-  --shadow-lift: var(--shadow-theme-md);
 }
 
 .dark {
-  --color-canvas: #0c111d;
-  --color-surface: #101828;
-  --color-surface-muted: #1d2939;
-  --color-sidebar: #101828;
-  --color-border-subtle: #1d2939;
-  --color-ink: #f9fafb;
-  --color-ink-muted: #98a2b3;
-  --color-brand: #7592ff;
-  --color-brand-soft: rgba(70, 95, 255, 0.12);
-  --color-brand-strong: #9cb9ff;
-  --color-good: #12b76a;
-  --color-warn: #f79009;
-  --color-bad: #f04438;
   --color-folder: #fdb022;
   --color-file: #9cb9ff;
-  --shadow-panel: none;
-  --shadow-lift: var(--shadow-theme-md);
 }
 
 html,
@@ -168,16 +131,14 @@ body {
   border-bottom-color: var(--color-gray-800);
 }
 
-.admin-card,
-.panel {
+.admin-card {
   border-radius: 0.75rem;
   border: 1px solid var(--color-gray-200);
   background-color: #ffffff;
   box-shadow: var(--shadow-theme-xs);
 }
 
-.dark .admin-card,
-.dark .panel {
+.dark .admin-card {
   border-color: var(--color-gray-800);
   background-color: var(--color-gray-dark);
   box-shadow: none;

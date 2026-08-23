@@ -313,14 +313,32 @@ func (c *Config) saveLocked() error {
 	}
 	raw = append(raw, '\n')
 
-	tmp := c.path + ".tmp"
-	// 0600: the file holds the device token and, when encryption is on, the
-	// master key.
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(c.path), FileName+".*.tmp")
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, c.path); err != nil {
-		_ = os.Remove(tmp)
+	tmpName := tmp.Name()
+	// 0600: the file holds the device token and, when encryption is on, the
+	// master key.
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	// A unique temp file per save keeps two processes (daemon and CLI) from
+	// interleaving writes through the same path and renaming a corrupt mix into
+	// place; last rename wins instead of last half-write wins.
+	if err := os.Rename(tmpName, c.path); err != nil {
+		_ = os.Remove(tmpName)
 		return err
 	}
 	return nil
@@ -447,9 +465,6 @@ func (c *Config) RefreshDetectedRoots() {
 		c.Roots = append(c.Roots, found)
 	}
 }
-
-// IgnoreConfig converts the stored settings into the ignore engine's config.
-func (c *Config) IgnoreConfig() ignore.Config { return c.Settings().IgnoreConfig() }
 
 // IgnoreConfig converts a settings snapshot into the ignore engine's config.
 func (s Settings) IgnoreConfig() ignore.Config {

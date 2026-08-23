@@ -35,7 +35,11 @@ type Uploader struct {
 	client *api.Client
 	codec  *codec.Codec
 	bucket *throttle.Bucket
-	cfg    chunk.Config
+
+	// cfgMu guards cfg: the heartbeat goroutine applies the server's chunking
+	// policy while a backup is reading it.
+	cfgMu sync.RWMutex
+	cfg   chunk.Config
 
 	concurrency int
 
@@ -100,6 +104,21 @@ func New(opts Options) (*Uploader, error) {
 	}, nil
 }
 
+// SetChunkConfig swaps the chunking parameters, which is how a server-side
+// policy change reaches running uploads. The next file picks it up; the file
+// currently being chunked keeps the settings it started with.
+func (u *Uploader) SetChunkConfig(cfg chunk.Config) {
+	u.cfgMu.Lock()
+	defer u.cfgMu.Unlock()
+	u.cfg = cfg
+}
+
+func (u *Uploader) chunkConfig() chunk.Config {
+	u.cfgMu.RLock()
+	defer u.cfgMu.RUnlock()
+	return u.cfg
+}
+
 // Stats exposes the running totals for the current backup.
 func (u *Uploader) Stats() *Stats { return &u.stats }
 
@@ -128,9 +147,9 @@ type FileResult struct {
 
 // UploadFile chunks and uploads one file.
 //
-// A file being written while it is read is the normal case on a live system, so
-// a size change is reported rather than treated as an error: the caller retries
-// it in the next pass, when the file has settled.
+// A file being written while it is read is the normal case on a live system:
+// whatever bytes were read are hashed and stored consistently, and a file that
+// kept changing shows up as changed in the next pass, when it has settled.
 func (u *Uploader) UploadFile(ctx context.Context, path string, expectedSize int64) (*FileResult, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -139,7 +158,7 @@ func (u *Uploader) UploadFile(ctx context.Context, path string, expectedSize int
 	defer f.Close()
 
 	whole := hash.NewHasher()
-	chunker, err := chunk.NewChunker(io.TeeReader(f, whole), u.cfg)
+	chunker, err := chunk.NewChunker(io.TeeReader(f, whole), u.chunkConfig())
 	if err != nil {
 		return nil, err
 	}
@@ -212,6 +231,7 @@ func (u *Uploader) flushBatch(ctx context.Context, b *batch) (uploaded, skipped 
 	for _, d := range missing {
 		needed[d] = struct{}{}
 	}
+	sent := make(map[string]struct{}, len(missing))
 
 	type job struct {
 		digest string
@@ -280,6 +300,16 @@ func (u *Uploader) flushBatch(ctx context.Context, b *batch) (uploaded, skipped 
 			u.stats.ChunksSkipped.Add(1)
 			continue
 		}
+		if _, dup := sent[digest]; dup {
+			// The same content appears twice in one file; the first upload of
+			// this batch already covers it.
+			size := int64(len(b.chunks[i].data))
+			skippedBytes.Add(size)
+			u.stats.BytesDeduplicated.Add(size)
+			u.stats.ChunksSkipped.Add(1)
+			continue
+		}
+		sent[digest] = struct{}{}
 		select {
 		case jobs <- job{digest: digest, data: b.chunks[i].data}:
 		case <-uploadCtx.Done():

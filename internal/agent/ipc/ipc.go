@@ -108,7 +108,15 @@ func Listen(stateDir string, handler Handler) (*Server, error) {
 	mux.HandleFunc("POST /resume", s.auth(s.handleResume))
 	mux.HandleFunc("POST /reload", s.auth(s.handleReload))
 
-	s.http = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	s.http = &http.Server{
+		Handler: mux,
+		// Loopback-only and token-gated, but a stuck local caller should still
+		// not be able to pin the agent's control goroutines forever.
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	go func() { _ = s.http.Serve(ln) }()
 	return s, nil
 }

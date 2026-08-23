@@ -41,6 +41,9 @@ const entryBatchSize = 500
 
 // Engine runs the agent.
 type Engine struct {
+	// cfg is replaced by Reload and read from the heartbeat goroutine, so every
+	// access goes through cfgMu (see config()).
+	cfgMu  sync.RWMutex
 	cfg    *config.Config
 	log    *slog.Logger
 	client *api.Client
@@ -75,6 +78,28 @@ type Engine struct {
 	// trigger asks the loop to run a backup now.
 	trigger chan trigger
 	events  *eventBuffer
+
+	// deferral counts consecutive governor-deferred runs, backing the retry
+	// off from 2 minutes up to half an hour so a long-lived condition (a
+	// permanently metered link, a kiosk that is always fullscreen) does not
+	// wake the machine every two minutes forever.
+	deferral int
+}
+
+// nextDeferral returns the wait before the next retry of a deferred backup,
+// doubling per consecutive deferral and capped at 30 minutes.
+func (e *Engine) nextDeferral() time.Duration {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.deferral++
+	delay := 2 * time.Minute
+	for range e.deferral - 1 {
+		delay *= 2
+		if delay >= 30*time.Minute {
+			return 30 * time.Minute
+		}
+	}
+	return delay
 }
 
 // trigger describes why a backup run was requested.
@@ -190,6 +215,20 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 	return e, nil
 }
 
+// config returns the live configuration pointer. Reload swaps it, so reads
+// must go through here to stay race-free.
+func (e *Engine) config() *config.Config {
+	e.cfgMu.RLock()
+	defer e.cfgMu.RUnlock()
+	return e.cfg
+}
+
+func (e *Engine) setConfig(c *config.Config) {
+	e.cfgMu.Lock()
+	e.cfg = c
+	e.cfgMu.Unlock()
+}
+
 // Close releases resources.
 func (e *Engine) Close() {
 	e.codec.Close()
@@ -198,16 +237,22 @@ func (e *Engine) Close() {
 
 // Status returns the current status.
 func (e *Engine) Status() Status {
+	// Evaluate the governor before taking e.mu: the evaluation may probe CPU
+	// usage, which can block for a few hundred milliseconds, and holding the
+	// lock across that would stall progress updates and IPC status polls.
+	paused := e.gov.Paused()
+	var eval governor.State
+	if !paused {
+		eval = e.gov.Evaluate(context.Background())
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	status := e.progress
 	status.State = e.state
-	status.Paused = e.gov.Paused()
-	if !status.Paused {
-		if s := e.gov.Evaluate(context.Background()); !s.Allowed {
-			status.Paused = true
-			status.PauseReason = s.Reason
-		}
+	status.Paused = paused
+	if !status.Paused && !eval.Allowed {
+		status.Paused = true
+		status.PauseReason = eval.Reason
 	}
 	return status
 }
@@ -216,7 +261,7 @@ func (e *Engine) Status() Status {
 func (e *Engine) Run(ctx context.Context) error {
 	set := e.settings()
 	e.log.Info("agent starting",
-		"version", version.Version, "server", e.cfg.ServerURL, "device", e.cfg.DeviceName,
+		"version", version.Version, "server", e.config().ServerURL, "device", e.config().DeviceName,
 		"encrypted", set.Encryption.Enabled)
 
 	// The first heartbeat also confirms the credentials still work, so a revoked
@@ -258,7 +303,9 @@ func (e *Engine) Run(ctx context.Context) error {
 	// Back up once at startup: the machine may have been off for a week.
 	e.Trigger(trigger{full: true, reason: "agent started"})
 
-	fullScan := time.NewTicker(set.Schedule.FullScanInterval)
+	// A timer rather than a ticker, so a changed FullScanInterval takes effect
+	// on the next fire instead of only after a restart.
+	fullScan := time.NewTimer(e.settings().Schedule.FullScanInterval)
 	defer fullScan.Stop()
 
 	var changes <-chan []watcher.Change
@@ -280,6 +327,7 @@ func (e *Engine) Run(ctx context.Context) error {
 
 		case <-fullScan.C:
 			e.runBackup(ctx, trigger{full: true, reason: "scheduled full scan"})
+			fullScan.Reset(max(e.settings().Schedule.FullScanInterval, time.Minute))
 
 		case <-overflow:
 			// Events were dropped, so the watcher's view is incomplete and only a
@@ -297,7 +345,10 @@ func (e *Engine) Run(ctx context.Context) error {
 // backup' uses when no background agent is running, and what a cron-style
 // deployment would call.
 func (e *Engine) RunOnce(ctx context.Context) error {
-	e.log.Info("running a single backup", "device", e.cfg.DeviceName)
+	e.log.Info("running a single backup", "device", e.config().DeviceName)
+	// A long-lived embedder may call this repeatedly; each run must report only
+	// its own numbers.
+	e.resetProgress()
 	err := e.backup(ctx, trigger{full: true, reason: "manual backup"})
 	e.flushEvents(context.WithoutCancel(ctx))
 	if err != nil {
@@ -340,7 +391,7 @@ func (e *Engine) setPaused(paused bool) {
 	e.setMu.Lock()
 	e.set.Paused = paused
 	e.setMu.Unlock()
-	if err := e.cfg.Update(func(c *config.Config) error {
+	if err := e.config().Update(func(c *config.Config) error {
 		c.Paused = paused
 		return nil
 	}); err != nil {
@@ -381,10 +432,10 @@ func (e *Engine) setSettings(s config.Settings) {
 func (e *Engine) Reload(ctx context.Context) error {
 	// Without a file there is nothing to re-read, and resolving the default path
 	// here would read some other installation's configuration.
-	if e.cfg.Path() == "" {
+	if e.config().Path() == "" {
 		return errors.New("this agent's configuration was not loaded from a file, so it cannot be reloaded")
 	}
-	fresh, err := config.Load(e.cfg.Path())
+	fresh, err := config.Load(e.config().Path())
 	if err != nil {
 		return err
 	}
@@ -405,7 +456,7 @@ func (e *Engine) Reload(ctx context.Context) error {
 	}
 
 	e.setSettings(next)
-	e.cfg = fresh
+	e.setConfig(fresh)
 	e.bucket.SetRate(next.Limits.UploadBytesPerSec)
 	e.gov.SetLimits(next.Limits)
 	if next.Paused {
@@ -492,16 +543,27 @@ func (e *Engine) runBackup(ctx context.Context, t trigger) {
 	if state := e.gov.Evaluate(ctx); !state.Allowed {
 		e.setState(api.StatePaused, state.Reason)
 		e.log.Info("backup deferred", "reason", state.Reason)
-		// Try again shortly; the machine's state changes on its own.
-		go func() {
-			select {
-			case <-ctx.Done():
-			case <-time.After(2 * time.Minute):
-				e.Trigger(t)
-			}
-		}()
+		// A deliberate pause is lifted by Resume, which triggers a backup of
+		// its own; retrying on a timer would only fight the user. Governor
+		// conditions (battery, metered link, fullscreen) clear on their own,
+		// so those are retried with a growing delay.
+		if !e.gov.Paused() {
+			delay := e.nextDeferral()
+			go func() {
+				timer := time.NewTimer(delay)
+				defer timer.Stop()
+				select {
+				case <-ctx.Done():
+				case <-timer.C:
+					e.Trigger(t)
+				}
+			}()
+		}
 		return
 	}
+	e.mu.Lock()
+	e.deferral = 0
+	e.mu.Unlock()
 
 	start := time.Now()
 	e.setState(api.StateScanning, t.reason)
@@ -645,7 +707,7 @@ func (e *Engine) backup(ctx context.Context, t trigger) error {
 		DirCount:      stats.dirs,
 		TotalBytes:    stats.bytes,
 		UploadedBytes: e.up.Stats().BytesUploaded.Load(),
-		SkippedCount:  stats.skipped,
+		SkippedCount:  stats.skipped + stats.failedReads,
 	}); err != nil {
 		return err
 	}
@@ -673,10 +735,15 @@ func (e *Engine) backup(ctx context.Context, t trigger) error {
 
 // runStats accumulates per-run counters.
 type runStats struct {
-	files        int64
-	dirs         int64
-	bytes        int64
+	files int64
+	dirs  int64
+	bytes int64
+	// skipped counts files left out by ignore rules; failedReads counts files
+	// that could not be read at all. They are reported together, but tracked
+	// separately so unreadable files are never silently folded into the
+	// "skipped on purpose" number.
 	skipped      int64
+	failedReads  int64
 	skippedBytes int64
 }
 
@@ -760,10 +827,10 @@ func (e *Engine) backupChanges(ctx context.Context, set config.Settings, changes
 		}
 
 		info, statErr := os.Lstat(change.AbsPath)
-		if statErr != nil || change.Removed {
-			// Gone: record deletions for every indexed path under this tree, then
-			// forget them locally. A directory delete must name each child or the
-			// server's delta merge would keep the old files forever.
+		if change.Removed || (statErr != nil && errors.Is(statErr, os.ErrNotExist)) {
+			// Genuinely gone: record deletions for every indexed path under this
+			// tree, then forget them locally. A directory delete must name each
+			// child or the server's delta merge would keep the old files forever.
 			indexed, listErr := e.idx.PathsUnder(ctx, change.AbsPath)
 			if listErr != nil {
 				return listErr
@@ -783,6 +850,15 @@ func (e *Engine) backupChanges(ctx context.Context, set config.Settings, changes
 			if err := e.idx.DeleteTree(ctx, change.AbsPath); err != nil {
 				return err
 			}
+			continue
+		}
+		if statErr != nil {
+			// The Lstat failed but the file was not reported as missing — a
+			// sharing violation, a permission hiccup, a path too long. Treating
+			// that as a deletion would lose data, so skip it and let the next
+			// scan see the settled state instead.
+			e.log.Warn("could not stat a changed file; skipping until the next pass",
+				"path", change.AbsPath, "error", statErr)
 			continue
 		}
 		if info.IsDir() {
@@ -882,7 +958,7 @@ func (e *Engine) processItem(ctx context.Context, item scanner.Item, kind api.Sn
 		// must never abort a backup of a million files.
 		e.log.Warn("skipping a file that could not be read", "path", item.AbsPath, "error", err)
 		e.event("warn", "Could not read "+item.SnapPath, item.SnapPath, friendlyFileError(err))
-		stats.skipped++
+		stats.failedReads++
 		return nil
 	}
 
@@ -927,11 +1003,18 @@ func (e *Engine) snapPathFor(roots []config.Root, abs string) (string, bool) {
 // damaging, so the engine periodically starts fresh.
 func (e *Engine) chainLength(ctx context.Context) int {
 	raw, err := e.idx.Meta(ctx, index.MetaChainLength)
-	if err != nil || raw == "" {
+	if err != nil {
+		// A read failure returning 0 would silently extend the delta chain past
+		// its limit; say so instead of quietly degrading.
+		e.log.Warn("could not read the delta chain length", "error", err)
+		return 0
+	}
+	if raw == "" {
 		return 0
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil {
+		e.log.Warn("could not parse the delta chain length", "value", raw)
 		return 0
 	}
 	return n
@@ -1138,18 +1221,51 @@ func liveCount(state api.AgentState, n int64) int64 {
 // machine.
 func (e *Engine) applyPolicy(policy api.Policy) {
 	set := e.settings()
+	changed := false
 	// Only a positive server cap overrides the local limit. Zero means "no
 	// policy" and must not wipe a throttle the user set on this machine.
 	if policy.MaxUploadBytesPerSec > 0 && policy.MaxUploadBytesPerSec != set.Limits.UploadBytesPerSec {
 		set.Limits.UploadBytesPerSec = policy.MaxUploadBytesPerSec
-		e.setSettings(set)
 		e.bucket.SetRate(policy.MaxUploadBytesPerSec)
 		e.gov.SetLimits(set.Limits)
+		changed = true
+	}
+	// Chunk sizes must match across devices or deduplication degrades, so the
+	// server's values outrank whatever this build defaults to.
+	if p := policyChunkConfig(policy); p != nil {
+		e.up.SetChunkConfig(*p)
+	}
+	if s := policy.HeartbeatSeconds; s > 0 {
+		if d := time.Duration(s) * time.Second; d != set.Schedule.HeartbeatInterval {
+			set.Schedule.HeartbeatInterval = d
+			changed = true
+		}
+	}
+	if changed {
+		e.setSettings(set)
 	}
 	if policy.RequireEncryption && !set.Encryption.Enabled {
 		e.event("error", "This server requires end-to-end encryption, but this device has it turned off. "+
 			"Run 'openbackup encrypt' to enable it.", "", "")
 	}
+}
+
+// policyChunkConfig converts the server's chunking parameters into a chunker
+// configuration. It returns nil when the policy does not carry a complete,
+// sane set (older servers, or a value of zero meaning "no opinion").
+func policyChunkConfig(p api.Policy) *chunk.Config {
+	if p.ChunkMinSize <= 0 || p.ChunkAvgSize <= 0 || p.ChunkMaxSize <= 0 {
+		return nil
+	}
+	def := chunk.DefaultConfig()
+	cfg := def
+	cfg.Min = p.ChunkMinSize
+	cfg.Avg = p.ChunkAvgSize
+	cfg.Max = p.ChunkMaxSize
+	if err := cfg.Normalize(); err != nil {
+		return nil
+	}
+	return &cfg
 }
 
 // encryptionRequired reports whether the account policy forbids plaintext uploads.
@@ -1185,7 +1301,7 @@ func (e *Engine) handleCommand(ctx context.Context, cmd api.Command) {
 		// The device was removed in the dashboard. Wipe the credentials so the
 		// agent stops trying and the user is prompted to reconnect.
 		e.log.Warn("this device was removed from the account; clearing local credentials")
-		if err := e.cfg.Update(func(c *config.Config) error {
+		if err := e.config().Update(func(c *config.Config) error {
 			c.DeviceToken = ""
 			c.DeviceID = ""
 			return nil
@@ -1268,6 +1384,12 @@ func newEventBuffer() *eventBuffer { return &eventBuffer{} }
 func (b *eventBuffer) add(event api.Event) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	// Collapse consecutive duplicates: a detached drive with live watching
+	// would otherwise re-emit the same "folder not available" warning on every
+	// backup pass and drown out everything else in the feed.
+	if n := len(b.events); n > 0 && sameEvent(b.events[n-1], event) {
+		return
+	}
 	// Bound the buffer: an agent that cannot reach the server must not grow its
 	// memory forever.
 	if len(b.events) >= 500 {
@@ -1278,6 +1400,10 @@ func (b *eventBuffer) add(event api.Event) {
 	if len(b.ring) > 200 {
 		b.ring = b.ring[len(b.ring)-200:]
 	}
+}
+
+func sameEvent(a, b api.Event) bool {
+	return a.Level == b.Level && a.Message == b.Message && a.Path == b.Path && a.Reason == b.Reason
 }
 
 func (b *eventBuffer) take() []api.Event {

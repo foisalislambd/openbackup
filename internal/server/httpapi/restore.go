@@ -105,8 +105,14 @@ func (s *Server) handleDownloadArchive(w http.ResponseWriter, r *http.Request, u
 		entries, next, err := s.db.Tree(r.Context(), snapshotID,
 			store.TreeQuery{Prefix: prefix, Cursor: cursor, Limit: 500})
 		if err != nil {
-			s.log.Error("archive tree read", "snapshot", snapshotID, "error", err)
-			break
+			// Mid-stream failure. Deliberately do NOT finalise the ZIP: closing
+			// the writer would emit a complete central directory and the client
+			// would receive a well-formed archive that silently omits every
+			// remaining file. Ending the response here leaves a detectably
+			// truncated download instead.
+			s.log.Error("archive tree read; aborting archive",
+				"snapshot", snapshotID, "error", err, "bytes", written)
+			return
 		}
 		if len(entries) == 0 {
 			break
@@ -116,11 +122,10 @@ func (s *Server) handleDownloadArchive(w http.ResponseWriter, r *http.Request, u
 				return
 			}
 			if err := s.writeArchiveEntry(r, zw, entry, prefix); err != nil {
-				// Mid-stream failures cannot become an HTTP error any more. Log
-				// it and abandon the response so the client sees a truncated
-				// archive rather than a silently incomplete one.
-				s.log.Error("archive entry", "snapshot", snapshotID, "path", entry.Path, "error", err)
-				_ = zw.Close()
+				// Same as above: abandon without writing the central directory,
+				// so truncation is visible to whoever unzips this.
+				s.log.Error("archive entry; aborting archive",
+					"snapshot", snapshotID, "path", entry.Path, "error", err, "bytes", written)
 				return
 			}
 			written += entry.Size
@@ -203,10 +208,18 @@ func (s *Server) streamEntry(r *http.Request, w io.Writer, entry api.Entry) erro
 	return nil
 }
 
-// probeEntry verifies that a single entry's data is present and decodable.
+// probeEntry verifies that an entry's data is present before any response
+// headers are written. Every chunk is checked: probing only the first one would
+// let a missing second chunk corrupt the download half-way through, when it is
+// too late to send a JSON error instead.
 func (s *Server) probeEntry(r *http.Request, entry *api.Entry) error {
 	if len(entry.Chunks) == 0 {
 		return nil
+	}
+	for _, digest := range entry.Chunks {
+		if _, ok := s.blobs.Has(r.Context(), digest); !ok {
+			return fmt.Errorf("chunk %s of %s: %w", digest, entry.Path, store.ErrBlobNotFound)
+		}
 	}
 	blob, err := s.blobs.Get(r.Context(), entry.Chunks[0])
 	if err != nil {

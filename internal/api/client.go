@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/foisalislambd/openbackup/internal/hash"
 	"github.com/foisalislambd/openbackup/internal/version"
 )
 
@@ -79,12 +80,6 @@ func IsQuotaError(err error) bool {
 func IsEncryptionRequired(err error) bool {
 	var apiErr *APIError
 	return errors.As(err, &apiErr) && apiErr.Code == CodeEncryptionRequired
-}
-
-// IsNotFound reports whether the server does not know the requested object.
-func IsNotFound(err error) bool {
-	var apiErr *APIError
-	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound
 }
 
 // IsConnectivityError reports whether msg looks like a network / DNS failure
@@ -175,20 +170,37 @@ func (c *Client) SetToken(token string) { c.token = token }
 func (c *Client) BaseURL() string { return c.baseURL.String() }
 
 // do performs a request with retries. body must be nil or a byte slice so it
-// can be replayed on retry. Non-idempotent methods (POST that create resources)
-// are not retried on network/5xx errors — a lost response after the server
-// committed would duplicate snapshots or burn a join code.
+// can be replayed on retry.
+//
+// Retry rules follow the risk: idempotent methods retry on network errors and
+// 5xx, because replaying them cannot duplicate anything. Non-idempotent POSTs
+// retry ONLY after an explicit 429 rate-limit answer — the server has told us
+// it did nothing with the request — and never for enrolment, which burns a
+// one-time join code.
 func (c *Client) do(ctx context.Context, method, path string, body []byte, headers map[string]string) (*http.Response, error) {
 	backoff := c.Backoff
 	if backoff <= 0 {
 		backoff = time.Second
 	}
 	maxAttempts := c.MaxRetries
-	if !idempotentMethod(method) {
-		maxAttempts = 0
+	if maxAttempts < 1 {
+		maxAttempts = 1
 	}
+	if !idempotentMethod(method) && path == PathEnroll {
+		maxAttempts = 1
+	}
+	canRetry := func(status int) bool {
+		if !idempotentMethod(method) {
+			return status == http.StatusTooManyRequests &&
+				method == http.MethodPost && path != PathEnroll
+		}
+		return status == http.StatusTooManyRequests || status >= 500
+	}
+
 	var lastErr error
-	for attempt := 0; attempt <= maxAttempts; attempt++ {
+	attempts := 0
+	charged := 0 // bytes already admitted by the rate limiter for this body
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			delay := backoff
 			var apiErr *APIError
@@ -206,13 +218,18 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, heade
 				backoff *= 2
 			}
 		}
+		attempts++
 
 		var reader io.Reader
 		if body != nil {
-			if c.Limiter != nil && len(body) > 0 {
-				if err := c.Limiter.Wait(ctx, len(body)); err != nil {
+			// Charge each byte against the rate limiter exactly once, no matter
+			// how many times the request is retried; otherwise one flaky chunk
+			// upload would consume its budget several times over.
+			if c.Limiter != nil && len(body) > charged {
+				if err := c.Limiter.Wait(ctx, len(body)-charged); err != nil {
 					return nil, err
 				}
+				charged = len(body)
 			}
 			reader = bytes.NewReader(body)
 		}
@@ -237,6 +254,11 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, heade
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
+			if !idempotentMethod(method) {
+				// The server may or may not have acted; replaying could create
+				// a duplicate snapshot or consume a join code.
+				return nil, err
+			}
 			lastErr = err
 			continue
 		}
@@ -245,12 +267,12 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, heade
 		}
 		apiErr := parseError(resp)
 		resp.Body.Close()
-		if !apiErr.Retryable() {
+		if !canRetry(apiErr.StatusCode) {
 			return nil, apiErr
 		}
 		lastErr = apiErr
 	}
-	return nil, fmt.Errorf("api: %s %s failed after %d attempts: %w", method, path, maxAttempts+1, lastErr)
+	return nil, fmt.Errorf("api: %s %s failed after %d attempts: %w", method, path, attempts, lastErr)
 }
 
 func idempotentMethod(method string) bool {
@@ -357,6 +379,9 @@ func (c *Client) MissingChunks(ctx context.Context, digests []string) ([]string,
 // PutChunk uploads one encoded blob. The digest is of the *plaintext*, so the
 // server can verify content addressing without the encryption key.
 func (c *Client) PutChunk(ctx context.Context, digest string, blob []byte, plainLen int) error {
+	if err := hash.Validate(digest); err != nil {
+		return fmt.Errorf("api: %w", err)
+	}
 	headers := map[string]string{
 		"Content-Type":      "application/octet-stream",
 		HeaderChunkPlainLen: strconv.Itoa(plainLen),
@@ -372,6 +397,9 @@ func (c *Client) PutChunk(ctx context.Context, digest string, blob []byte, plain
 
 // GetChunk downloads one encoded blob, used during restore.
 func (c *Client) GetChunk(ctx context.Context, digest string) ([]byte, error) {
+	if err := hash.Validate(digest); err != nil {
+		return nil, fmt.Errorf("api: %w", err)
+	}
 	resp, err := c.do(ctx, http.MethodGet, PathChunk+digest, nil, nil)
 	if err != nil {
 		return nil, err

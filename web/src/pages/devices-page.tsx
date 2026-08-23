@@ -178,22 +178,57 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
 
 function CopyBlock({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
+  const [failed, setFailed] = useState(false)
+  // Plain-HTTP deployments (http://192.168.x.x on a LAN) have no clipboard
+  // API, so failure is normal there and needs an honest fallback.
+  const copy = () => {
+    const mark = () => {
+      setCopied(true)
+      setFailed(false)
+      setTimeout(() => setCopied(false), 2000)
+    }
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(mark, () => fallbackCopy(text) ? mark() : setFailed(true))
+      return
+    }
+    if (fallbackCopy(text)) {
+      mark()
+    } else {
+      setFailed(true)
+    }
+  }
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-100 p-3 sm:flex-row sm:items-center dark:border-gray-800 dark:bg-gray-800">
       <code className="min-w-0 flex-1 overflow-x-auto break-all font-mono text-xs whitespace-pre-wrap sm:whitespace-nowrap sm:break-normal">
         {text}
       </code>
-      <Button
-        className="shrink-0 self-end sm:self-auto"
-        onClick={() => {
-          void navigator.clipboard.writeText(text).then(() => {
-            setCopied(true)
-            setTimeout(() => setCopied(false), 2000)
-          })
-        }}
-      >
+      <Button className="shrink-0 self-end sm:self-auto" onClick={copy}>
         {copied ? 'Copied' : 'Copy'}
       </Button>
+      {failed && (
+        <span className="self-end text-xs text-error-600 sm:self-auto">
+          Copy failed — select the text manually
+        </span>
+      )}
     </div>
   )
+}
+
+// fallbackCopy uses the legacy execCommand path, which still works where the
+// async clipboard API is unavailable (non-secure origins).
+function fallbackCopy(text: string): boolean {
+  const area = document.createElement('textarea')
+  area.value = text
+  area.style.position = 'fixed'
+  area.style.opacity = '0'
+  document.body.appendChild(area)
+  area.select()
+  let ok
+  try {
+    ok = document.execCommand('copy')
+  } catch {
+    ok = false
+  }
+  document.body.removeChild(area)
+  return ok
 }

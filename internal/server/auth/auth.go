@@ -90,11 +90,6 @@ func HashToken(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// TokensEqual compares two token hashes in constant time.
-func TokensEqual(a, b string) bool {
-	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
-}
-
 // BearerToken extracts a token from an Authorization header value.
 func BearerToken(header string) string {
 	const prefix = "Bearer "

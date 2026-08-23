@@ -36,7 +36,12 @@ export function AuthScreen({ mode, onDone }: { mode: 'setup' | 'signin'; onDone:
             setError(undefined)
             const action = setup ? api.setup(email, password) : api.login(email, password)
             action.then(
-              () => onDone(),
+              () => {
+                // Reset before handing over: if the post-login bootstrap stalls,
+                // this screen must stay usable instead of freezing on "…".
+                setBusy(false)
+                onDone()
+              },
               (err: unknown) => {
                 setError(message(err, setup ? 'Could not create the account' : 'Could not sign in'))
                 setBusy(false)

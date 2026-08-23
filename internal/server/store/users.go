@@ -64,6 +64,36 @@ func (db *DB) CreateUser(ctx context.Context, email, passwordHash string, isAdmi
 	return u, nil
 }
 
+// CreateFirstUser inserts the initial administrator, but only while no account
+// exists yet. The conditional INSERT makes first-run setup atomic: two
+// concurrent setup requests cannot both observe an empty users table and mint
+// two independent administrators.
+func (db *DB) CreateFirstUser(ctx context.Context, email, passwordHash string) (*User, error) {
+	u := &User{
+		ID:           idgen.NewPrefixed("usr"),
+		Email:        normalizeEmail(email),
+		PasswordHash: passwordHash,
+		IsAdmin:      true,
+		CreatedAt:    time.Now().UTC(),
+		Policy:       UserPolicy{RetentionDays: api.DefaultPolicy().RetentionDays},
+	}
+	res, err := db.sql.ExecContext(ctx,
+		`INSERT INTO users (id, email, password_hash, is_admin, quota_bytes, retention_days,
+		 max_upload_bytes_per_sec, require_encryption, created_at)
+		 SELECT ?, ?, ?, 1, 0, ?, 0, 0, ?
+		 WHERE NOT EXISTS (SELECT 1 FROM users)`,
+		u.ID, u.Email, u.PasswordHash, u.Policy.RetentionDays, toMillis(u.CreatedAt))
+	if err != nil {
+		return nil, err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return nil, err
+	} else if n == 0 {
+		return nil, ErrConflict
+	}
+	return u, nil
+}
+
 // UserByEmail looks up an account for login.
 func (db *DB) UserByEmail(ctx context.Context, email string) (*User, error) {
 	return db.scanUser(db.sql.QueryRowContext(ctx,
@@ -162,6 +192,19 @@ func (db *DB) SessionUser(ctx context.Context, tokenHash string) (*User, error) 
 func (db *DB) DeleteSession(ctx context.Context, tokenHash string) error {
 	_, err := db.sql.ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = ?`, tokenHash)
 	return err
+}
+
+// DeleteUserSessions revokes every session of an account except keepTokenHash
+// (the caller's own session, so changing the password does not log the person
+// who changed it out of the dashboard). A password change must kill sessions an
+// attacker may have copied; otherwise rotation achieves nothing.
+func (db *DB) DeleteUserSessions(ctx context.Context, userID, keepTokenHash string) (int64, error) {
+	res, err := db.sql.ExecContext(ctx,
+		`DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?`, userID, keepTokenHash)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // DeleteExpiredSessions is called by the maintenance loop.

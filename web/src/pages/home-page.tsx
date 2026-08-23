@@ -22,7 +22,9 @@ export default function HomePage() {
     { pollMs: 15000 },
   )
 
-  if (error) return <ErrorNote>{error}</ErrorNote>
+  // A single failed poll must not wipe the whole dashboard: keep rendering the
+  // last good data and show the failure as a banner instead.
+  if (error && !data) return <ErrorNote>{error}</ErrorNote>
   if (loading || !data) return <OverviewSkeleton />
 
   const { devices, usage, snapshots } = data
@@ -40,6 +42,7 @@ export default function HomePage() {
 
   return (
     <div className="space-y-8">
+      {error && <ErrorNote>{error}</ErrorNote>}
       <HealthBanner devices={devices} newest={newest} />
 
       <section>

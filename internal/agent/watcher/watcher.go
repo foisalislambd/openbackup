@@ -17,7 +17,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -273,6 +272,9 @@ func (w *Watcher) Run(ctx context.Context) {
 		<-timer.C
 	}
 	timerRunning := false
+	// stretchUntil caps how long continuous churn may postpone a batch, so an
+	// endless stream of changes (a build, a sync client) still gets backed up.
+	var stretchUntil time.Time
 
 	for {
 		select {
@@ -283,9 +285,20 @@ func (w *Watcher) Run(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if w.handleEvent(ctx, event) && !timerRunning {
-				timer.Reset(w.debounce)
+			if !w.handleEvent(ctx, event) {
+				continue
+			}
+			// Reset on every accepted event, so the batch measures quiet time
+			// from the LAST change rather than the first — otherwise a file
+			// being saved repeatedly uploads mid-write. The total delay is
+			// capped so constant activity cannot starve backups entirely.
+			now := time.Now()
+			if !timerRunning {
+				timer = resetTimer(timer, w.debounce)
+				stretchUntil = now.Add(10 * w.debounce)
 				timerRunning = true
+			} else if now.Add(w.debounce).Before(stretchUntil) {
+				timer = resetTimer(timer, w.debounce)
 			}
 
 		case err, ok := <-w.fsw.Errors:
@@ -320,6 +333,19 @@ func (w *Watcher) Run(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// resetTimer stops a timer, drains a pending fire if there is one, and starts
+// it again. Returning the timer keeps this a single expression at call sites.
+func resetTimer(t *time.Timer, d time.Duration) *time.Timer {
+	if !t.Stop() {
+		select {
+		case <-t.C:
+		default:
+		}
+	}
+	t.Reset(d)
+	return t
 }
 
 // handleEvent records an event, reporting whether it is worth a backup pass.
@@ -465,23 +491,4 @@ func (w *Watcher) restore(batch []Change) {
 			w.pending[c.AbsPath] = c
 		}
 	}
-}
-
-// AtWatchLimit reports whether the watch ceiling was reached, in which case the
-// agent must keep scanning periodically to stay correct.
-func (w *Watcher) AtWatchLimit() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return len(w.watched) >= maxWatchedDirs
-}
-
-// Describe returns a short status string for the CLI.
-func (w *Watcher) Describe() string {
-	dirs := w.WatchedDirs()
-	if w.AtWatchLimit() {
-		return strings.Join([]string{
-			"watching", strconv.Itoa(dirs), "directories (limit reached; relying on periodic scans for the rest)",
-		}, " ")
-	}
-	return "watching " + strconv.Itoa(dirs) + " directories"
 }

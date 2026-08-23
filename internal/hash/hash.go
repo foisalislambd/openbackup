@@ -9,7 +9,6 @@ package hash
 import (
 	"encoding/hex"
 	"errors"
-	"io"
 
 	"github.com/zeebo/blake3"
 )
@@ -43,21 +42,6 @@ func (h *Hasher) Hex() string {
 	var out [Size]byte
 	h.h.Digest().Read(out[:])
 	return hex.EncodeToString(out[:])
-}
-
-// Reset prepares the hasher for reuse.
-func (h *Hasher) Reset() { h.h.Reset() }
-
-// Stream hashes everything readable from r and reports the byte count.
-func Stream(r io.Reader) (string, int64, error) {
-	h := blake3.New()
-	n, err := io.Copy(h, r)
-	if err != nil {
-		return "", n, err
-	}
-	var out [Size]byte
-	h.Digest().Read(out[:])
-	return hex.EncodeToString(out[:]), n, nil
 }
 
 // Validate checks that s looks like a digest produced by this package.

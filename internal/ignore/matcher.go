@@ -283,15 +283,28 @@ func (m *Matcher) Match(relPath string, isDir bool) Decision {
 			}
 		}
 	}
+	// Exclude rules follow gitignore semantics: when several rules match, the
+	// LAST one wins. First-match-wins would make the common
+	//
+	//     *.log
+	//     !keep.log
+	//
+	// pair silently drop keep.log forever, which is exactly the kind of quiet
+	// data loss a backup tool must not do.
+	var excluded *Pattern
 	for _, p := range m.exclude {
 		for _, c := range cands {
 			if p.Match(c.path, c.isDir, m.fold) {
-				if p.Negated() {
-					return Decision{}
-				}
-				return Decision{Skip: true, Reason: p.Reason(), Rule: p.String()}
+				excluded = p
+				break
 			}
 		}
+	}
+	if excluded != nil {
+		if excluded.Negated() {
+			return Decision{}
+		}
+		return Decision{Skip: true, Reason: excluded.Reason(), Rule: excluded.String()}
 	}
 	if m.cfg.SkipHidden {
 		for _, c := range cands {

@@ -9,7 +9,6 @@ package userdirs
 import (
 	"os"
 	"path/filepath"
-	"sort"
 )
 
 // Kind identifies a well-known folder.
@@ -76,18 +75,6 @@ func Detect() []Dir {
 			DefaultOn: kind != KindDownloads,
 		})
 	}
-	return out
-}
-
-// DefaultPaths returns the paths that a fresh install backs up.
-func DefaultPaths() []string {
-	var out []string
-	for _, d := range Detect() {
-		if d.DefaultOn && d.Exists {
-			out = append(out, d.Path)
-		}
-	}
-	sort.Strings(out)
 	return out
 }
 

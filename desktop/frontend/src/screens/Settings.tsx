@@ -318,8 +318,9 @@ function Encryption({
                     onEnabled()
                   } catch (err) {
                     // A restart requirement arrives as an error alongside the code,
-                    // so it is shown as a warning rather than a failure.
-                    const text = String(err)
+                    // so it is shown as a warning rather than a failure. Go errors
+                    // reach here in several shapes, so normalise before matching.
+                    const text = message(err)
                     if (text.includes('restart')) {
                       setWarning(text)
                       setCode(await api.recoveryCode())

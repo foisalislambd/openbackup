@@ -2,16 +2,8 @@ import { useEffect, useState } from 'react'
 
 import { api, message, on } from '../lib/bridge'
 import { ago } from '../lib/format'
-import type { Overview, RestoreProgress } from '../lib/types'
+import type { ActivityEvent, Overview, RestoreProgress } from '../lib/types'
 import { Button, Card, Notice } from '../components/ui'
-
-export type ActivityEvent = {
-  at: string
-  level: string
-  message: string
-  path?: string
-  reason?: string
-}
 
 /** Logs shows live backup/restore progress and recent file activity. */
 export function Logs({ status }: { status: Overview }) {

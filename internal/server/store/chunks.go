@@ -12,24 +12,34 @@ import (
 // sqliteMaxParams keeps generated IN clauses inside SQLite's variable limit.
 const sqliteMaxParams = 500
 
-// RegisterChunk records a stored blob. It is idempotent, matching the blob
-// store, so a retried upload changes nothing.
-func (db *DB) RegisterChunk(ctx context.Context, digest string, storedBytes, plainBytes int64, encrypted bool) error {
+// RegisterChunk records a stored blob for an account. It is idempotent,
+// matching the blob store, so a retried upload changes nothing.
+func (db *DB) RegisterChunk(ctx context.Context, userID, digest string, storedBytes, plainBytes int64, encrypted bool) error {
 	if err := hash.Validate(digest); err != nil {
 		return err
 	}
-	_, err := db.sql.ExecContext(ctx,
+	if _, err := db.sql.ExecContext(ctx,
 		`INSERT INTO chunks (digest, stored_bytes, plain_bytes, encrypted, created_at) VALUES (?, ?, ?, ?, ?)
 		 ON CONFLICT(digest) DO NOTHING`,
-		digest, storedBytes, plainBytes, boolToInt(encrypted), nowMillis())
+		digest, storedBytes, plainBytes, boolToInt(encrypted), nowMillis()); err != nil {
+		return err
+	}
+	_, err := db.sql.ExecContext(ctx,
+		`INSERT INTO account_chunks (user_id, digest) VALUES (?, ?) ON CONFLICT DO NOTHING`,
+		userID, digest)
 	return err
 }
 
-// MissingChunks returns the digests that are not stored yet, preserving the
-// caller's order. This is the hot path of every backup: one round trip tells the
-// agent exactly what it must upload, and everything already known from any
-// device is skipped.
-func (db *DB) MissingChunks(ctx context.Context, digests []string) ([]string, error) {
+// MissingChunks returns the digests the account does not have yet, preserving
+// the caller's order. This is the hot path of every backup: one round trip
+// tells the agent exactly what it must upload.
+//
+// "Have" knowledge is scoped to the calling account (chunks it uploaded or that
+// its snapshots reference). A global answer would let any enrolled device probe
+// whether any other tenant stores a given digest — an existence oracle. The
+// blob store itself still deduplicates across accounts at Put time, so nothing
+// is stored twice; only redundant uploads of already-present data are possible.
+func (db *DB) MissingChunks(ctx context.Context, userID string, digests []string) ([]string, error) {
 	if len(digests) == 0 {
 		return nil, nil
 	}
@@ -39,12 +49,24 @@ func (db *DB) MissingChunks(ctx context.Context, digests []string) ([]string, er
 		batch := digests[chunkStart:end]
 
 		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
-		args := make([]any, 0, len(batch))
+		args := make([]any, 0, 2*len(batch)+2)
+		args = append(args, userID)
+		for _, d := range batch {
+			args = append(args, d)
+		}
+		args = append(args, userID)
 		for _, d := range batch {
 			args = append(args, d)
 		}
 		rows, err := db.sql.QueryContext(ctx,
-			`SELECT digest FROM chunks WHERE digest IN (`+placeholders+`)`, args...)
+			`SELECT digest FROM (
+			     SELECT ac.digest AS digest FROM account_chunks ac
+			     WHERE ac.user_id = ? AND ac.digest IN (`+placeholders+`)
+			     UNION
+			     SELECT sc.digest FROM snapshot_chunks sc
+			     JOIN snapshots s ON s.id = sc.snapshot_id
+			     WHERE s.user_id = ? AND sc.digest IN (`+placeholders+`)
+			 ) GROUP BY digest`, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -78,29 +100,33 @@ func (db *DB) MissingChunks(ctx context.Context, digests []string) ([]string, er
 	return missing, nil
 }
 
+// AccountChunkKnown reports whether the account has the chunk: either it
+// uploaded the blob itself, or one of its snapshots references it. Chunk reads
+// are gated on this so one account cannot fetch another account's data by
+// guessing a digest.
+func (db *DB) AccountChunkKnown(ctx context.Context, userID, digest string) (bool, error) {
+	var known int
+	err := db.sql.QueryRowContext(ctx,
+		`SELECT CASE WHEN EXISTS (
+		     SELECT 1 FROM account_chunks WHERE user_id = ? AND digest = ?
+		 ) OR EXISTS (
+		     SELECT 1 FROM snapshot_chunks sc
+		     JOIN snapshots s ON s.id = sc.snapshot_id
+		     WHERE s.user_id = ? AND sc.digest = ?
+		 ) THEN 1 ELSE 0 END`,
+		userID, digest, userID, digest).Scan(&known)
+	if err != nil {
+		return false, err
+	}
+	return known != 0, nil
+}
+
 // ChunkInfo describes a stored chunk.
 type ChunkInfo struct {
 	Digest      string
 	StoredBytes int64
 	PlainBytes  int64
 	Encrypted   bool
-}
-
-// Chunk reads a chunk's metadata.
-func (db *DB) Chunk(ctx context.Context, digest string) (*ChunkInfo, error) {
-	var (
-		info      ChunkInfo
-		encrypted int
-	)
-	info.Digest = digest
-	err := db.sql.QueryRowContext(ctx,
-		`SELECT stored_bytes, plain_bytes, encrypted FROM chunks WHERE digest = ?`, digest).
-		Scan(&info.StoredBytes, &info.PlainBytes, &encrypted)
-	if err != nil {
-		return nil, err
-	}
-	info.Encrypted = encrypted != 0
-	return &info, nil
 }
 
 // UnreferencedChunks lists stored chunks that no snapshot references any more.
@@ -131,7 +157,10 @@ func (db *DB) UnreferencedChunks(ctx context.Context, limit int) ([]ChunkInfo, e
 
 // DeleteChunkRow removes chunk metadata after its blob has been deleted.
 func (db *DB) DeleteChunkRow(ctx context.Context, digest string) error {
-	_, err := db.sql.ExecContext(ctx, `DELETE FROM chunks WHERE digest = ?`, digest)
+	if _, err := db.sql.ExecContext(ctx, `DELETE FROM chunks WHERE digest = ?`, digest); err != nil {
+		return err
+	}
+	_, err := db.sql.ExecContext(ctx, `DELETE FROM account_chunks WHERE digest = ?`, digest)
 	return err
 }
 

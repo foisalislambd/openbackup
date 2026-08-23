@@ -26,8 +26,7 @@ var ErrInvalidPath = errors.New("store: invalid path")
 
 // DB wraps the metadata database.
 type DB struct {
-	sql  *sql.DB
-	path string
+	sql *sql.DB
 }
 
 // OpenDB opens (creating if needed) the SQLite database at path and applies
@@ -61,7 +60,7 @@ func OpenDB(ctx context.Context, path string) (*DB, error) {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
-	db := &DB{sql: sqlDB, path: path}
+	db := &DB{sql: sqlDB}
 	if err := db.migrate(ctx); err != nil {
 		_ = sqlDB.Close()
 		return nil, err
@@ -72,11 +71,9 @@ func OpenDB(ctx context.Context, path string) (*DB, error) {
 // Close releases the database.
 func (db *DB) Close() error { return db.sql.Close() }
 
-// SQL exposes the underlying handle for the few places that need custom queries.
+// SQL exposes the underlying handle. Production code should use the typed
+// methods; this exists so tests can set up or backdate rows directly.
 func (db *DB) SQL() *sql.DB { return db.sql }
-
-// Path returns the database file path.
-func (db *DB) Path() string { return db.path }
 
 // migrations are applied in order and recorded in schema_migrations. Each entry
 // must be append-only: never edit a released migration.
@@ -233,6 +230,20 @@ ALTER TABLE devices ADD COLUMN current_path TEXT NOT NULL DEFAULT '';
 ALTER TABLE devices ADD COLUMN files_done INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE devices ADD COLUMN files_total INTEGER NOT NULL DEFAULT 0;
 `},
+
+	// updated_at lets the stale-snapshot reaper measure inactivity since the
+	// last entry batch instead of since the backup started, so a legitimately
+	// long first backup is no longer killed mid-flight. account_chunks scopes
+	// chunk knowledge per account: without it, any enrolled device could probe
+	// whether any other account stores a given digest.
+	{"0004_snapshot_activity_and_account_chunks", `
+ALTER TABLE snapshots ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE account_chunks (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    digest  TEXT NOT NULL,
+    PRIMARY KEY (user_id, digest)
+) WITHOUT ROWID;
+`},
 }
 
 func (db *DB) migrate(ctx context.Context) error {
@@ -272,24 +283,6 @@ func (db *DB) migrate(ctx context.Context) error {
 // Vacuum reclaims space after large deletions. Called by the retention job.
 func (db *DB) Vacuum(ctx context.Context) error {
 	_, err := db.sql.ExecContext(ctx, `PRAGMA incremental_vacuum; PRAGMA wal_checkpoint(TRUNCATE)`)
-	return err
-}
-
-// Setting reads a server setting.
-func (db *DB) Setting(ctx context.Context, key string) (string, error) {
-	var v string
-	err := db.sql.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, key).Scan(&v)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
-	}
-	return v, err
-}
-
-// SetSetting writes a server setting.
-func (db *DB) SetSetting(ctx context.Context, key, value string) error {
-	_, err := db.sql.ExecContext(ctx,
-		`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-		key, value)
 	return err
 }
 

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base32"
 	"encoding/binary"
+	"os"
 	"strings"
 	"time"
 )
@@ -25,9 +26,14 @@ func New() string {
 	buf[4] = byte(ms >> 8)
 	buf[5] = byte(ms)
 	if _, err := rand.Read(buf[6:]); err != nil {
-		// crypto/rand cannot fail on any supported platform, but never emit a
-		// predictable id if it somehow does.
-		binary.BigEndian.PutUint64(buf[6:14], uint64(time.Now().UnixNano()))
+		// crypto/rand cannot fail on any supported platform. If it somehow did,
+		// spread the wall clock and PID across the whole random half rather
+		// than emitting a partly predictable, zero-padded tail.
+		nano := uint64(time.Now().UnixNano())
+		pid := uint64(os.Getpid())
+		binary.BigEndian.PutUint64(buf[6:14], nano)
+		buf[14] = byte(pid >> 8)
+		buf[15] = byte(pid)
 	}
 	return encoding.EncodeToString(buf[:])
 }

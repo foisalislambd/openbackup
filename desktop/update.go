@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	goruntime "runtime"
 	"strings"
 	"time"
@@ -23,7 +24,6 @@ type UpdateCheck struct {
 	UpdateAvailable bool   `json:"update_available"`
 	ReleaseURL      string `json:"release_url"`
 	DownloadURL     string `json:"download_url,omitempty"`
-	Name            string `json:"name,omitempty"`
 }
 
 type githubRelease struct {
@@ -76,18 +76,32 @@ func (a *App) CheckForUpdates() (UpdateCheck, error) {
 	if rel.HTMLURL != "" {
 		out.ReleaseURL = rel.HTMLURL
 	}
-	out.Name = rel.Name
 	out.DownloadURL = pickDesktopAsset(rel, goruntime.GOOS, goruntime.GOARCH)
 	out.UpdateAvailable = versionNewer(rel.TagName, version.Version)
 	return out, nil
 }
 
-// OpenUpdateDownload opens the installer download (or the releases page) in the browser.
+// OpenUpdateDownload opens the installer download (or the releases page) in
+// the browser. The URL is validated before it reaches the OS opener: anything
+// the renderer passes must be an HTTPS link to this project's GitHub releases,
+// so a compromised webview cannot use this binding to launch file://, smb:// or
+// phishing URLs.
 func (a *App) OpenUpdateDownload(url string) {
-	if strings.TrimSpace(url) == "" {
+	if !isTrustedReleaseURL(url) {
 		url = githubReleasesPage
 	}
 	wailsruntime.BrowserOpenURL(a.context(), url)
+}
+
+// isTrustedReleaseURL reports whether u points at this project's GitHub.
+func isTrustedReleaseURL(u string) bool {
+	parsed, err := neturl.Parse(strings.TrimSpace(u))
+	if err != nil || parsed.Scheme != "https" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "github.com" || host == "www.github.com" ||
+		strings.HasSuffix(host, ".githubusercontent.com")
 }
 
 func pickDesktopAsset(rel githubRelease, goos, goarch string) string {

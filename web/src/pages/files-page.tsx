@@ -83,6 +83,12 @@ export default function FilesPage() {
       complete.find((s) => s.id === snapshotOverride)
     : deviceSnaps[0]
 
+  // "Viewing older" must compare against the newest snapshot of the device the
+  // viewed snapshot actually belongs to; when the override comes from another
+  // device (deep link), comparing to this device's latest is simply wrong.
+  const viewingOlderSnapshot =
+    Boolean(snapshotOverride) && snapshotOverride !== latestByDeviceId(complete, snapshotOverride)
+
   const historySnaps = data.snapshots
     .filter((s) => !deviceId || s.device_id === deviceId)
     .filter((s) => s.status === 'complete' || s.status === 'failed' || s.status === 'running')
@@ -177,7 +183,7 @@ export default function FilesPage() {
           deviceName={activeDevice?.name || latest.device_name || 'This computer'}
           prefix={prefix}
           versionsPath={versionsPath}
-          viewingOlder={Boolean(snapshotOverride && snapshotOverride !== deviceSnaps[0]?.id)}
+          viewingOlder={viewingOlderSnapshot}
           onBackToDevices={() =>
             setQuery({ device: undefined, path: undefined, file: undefined, id: undefined })
           }
@@ -190,6 +196,13 @@ export default function FilesPage() {
       )}
     </div>
   )
+}
+
+/** The newest completed snapshot on the device that owns snapshotId. */
+function latestByDeviceId(complete: Snapshot[], snapshotId: string): string | undefined {
+  const snap = complete.find((s) => s.id === snapshotId)
+  if (!snap) return undefined
+  return complete.find((s) => s.device_id === snap.device_id)?.id
 }
 
 /** Devices that have at least one completed backup, newest backup first. */

@@ -73,6 +73,7 @@ function DashboardChrome({
   const location = useLocation()
   const navigate = useNavigate()
   const { isExpanded, isDesktop, isMobileOpen, closeMobileSidebar } = useSidebar()
+  const [signOutError, setSignOutError] = useState('')
   const path = normalizePath(location.pathname)
   const heading = pageMeta[path] ?? pageMeta['/']
   const sidebarWidth = isDesktop ? (isExpanded ? SIDEBAR_WIDTH_EXPANDED : SIDEBAR_WIDTH_COLLAPSED) : 0
@@ -88,12 +89,25 @@ function DashboardChrome({
       <AppSidebar
         version={version}
         onSignOut={() => {
-          void api.logout().then(() => {
-            navigate('/')
-            onSignedOut()
-          })
+          // Only leave the dashboard once the session is really gone; a failed
+          // request would otherwise bounce back into an authenticated shell.
+          api.logout().then(
+            () => {
+              setSignOutError('')
+              navigate('/')
+              onSignedOut()
+            },
+            (err: unknown) => {
+              setSignOutError(err instanceof Error ? err.message : String(err))
+            },
+          )
         }}
       />
+      {signOutError && (
+        <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2">
+          <ErrorNote>Sign-out failed: {signOutError}</ErrorNote>
+        </div>
+      )}
 
       {isMobileOpen && (
         <button
@@ -117,6 +131,3 @@ function DashboardChrome({
     </div>
   )
 }
-
-/** @deprecated Use DashboardLayout — kept for older imports. */
-export const Shell = DashboardLayout

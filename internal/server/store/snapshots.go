@@ -57,9 +57,10 @@ func (db *DB) StartSnapshot(ctx context.Context, userID, deviceID string, req ap
 		parentArg = parent
 	}
 	_, err = db.sql.ExecContext(ctx,
-		`INSERT INTO snapshots (id, user_id, device_id, kind, status, parent_id, started_at, roots)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, userID, deviceID, string(kind), api.SnapshotStatusRunning, parentArg, toMillis(started), string(roots))
+		`INSERT INTO snapshots (id, user_id, device_id, kind, status, parent_id, started_at, updated_at, roots)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, userID, deviceID, string(kind), api.SnapshotStatusRunning, parentArg, toMillis(started),
+		toMillis(time.Now().UTC()), string(roots))
 	if err != nil {
 		return "", "", "", err
 	}
@@ -108,6 +109,14 @@ func (db *DB) AddEntries(ctx context.Context, snapshotID string, entries []api.E
 	}
 	if status != api.SnapshotStatusRunning {
 		return fmt.Errorf("%w: snapshot is %s", ErrConflict, status)
+	}
+
+	// Touch the activity timestamp: the stale-snapshot reaper measures from the
+	// last progress, not from when the backup started, so a multi-hour first
+	// backup that is steadily uploading is never killed mid-flight.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE snapshots SET updated_at = ? WHERE id = ?`, nowMillis(), snapshotID); err != nil {
+		return err
 	}
 
 	entryStmt, err := tx.PrepareContext(ctx,
@@ -237,16 +246,37 @@ func (db *DB) MissingSnapshotChunks(ctx context.Context, snapshotID string, limi
 
 // FailStaleSnapshots marks snapshots abandoned by a crashed or removed agent as
 // failed, so the dashboard never shows a backup "running" for days.
+//
+// Staleness is measured from the last activity (updated_at, touched by
+// AddEntries), not from started_at: a full backup of a large disk can run for
+// many hours while making steady progress, and killing it would lose the work.
 func (db *DB) FailStaleSnapshots(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan)
 	res, err := db.sql.ExecContext(ctx,
 		`UPDATE snapshots SET status = ?, completed_at = ?, error = 'agent stopped reporting before the snapshot completed'
-		 WHERE status = ? AND started_at < ?`,
+		 WHERE status = ? AND MAX(started_at, updated_at) < ?`,
 		api.SnapshotStatusFailed, nowMillis(), api.SnapshotStatusRunning, toMillis(cutoff))
 	if err != nil {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// HasSnapshots reports whether an account has stored any snapshot at all,
+// including ones that are still running or failed. Used to gate settings that
+// only make sense before the first backup, such as turning on the encryption
+// requirement — which must be scoped to this account, not counted globally.
+func (db *DB) HasSnapshots(ctx context.Context, userID string) (bool, error) {
+	var one int
+	err := db.sql.QueryRowContext(ctx,
+		`SELECT 1 FROM snapshots WHERE user_id = ? LIMIT 1`, userID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 const snapshotColumns = `s.id, s.device_id, s.kind, s.status, COALESCE(s.parent_id, ''), s.started_at,
@@ -667,6 +697,10 @@ func (db *DB) FileVersions(ctx context.Context, userID, path, deviceID string, l
 
 // DeleteSnapshot removes a snapshot. Deltas that depend on it are removed too,
 // because a delta without its base is unrestorable.
+//
+// Victim selection runs inside the delete transaction (and joins against live
+// rows), so a delta created concurrently onto a doomed base is either included
+// or left fully intact — never half-orphaned.
 func (db *DB) DeleteSnapshot(ctx context.Context, userID, snapshotID string) (int, error) {
 	var owner string
 	err := db.sql.QueryRowContext(ctx, `SELECT user_id FROM snapshots WHERE id = ?`, snapshotID).Scan(&owner)
@@ -680,48 +714,43 @@ func (db *DB) DeleteSnapshot(ctx context.Context, userID, snapshotID string) (in
 		return 0, ErrNotFound
 	}
 
-	ids, err := db.descendants(ctx, snapshotID)
-	if err != nil {
-		return 0, err
-	}
 	tx, err := db.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx, `
+		WITH RECURSIVE tree(id) AS (
+			SELECT ? UNION ALL
+			SELECT s.id FROM snapshots s JOIN tree t ON s.parent_id = t.id
+		)
+		SELECT tree.id FROM tree JOIN snapshots ON snapshots.id = tree.id`, snapshotID)
+	if err != nil {
+		return 0, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+
 	for _, id := range ids {
 		// Entries, deletions and chunk references cascade from the snapshot row.
 		if _, err := tx.ExecContext(ctx, `DELETE FROM snapshots WHERE id = ?`, id); err != nil {
 			return 0, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return len(ids), nil
-}
-
-// descendants returns snapshotID plus every snapshot that chains onto it.
-func (db *DB) descendants(ctx context.Context, snapshotID string) ([]string, error) {
-	rows, err := db.sql.QueryContext(ctx, `
-		WITH RECURSIVE tree(id) AS (
-			SELECT ? UNION ALL
-			SELECT s.id FROM snapshots s JOIN tree t ON s.parent_id = t.id
-		)
-		SELECT id FROM tree`, snapshotID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out = append(out, id)
-	}
-	return out, rows.Err()
+	return len(ids), tx.Commit()
 }
 
 // normalizePath canonicalises a stored path: forward slashes, no leading or

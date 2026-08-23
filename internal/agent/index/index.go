@@ -266,11 +266,9 @@ func (i *Index) Stats(ctx context.Context) (Stats, error) {
 // Meta keys used by the engine.
 const (
 	MetaLastSnapshotID   = "last_snapshot_id"
-	MetaLastFullScan     = "last_full_scan"
 	MetaChainLength      = "delta_chain_length"
 	MetaGeneration       = "scan_generation"
 	MetaLastSnapshotTime = "last_snapshot_time"
-	MetaKeyID            = "key_id"
 )
 
 // Meta reads a stored value.

@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path"
@@ -110,6 +109,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	result := &Result{}
 	var filesDone atomic.Int64
 	cursor := ""
+	seenCursors := map[string]bool{}
 
 	for {
 		entries, next, err := opts.Client.SnapshotEntries(ctx, opts.SnapshotID,
@@ -136,6 +136,10 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			switch entry.Type {
 			case api.EntryDir:
 				if !opts.DryRun {
+					if err := ensureNoSymlinkAncestors(target, dest); err != nil {
+						result.Failed = append(result.Failed, fmt.Sprintf("%s: %v", entry.Path, err))
+						continue
+					}
 					if err := os.MkdirAll(dest, 0o755); err != nil {
 						result.Failed = append(result.Failed, fmt.Sprintf("%s: %v", entry.Path, err))
 					}
@@ -146,10 +150,22 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 				if opts.DryRun {
 					continue
 				}
+				if err := ensureNoSymlinkAncestors(target, dest); err != nil {
+					result.Failed = append(result.Failed, fmt.Sprintf("%s: %v", entry.Path, err))
+					continue
+				}
 				if err := restoreSymlink(dest, entry, opts.Conflict); err != nil {
 					result.Failed = append(result.Failed, fmt.Sprintf("%s: %v", entry.Path, err))
 				}
 				continue
+			}
+
+			if !opts.DryRun {
+				if err := ensureNoSymlinkAncestors(target, dest); err != nil {
+					log.Error("refusing to restore through a symlinked folder", "path", entry.Path, "error", err)
+					result.Failed = append(result.Failed, fmt.Sprintf("%s: %v", entry.Path, err))
+					continue
+				}
 			}
 
 			written, skipped, err := restoreFile(ctx, opts, entry, dest)
@@ -172,6 +188,12 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		if next == "" {
 			break
 		}
+		if seenCursors[next] {
+			// A misbehaving server must not turn a restore into an endless
+			// loop of the same page.
+			return result, fmt.Errorf("restore: the server keeps returning cursor %q", next)
+		}
+		seenCursors[next] = true
 		cursor = next
 	}
 
@@ -186,7 +208,11 @@ func restoreFile(ctx context.Context, opts Options, entry api.Entry, dest string
 		case ConflictSkip:
 			return 0, true, nil
 		case ConflictRename:
-			dest = uniqueName(dest)
+			next, ok := uniqueName(dest)
+			if !ok {
+				return 0, false, fmt.Errorf("could not find a free name next to %s", dest)
+			}
+			dest = next
 		case ConflictOverwrite:
 			if existing.IsDir() {
 				return 0, false, fmt.Errorf("a directory already exists at %s", dest)
@@ -349,17 +375,56 @@ func isReservedName(name string) bool {
 	return reservedNames[base]
 }
 
-// uniqueName finds a free filename next to an existing one.
-func uniqueName(dest string) string {
+// uniqueName finds a free filename next to an existing one. It returns false
+// when no candidate is free, so the caller can fail instead of silently
+// overwriting the file the "keep both" policy promised to preserve.
+func uniqueName(dest string) (string, bool) {
 	ext := filepath.Ext(dest)
 	base := strings.TrimSuffix(dest, ext)
 	for i := 1; i < 1000; i++ {
 		candidate := fmt.Sprintf("%s (restored %d)%s", base, i, ext)
 		if _, err := os.Stat(candidate); errors.Is(err, os.ErrNotExist) {
-			return candidate
+			return candidate, true
 		}
 	}
-	return dest
+	return dest, false
+}
+
+// ensureNoSymlinkAncestors refuses to write below a path whose ancestor
+// directories are symlinks.
+//
+// safeJoin defends against lexical escapes only, but a crafted snapshot can
+// also smuggle in a directory entry that is a symlink — "link -> /home/u/.ssh"
+// followed by "link/authorized_keys" — and every write through that link would
+// land outside the target. Each component between target and dest is checked
+// with Lstat, which does not follow symlinks; components that do not exist yet
+// cannot redirect anything and are fine.
+func ensureNoSymlinkAncestors(target, dest string) error {
+	rel, err := filepath.Rel(target, dest)
+	if err != nil {
+		return err
+	}
+	if rel == "." {
+		return nil
+	}
+	cur := target
+	for _, seg := range strings.Split(filepath.FromSlash(rel), string(filepath.Separator)) {
+		if seg == "" || seg == "." {
+			continue
+		}
+		cur = filepath.Join(cur, seg)
+		fi, statErr := os.Lstat(cur)
+		if errors.Is(statErr, os.ErrNotExist) {
+			continue
+		}
+		if statErr != nil {
+			return statErr
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symlink; restoring through it would write outside the target", cur)
+		}
+	}
+	return nil
 }
 
 // FindSnapshot resolves a user-supplied snapshot reference.
@@ -417,6 +482,7 @@ func Search(ctx context.Context, client *api.Client, snapshotID, query string, l
 	needle := strings.ToLower(query)
 	var out []api.Entry
 	cursor := ""
+	seen := map[string]bool{}
 	for {
 		entries, next, err := client.SnapshotEntries(ctx, snapshotID,
 			api.EntryQuery{Cursor: cursor, Limit: 500})
@@ -440,24 +506,10 @@ func Search(ctx context.Context, client *api.Client, snapshotID, query string, l
 		if next == "" {
 			return out, nil
 		}
+		if seen[next] {
+			return out, fmt.Errorf("restore: the server keeps returning cursor %q", next)
+		}
+		seen[next] = true
 		cursor = next
 	}
-}
-
-// CopyTo streams a single restored file to a writer, used by "openbackup cat".
-func CopyTo(ctx context.Context, client *api.Client, c *codec.Codec, entry api.Entry, w io.Writer) error {
-	for _, digest := range entry.Chunks {
-		blob, err := client.GetChunk(ctx, digest)
-		if err != nil {
-			return err
-		}
-		plain, err := c.Decode(blob)
-		if err != nil {
-			return err
-		}
-		if _, err := w.Write(plain); err != nil {
-			return err
-		}
-	}
-	return nil
 }

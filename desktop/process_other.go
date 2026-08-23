@@ -3,7 +3,10 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -16,4 +19,15 @@ func processExists(pid int) bool {
 		return false
 	}
 	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+// holderMatches reports whether pid belongs to a live OpenBackup executable.
+// On Linux the resolved binary is readable through /proc; where that does not
+// exist (macOS) we fall back to plain liveness, as before.
+func holderMatches(pid int, exeBase string) bool {
+	link, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	if err != nil {
+		return processExists(pid)
+	}
+	return exeBase == "" || strings.EqualFold(filepath.Base(link), exeBase)
 }

@@ -35,6 +35,9 @@ export function AppSidebar({
       )}
       aria-label="Main navigation"
       aria-hidden={mobileClosed || undefined}
+      // Off-screen but still tab-focusable is a keyboard trap; inert takes the
+      // hidden sidebar out of the focus order entirely.
+      inert={mobileClosed || undefined}
     >
       <div className="admin-topbar flex items-center gap-3 px-4">
         <Link

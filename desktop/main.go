@@ -10,6 +10,7 @@ import (
 	"embed"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -88,6 +89,9 @@ func main() {
 		MinHeight: 600,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
+			// Everything is locally embedded, so a strict policy costs nothing
+			// and contains any future XSS before it reaches the IPC bindings.
+			Middleware: cspMiddleware,
 		},
 		OnStartup: func(ctx context.Context) {
 			app.startup(ctx)
@@ -132,6 +136,17 @@ func main() {
 		log.Error("the OpenBackup window could not start", "error", err)
 		os.Exit(1)
 	}
+}
+
+// cspMiddleware sets a Content-Security-Policy on served assets.
+func cspMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
+				"img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; "+
+				"font-src 'self'; base-uri 'none'; form-action 'none'")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // stripBackgroundFlag removes --background (login autostart) and reports it.

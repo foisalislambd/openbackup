@@ -127,11 +127,6 @@ func StatusText(opt Options) (string, error) {
 	}
 }
 
-// InstallOrStart ensures autostart is registered and the agent is running.
-func InstallOrStart(opt Options) error {
-	return Install(opt)
-}
-
 // EnableLoginAutostart registers this executable to start at user login.
 // Default arguments are --background (open the app hidden with the in-process agent).
 func EnableLoginAutostart(opt Options) error {
@@ -160,7 +155,7 @@ func enableAutostart(opt Options) error {
 		// `run` starts the agent without going through Windows Service APIs.
 		args = []string{"run"}
 	}
-	cmdLine := `"` + exe + `"`
+	cmdLine := quoteArg(exe)
 	for _, a := range args {
 		cmdLine += " " + quoteArg(a)
 	}
@@ -244,6 +239,10 @@ func terminatePID(pid int) error {
 	return nil
 }
 
+// quoteArg quotes one argument for a Windows command line the way
+// CommandLineToArgvW parses it. Backslashes before a closing quote must be
+// doubled, so a path ending in a separator (C:\tools\openbackup\) does not
+// escape its own closing quote and silently corrupt the autostart entry.
 func quoteArg(s string) string {
 	if s == "" {
 		return `""`
@@ -251,7 +250,27 @@ func quoteArg(s string) string {
 	if !strings.ContainsAny(s, " \t\"") {
 		return s
 	}
-	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+	var b strings.Builder
+	b.WriteByte('"')
+	backslashes := 0
+	for _, r := range s {
+		switch {
+		case r == '\\':
+			backslashes++
+			b.WriteByte('\\')
+		case r == '"':
+			b.WriteString(strings.Repeat(`\`, backslashes*2+1))
+			b.WriteByte('"')
+			backslashes = 0
+		default:
+			backslashes = 0
+			b.WriteRune(r)
+		}
+	}
+	// Double any backslashes that would sit against the closing quote.
+	b.WriteString(strings.Repeat(`\`, backslashes))
+	b.WriteByte('"')
+	return b.String()
 }
 
 func errorsIsNotExist(err error) bool {

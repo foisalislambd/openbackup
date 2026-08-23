@@ -242,7 +242,7 @@ func (s *Server) handleMissingChunks(w http.ResponseWriter, r *http.Request, dev
 			return
 		}
 	}
-	missing, err := s.db.MissingChunks(r.Context(), req.Digests)
+	missing, err := s.db.MissingChunks(r.Context(), device.UserID, req.Digests)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -259,7 +259,7 @@ func (s *Server) handlePutChunk(w http.ResponseWriter, r *http.Request, device *
 	if _, exists := s.blobs.Has(r.Context(), digest); exists {
 		// Idempotent: the agent may be retrying after a timeout that actually
 		// succeeded, or another device may have uploaded the same content.
-		if err := s.registerChunk(r, digest, nil); err != nil {
+		if err := s.registerChunk(r, device.UserID, digest, nil); err != nil {
 			writeStoreError(w, err)
 			return
 		}
@@ -313,7 +313,7 @@ func (s *Server) handlePutChunk(w http.ResponseWriter, r *http.Request, device *
 		writeStoreError(w, err)
 		return
 	}
-	if err := s.registerChunk(r, digest, blob); err != nil {
+	if err := s.registerChunk(r, device.UserID, digest, blob); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -342,20 +342,32 @@ func (s *Server) requiresEncryption(r *http.Request, device *store.Device) bool 
 
 // registerChunk records chunk metadata, deriving sizes from the blob when it is
 // available and from the header hint otherwise.
-func (s *Server) registerChunk(r *http.Request, digest string, blob []byte) error {
+func (s *Server) registerChunk(r *http.Request, userID, digest string, blob []byte) error {
 	stored, _ := s.blobs.Has(r.Context(), digest)
 	plainLen, _ := strconv.ParseInt(r.Header.Get(api.HeaderChunkPlainLen), 10, 64)
 	if plainLen <= 0 {
 		plainLen = stored
 	}
 	encrypted := len(blob) > 0 && codec.IsEncrypted(blob)
-	return s.db.RegisterChunk(r.Context(), digest, stored, plainLen, encrypted)
+	return s.db.RegisterChunk(r.Context(), userID, digest, stored, plainLen, encrypted)
 }
 
 func (s *Server) handleGetChunk(w http.ResponseWriter, r *http.Request, device *store.Device) {
 	digest := r.PathValue("digest")
 	if err := hash.Validate(digest); err != nil {
 		writeError(w, http.StatusBadRequest, "", "malformed digest")
+		return
+	}
+	// The blob store is shared across accounts for deduplication, so serving a
+	// digest to anyone with a valid token would leak other tenants' data. Only
+	// serve chunks this account uploaded or that its snapshots reference.
+	known, err := s.db.AccountChunkKnown(r.Context(), device.UserID, digest)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if !known {
+		writeError(w, http.StatusNotFound, api.CodeNotFound, "chunk not found")
 		return
 	}
 	f, size, err := s.blobs.Open(r.Context(), digest)
@@ -585,8 +597,16 @@ func (s *Server) checkQuota(r *http.Request, userID string) error {
 		if err != nil {
 			return err
 		}
+		// Another goroutine may have refreshed the entry or accounted new
+		// uploads while we were reading from the database; prefer its fresher
+		// number over clobbering it with our stale snapshot.
+		now := time.Now()
 		s.usageMu.Lock()
-		s.usageCache[userID] = cachedUsage{bytes: used, expiresAt: time.Now().Add(usageCacheTTL)}
+		if cur, ok := s.usageCache[userID]; ok && now.Before(cur.expiresAt) {
+			used = cur.bytes
+		} else {
+			s.usageCache[userID] = cachedUsage{bytes: used, expiresAt: now.Add(usageCacheTTL)}
+		}
 		s.usageMu.Unlock()
 	}
 	if used >= quota {

@@ -159,8 +159,12 @@ function Done({ result, onFinish }: { result: ConnectResult; onFinish: () => voi
           <div className="mt-3 flex items-center gap-2">
             <Button
               onClick={() => {
-                void navigator.clipboard.writeText(result.recovery_code ?? '')
-                setCopied(true)
+                // This is the most important secret in the app: only claim
+                // success when the write actually happened.
+                navigator.clipboard
+                  .writeText(result.recovery_code ?? '')
+                  .then(() => setCopied(true))
+                  .catch(() => setCopied(false))
               }}
             >
               {copied ? 'Copied' : 'Copy'}

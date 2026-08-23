@@ -35,6 +35,9 @@ func listenForRaise(ctx context.Context, raise func()) {
 	if err != nil {
 		return
 	}
+	// Owner-only: the payload only triggers a window raise, but there is no
+	// reason to let every local user connect.
+	_ = os.Chmod(path, 0o600)
 	go func() {
 		<-ctx.Done()
 		_ = ln.Close()

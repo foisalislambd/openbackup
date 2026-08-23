@@ -56,8 +56,17 @@ func (c *Config) normalize() error {
 	if bits.Len(uint(c.Avg))+normalization > 63 {
 		return errors.New("chunk: average size too large")
 	}
+	if c.Avg < 1<<normalization {
+		// Below this the large-chunk threshold shift would exceed 64 bits and
+		// silently disable the second cut-point region entirely.
+		return errors.New("chunk: average size too small")
+	}
 	return nil
 }
+
+// Normalize validates and fills in defaults, so callers that build a Config
+// from untrusted values can check it without constructing a Chunker.
+func (c *Config) Normalize() error { return c.normalize() }
 
 // Chunk describes one content-defined chunk of a stream.
 type Chunk struct {

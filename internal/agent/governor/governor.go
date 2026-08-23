@@ -203,14 +203,3 @@ func (g *Governor) WaitUntilAllowed(ctx context.Context) (waitedFor string, err 
 }
 
 func (s State) isZero() bool { return s.Reason == "" && !s.Allowed && s.CPUPercent == 0 }
-
-// Describe renders the state for the CLI and the tray tooltip.
-func (s State) Describe() string {
-	if s.Allowed {
-		if s.CPUPercent >= 0 {
-			return fmt.Sprintf("running (CPU %.0f%%)", s.CPUPercent)
-		}
-		return "running"
-	}
-	return "paused: " + s.Reason
-}

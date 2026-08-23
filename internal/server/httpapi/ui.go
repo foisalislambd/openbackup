@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -41,21 +42,17 @@ type credentials struct {
 	Password string `json:"password"`
 }
 
+// decoyPasswordHash is verified against when the email is unknown, so the
+// endpoint spends the same Argon2id time either way and response timing cannot
+// be used to enumerate which addresses have an account.
+var decoyPasswordHash, _ = auth.HashPassword("openbackup timing decoy")
+
 // handleSetup creates the first administrator. It only works while no account
 // exists, so an exposed server cannot be taken over later.
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	var req credentials
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "", "invalid request body")
-		return
-	}
-	count, err := s.db.CountUsers(r.Context())
-	if err != nil {
-		writeStoreError(w, err)
-		return
-	}
-	if count > 0 {
-		writeError(w, http.StatusConflict, "", "this server is already set up")
 		return
 	}
 	if !strings.Contains(req.Email, "@") {
@@ -67,13 +64,23 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "", err.Error())
 		return
 	}
-	user, err := s.db.CreateUser(r.Context(), req.Email, hash, true)
+	// The conditional insert makes "no users yet" part of the write itself: two
+	// concurrent setup requests cannot both win, so a fresh internet-facing
+	// server cannot be raced into having a second, attacker-chosen admin.
+	user, err := s.db.CreateFirstUser(r.Context(), req.Email, hash)
 	if err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			writeError(w, http.StatusConflict, "", "this server is already set up")
+			return
+		}
 		writeStoreError(w, err)
 		return
 	}
 	s.log.Info("first account created", "user", user.ID, "email", user.Email)
-	s.startSession(w, r, user)
+	if err := s.startSession(w, r, user); err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{"user": publicUser(user)})
 }
 
@@ -91,8 +98,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := s.db.UserByEmail(r.Context(), req.Email)
 	if err != nil {
-		// Identical response for unknown email and wrong password, so the
-		// endpoint cannot be used to enumerate accounts.
+		// Identical response for unknown email and wrong password, and the same
+		// Argon2id work either way, so the endpoint can neither enumerate
+		// accounts by body nor by timing.
+		_ = auth.VerifyPassword(req.Password, decoyPasswordHash)
 		writeError(w, http.StatusUnauthorized, "", "email or password is incorrect")
 		return
 	}
@@ -101,28 +110,36 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.loginLimiter.Reset(key)
-	s.startSession(w, r, user)
+	if err := s.startSession(w, r, user); err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"user": publicUser(user)})
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
-		_ = s.db.DeleteSession(r.Context(), auth.HashToken(cookie.Value))
+		if err := s.db.DeleteSession(r.Context(), auth.HashToken(cookie.Value)); err != nil {
+			// The browser drops the cookie either way; the row is cleaned up by
+			// the maintenance pass if this failed.
+			s.log.Warn("delete session on logout", "error", err)
+		}
 	}
 	s.clearSessionCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user *store.User) {
+// startSession creates a session row and sets the cookie. It returns an error
+// instead of writing a response on failure, so callers can emit exactly one
+// response; call writeStoreError at the call site when it fails.
+func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user *store.User) error {
 	token, err := idgen.Secret(32)
 	if err != nil {
-		writeStoreError(w, err)
-		return
+		return err
 	}
 	if err := s.db.CreateSession(r.Context(), user.ID, auth.HashToken(token),
 		r.UserAgent(), s.cfg.SessionTTL); err != nil {
-		writeStoreError(w, err)
-		return
+		return err
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
@@ -136,6 +153,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user *stor
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Now().Add(s.cfg.SessionTTL),
 	})
+	return nil
 }
 
 func (s *Server) clearSessionCookie(w http.ResponseWriter) {
@@ -189,6 +207,18 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, us
 	if err := s.db.UpdateUserPassword(r.Context(), user.ID, hash); err != nil {
 		writeStoreError(w, err)
 		return
+	}
+	// Rotating a password must also kill any sessions an attacker may have
+	// copied; otherwise the old cookies stay valid for the full session TTL.
+	// The caller's own session is kept so they are not logged out mid-action.
+	keepHash := ""
+	if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
+		keepHash = auth.HashToken(cookie.Value)
+	}
+	if n, err := s.db.DeleteUserSessions(r.Context(), user.ID, keepHash); err != nil {
+		s.log.Warn("revoke sessions after password change", "user", user.ID, "error", err)
+	} else if n > 0 {
+		s.log.Info("revoked sessions after password change", "user", user.ID, "sessions", n)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -412,7 +442,14 @@ func (s *Server) handleCreateJoinToken(w http.ResponseWriter, r *http.Request, u
 	}
 	serverURL := s.cfg.PublicURL
 	if serverURL == "" {
-		serverURL = "https://" + r.Host
+		// Derive the scheme from the actual connection instead of assuming TLS:
+		// a plain-HTTP install must not print enrolment commands pointing at an
+		// https:// URL that does not exist.
+		scheme := "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		serverURL = scheme + "://" + r.Host
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"code":       code,
@@ -471,8 +508,8 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request, us
 	// Turning the requirement on later would silently orphan whatever is already
 	// stored in plaintext, so say so instead of pretending it applies backwards.
 	if req.RequireEncryption != nil && *req.RequireEncryption && !user.Policy.RequireEncryption {
-		stored, err := s.db.CountRows(r.Context(), "snapshots")
-		if err == nil && stored > 0 {
+		stored, err := s.db.HasSnapshots(r.Context(), user.ID)
+		if err == nil && stored {
 			writeError(w, http.StatusConflict, "",
 				"backups already exist on this account; encryption can only be required before the first backup")
 			return

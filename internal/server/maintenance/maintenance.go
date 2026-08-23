@@ -10,9 +10,10 @@ import (
 	"github.com/foisalislambd/openbackup/internal/server/store"
 )
 
-// staleSnapshotAge is how long a snapshot may stay "running" before it is
-// assumed the agent died. Six hours is generous enough for a first full backup
-// of a large disk on a slow link.
+// staleSnapshotAge is how long a snapshot may stay "running" without any
+// progress before it is assumed the agent died. It measures inactivity (the
+// last entry batch), not total runtime, so a first full backup of a large disk
+// on a slow link is never killed while it is steadily uploading.
 const staleSnapshotAge = 6 * time.Hour
 
 // eventRetention bounds the activity log.
@@ -78,12 +79,18 @@ func (r *Runner) Run(ctx context.Context) (Report, error) {
 
 	if n, err := r.db.PruneEvents(ctx, eventRetention, maxEventRows); err == nil {
 		report.PrunedEvents = n
+	} else {
+		r.log.Warn("prune events", "error", err)
 	}
 	if n, err := r.db.DeleteExpiredSessions(ctx); err == nil {
 		report.ExpiredSessions = n
+	} else {
+		r.log.Warn("delete expired sessions", "error", err)
 	}
 	if n, err := r.db.DeleteExpiredJoinTokens(ctx); err == nil {
 		report.ExpiredJoinTokens = n
+	} else {
+		r.log.Warn("delete expired join tokens", "error", err)
 	}
 	if report.DeletedChunks > 0 || report.ExpiredSnapshots > 0 {
 		if err := r.db.Vacuum(ctx); err != nil {
@@ -195,8 +202,14 @@ func (r *Runner) applyRetention(ctx context.Context) (int, error) {
 	}
 
 	var deleted int
+	deletedIDs := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
 		if _, kept := keep[row.ID]; kept {
+			continue
+		}
+		// An earlier cascade already removed this row together with its
+		// descendants; counting it again would inflate the report.
+		if _, done := deletedIDs[row.ID]; done {
 			continue
 		}
 		if ctx.Err() != nil {
@@ -208,6 +221,7 @@ func (r *Runner) applyRetention(ctx context.Context) (int, error) {
 			continue
 		}
 		deleted += n
+		deletedIDs[row.ID] = struct{}{}
 		r.log.Debug("expired snapshot deleted",
 			"snapshot", row.ID, "device", row.DeviceID, "age_days", int(now.Sub(row.StartedAt).Hours()/24))
 	}
@@ -229,6 +243,7 @@ func (r *Runner) collectGarbage(ctx context.Context) (deleted int, freed int64, 
 		if len(chunks) == 0 {
 			return deleted, freed, nil
 		}
+		passDeleted := 0
 		for _, chunk := range chunks {
 			if ctx.Err() != nil {
 				return deleted, freed, ctx.Err()
@@ -241,8 +256,16 @@ func (r *Runner) collectGarbage(ctx context.Context) (deleted int, freed int64, 
 				r.log.Error("delete chunk row", "digest", chunk.Digest, "error", err)
 				continue
 			}
+			passDeleted++
 			deleted++
 			freed += chunk.StoredBytes
+		}
+		if passDeleted == 0 && len(chunks) >= gcBatchSize {
+			// A full batch that made zero progress would be refetched forever;
+			// stop and let the operator fix the underlying storage problem.
+			r.log.Warn("garbage collection made no progress; stopping this pass",
+				"blocked_chunks", len(chunks))
+			return deleted, freed, nil
 		}
 		if len(chunks) < gcBatchSize {
 			return deleted, freed, nil

@@ -27,8 +27,10 @@ func (p *genericProbe) CPUPercent(ctx context.Context) float64 {
 // Battery shells out to pmset on macOS. Reading the power source properly needs
 // IOKit through cgo, and a cgo-free binary that cross-compiles is worth more
 // than avoiding one short-lived subprocess every few seconds of active backup.
+// The absolute path keeps a root-launched service from resolving whatever
+// "pmset" happens to sit first on a manipulated PATH.
 func (p *genericProbe) Battery() BatteryState {
-	out, err := exec.Command("pmset", "-g", "batt").Output()
+	out, err := exec.Command("/usr/bin/pmset", "-g", "batt").Output()
 	if err != nil {
 		return BatteryState{Percent: -1}
 	}

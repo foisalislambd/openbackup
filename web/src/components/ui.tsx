@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/cn'
 
-export function PageTitle({ title }: { title: string; subtitle?: string }) {
+export function PageTitle({ title }: { title: string }) {
   return (
     <div className="min-w-0 leading-tight">
       <h1 className="truncate text-base font-semibold tracking-tight text-gray-900 dark:text-white sm:text-lg">

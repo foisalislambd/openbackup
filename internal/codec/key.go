@@ -66,7 +66,8 @@ func KeyFromBytes(raw []byte) (*Key, error) {
 
 // DeriveKeyFromPassphrase stretches a human passphrase into a master key.
 // Passing a nil salt generates one, which is what happens during enrolment;
-// the salt is public and is stored alongside the account.
+// the salt is public and is stored alongside the account. A non-nil salt must
+// be full length — a short one would quietly strip Argon2id of its protection.
 func DeriveKeyFromPassphrase(passphrase string, salt []byte) (*Key, []byte, error) {
 	if len(passphrase) < 8 {
 		return nil, nil, errors.New("codec: passphrase must be at least 8 characters")
@@ -76,6 +77,9 @@ func DeriveKeyFromPassphrase(passphrase string, salt []byte) (*Key, []byte, erro
 		if _, err := rand.Read(salt); err != nil {
 			return nil, nil, err
 		}
+	}
+	if len(salt) < saltSize {
+		return nil, nil, fmt.Errorf("codec: salt must be at least %d bytes, got %d", saltSize, len(salt))
 	}
 	raw := argon2.IDKey([]byte(passphrase), salt, argonTime, argonMemory, argonThreads, KeySize)
 	k, err := KeyFromBytes(raw)

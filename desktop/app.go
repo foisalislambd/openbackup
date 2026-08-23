@@ -66,7 +66,6 @@ type restoreJob struct {
 	cancel   context.CancelFunc
 	Running  bool   `json:"running"`
 	Target   string `json:"target"`
-	Path     string `json:"path"`
 	Files    int64  `json:"files"`
 	OfFiles  int64  `json:"of_files"`
 	Bytes    int64  `json:"bytes"`
@@ -150,6 +149,9 @@ func (a *App) pollStatus(ctx context.Context) {
 // itself every hour gets muted, and then the one message that mattered is missed
 // too.
 func (a *App) announce(o control.Overview, previous string) {
+	// The tray must reflect reality from the very first poll; only the
+	// notification is suppressed when there was no previous state to compare.
+	a.setTrayState(o)
 	if previous == "" {
 		return
 	}
@@ -161,7 +163,6 @@ func (a *App) announce(o control.Overview, previous string) {
 	case "stale":
 		a.notify("Your backup is out of date", o.Detail)
 	}
-	a.setTrayState(o)
 }
 
 // -----------------------------------------------------------------------------
@@ -178,7 +179,9 @@ func (a *App) Status() (control.Overview, error) {
 	a.mu.Unlock()
 	// The very first call happens before the poll loop has run.
 	if cached.Version == "" {
-		cached = a.agent.Overview(a.context())
+		ctx, cancel := context.WithTimeout(a.context(), 15*time.Second)
+		defer cancel()
+		cached = a.agent.Overview(ctx)
 		a.mu.Lock()
 		a.overview = cached
 		a.mu.Unlock()
@@ -468,17 +471,24 @@ func (a *App) StartRestore(req control.RestoreRequest) error {
 	if strings.TrimSpace(req.Target) == "" {
 		return errors.New("choose a folder to restore into")
 	}
+	// The bridge only offers the non-destructive policy. Overwrite/rename would
+	// let anything speaking to this window replace files in any directory it
+	// can name; the CLI remains the way to do that deliberately.
+	if req.Conflict != "" && req.Conflict != string(restore.ConflictSkip) {
+		return errors.New("the desktop app restores without replacing existing files")
+	}
 	a.mu.Lock()
 	if a.restore != nil && a.restore.Running {
 		a.mu.Unlock()
 		return errors.New("a restore is already running; wait for it to finish or cancel it")
 	}
 	ctx, cancel := context.WithCancel(context.WithoutCancel(a.context()))
-	job := &restoreJob{cancel: cancel, Running: true, Target: req.Target, Path: req.Path}
+	job := &restoreJob{cancel: cancel, Running: true, Target: req.Target}
 	a.restore = job
 	a.mu.Unlock()
 
 	a.emitRestore()
+	var lastEmit time.Time
 	go func() {
 		defer cancel()
 		result, err := a.agent.Restore(ctx, req, func(p restore.Progress) {
@@ -488,7 +498,14 @@ func (a *App) StartRestore(req control.RestoreRequest) error {
 			job.OfFiles = p.FilesTotal
 			job.Bytes = p.BytesWritten
 			a.mu.Unlock()
-			a.emitRestore()
+			// A six-figure file count would push one bridge event per file;
+			// throttle to roughly ten per second and let the completion emit
+			// carry the final state.
+			now := time.Now()
+			if now.Sub(lastEmit) >= 100*time.Millisecond {
+				lastEmit = now
+				a.emitRestore()
+			}
 		})
 
 		a.mu.Lock()
@@ -635,8 +652,34 @@ func (a *App) OpenLogFolder() error { return reveal(filepath.Dir(logPath())) }
 // MinimiseToTray hides the window. Backups keep running in this process until Quit.
 func (a *App) MinimiseToTray() { runtime.WindowHide(a.context()) }
 
-// Quit stops backups in this process and closes the app.
+// Quit stops backups in this process and closes the app. An in-flight restore
+// is cancelled first and given a moment to unwind, so its temp files are
+// cleaned up instead of being left behind mid-write.
 func (a *App) Quit() {
+	a.mu.Lock()
+	job := a.restore
+	a.mu.Unlock()
+	if job != nil && job.Running && job.cancel != nil {
+		job.cancel()
+		done := make(chan struct{})
+		go func() {
+			for range 20 {
+				a.mu.Lock()
+				running := a.restore != nil && a.restore.Running
+				a.mu.Unlock()
+				if !running {
+					close(done)
+					return
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		}
+	}
 	a.stopEmbeddedAgent()
 	a.mu.Lock()
 	a.forceQuit = true

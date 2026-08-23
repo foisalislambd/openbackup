@@ -26,6 +26,12 @@ import (
 
 const formatVersion = 1
 
+// maxPlaintextLen bounds the plaintext size a blob header may claim. Chunks are
+// at most a few MiB by policy, so a corrupt or hostile header claiming
+// gigabytes must be rejected before Decode preallocates from it — otherwise a
+// malicious server could OOM or panic every agent that restores.
+const maxPlaintextLen = 64 << 20
+
 const (
 	flagCompressed = 1 << 0
 	flagEncrypted  = 1 << 1
@@ -43,8 +49,6 @@ type Codec struct {
 	enc *zstd.Encoder
 	dec *zstd.Decoder
 	key *Key
-	// level is retained for reporting only.
-	level zstd.EncoderLevel
 }
 
 // Options configures a Codec.
@@ -85,7 +89,7 @@ func New(opts Options) (*Codec, error) {
 		enc.Close()
 		return nil, err
 	}
-	return &Codec{enc: enc, dec: dec, key: opts.Key, level: opts.Level}, nil
+	return &Codec{enc: enc, dec: dec, key: opts.Key}, nil
 }
 
 // Close releases the Zstd resources.
@@ -93,9 +97,6 @@ func (c *Codec) Close() {
 	c.enc.Close()
 	c.dec.Close()
 }
-
-// Encrypted reports whether this codec seals blobs.
-func (c *Codec) Encrypted() bool { return c.key != nil }
 
 // Encode packs plain into a blob.
 //
@@ -152,6 +153,9 @@ func (c *Codec) Decode(blob []byte) ([]byte, error) {
 	plainLen, n := binary.Uvarint(blob[2:])
 	if n <= 0 {
 		return nil, ErrMalformed
+	}
+	if plainLen > maxPlaintextLen {
+		return nil, fmt.Errorf("%w: plaintext length %d exceeds the %d byte limit", ErrMalformed, plainLen, maxPlaintextLen)
 	}
 	headerLen := 2 + n
 	rest := blob[headerLen:]

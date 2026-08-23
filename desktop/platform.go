@@ -9,17 +9,30 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gen2brain/beeep"
 
 	"github.com/foisalislambd/openbackup/internal/agent/config"
 )
 
-// reveal opens a folder in the system file manager.
+// reveal opens a folder in the system file manager. The path is validated
+// because it crosses the renderer boundary: a UNC path would make Explorer
+// negotiate NTLM with a remote host, and a dash-leading argument could be read
+// as a flag by the opener.
 func reveal(path string) error {
+	path = strings.TrimSpace(path)
 	if path == "" {
 		return errors.New("there is no folder to open")
+	}
+	if strings.HasPrefix(path, `\\`) || strings.HasPrefix(path, "-") {
+		return fmt.Errorf("cannot open %q", path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("that folder is not available: %w", err)
+	}
+	if !info.IsDir() {
+		path = filepath.Dir(path)
 	}
 	switch runtime.GOOS {
 	case "windows":
@@ -68,7 +81,9 @@ func logPath() string {
 }
 
 // singleInstance reports whether this is the only copy of the app running, and
-// keeps the lock for the life of the process.
+// keeps the lock for the life of the process. The lock records which executable
+// holds it, so a recycled PID left behind by a crash cannot wedge every future
+// launch with "another window is already open".
 func singleInstance() (release func(), ok bool) {
 	stateDir, err := config.StateDir()
 	if err != nil {
@@ -79,9 +94,14 @@ func singleInstance() (release func(), ok bool) {
 	}
 	path := filepath.Join(stateDir, "desktop.lock")
 
+	exeBase := ""
+	if exe, exeErr := os.Executable(); exeErr == nil {
+		exeBase = filepath.Base(exe)
+	}
+
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err == nil {
-		fmt.Fprintf(file, "%d\n%s\n", os.Getpid(), time.Now().Format(time.RFC3339))
+		fmt.Fprintf(file, "%d\n%s\n", os.Getpid(), exeBase)
 		_ = file.Close()
 		return func() { _ = os.Remove(path) }, true
 	}
@@ -92,7 +112,7 @@ func singleInstance() (release func(), ok bool) {
 		if err != nil {
 			return func() {}, false
 		}
-		fmt.Fprintf(file, "%d\n%s\n", os.Getpid(), time.Now().Format(time.RFC3339))
+		fmt.Fprintf(file, "%d\n%s\n", os.Getpid(), exeBase)
 		_ = file.Close()
 		return func() { _ = os.Remove(path) }, true
 	}
@@ -104,13 +124,17 @@ func holderIsAlive(path string) bool {
 	if err != nil {
 		return false
 	}
-	fields := strings.Fields(string(raw))
-	if len(fields) == 0 {
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) == 0 {
 		return false
 	}
-	pid, err := strconv.Atoi(fields[0])
+	pid, err := strconv.Atoi(strings.TrimSpace(lines[0]))
 	if err != nil || pid <= 0 || pid == os.Getpid() {
 		return false
 	}
-	return processExists(pid)
+	exeBase := ""
+	if len(lines) > 1 {
+		exeBase = strings.TrimSpace(lines[1])
+	}
+	return holderMatches(pid, exeBase)
 }

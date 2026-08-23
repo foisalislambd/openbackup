@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"github.com/foisalislambd/openbackup/internal/api"
@@ -102,7 +101,7 @@ func (db *DB) ListEvents(ctx context.Context, userID, deviceID, level string, li
 }
 
 // PruneEvents keeps the activity log bounded: events older than the retention
-// window are dropped, and each account keeps at most maxRows rows.
+// window are dropped, and the table is capped at maxRows rows overall.
 func (db *DB) PruneEvents(ctx context.Context, olderThan time.Duration, maxRows int64) (int64, error) {
 	cutoff := toMillis(time.Now().UTC().Add(-olderThan))
 	var total int64
@@ -126,17 +125,4 @@ func (db *DB) PruneEvents(ctx context.Context, olderThan time.Duration, maxRows 
 		}
 	}
 	return total, nil
-}
-
-// LatestEventAt reports the most recent event time for a device, or zero.
-func (db *DB) LatestEventAt(ctx context.Context, deviceID string) (time.Time, error) {
-	var at sql.NullInt64
-	err := db.sql.QueryRowContext(ctx, `SELECT MAX(at) FROM events WHERE device_id = ?`, deviceID).Scan(&at)
-	if err != nil {
-		return time.Time{}, err
-	}
-	if !at.Valid {
-		return time.Time{}, nil
-	}
-	return fromMillis(at.Int64), nil
 }

@@ -36,7 +36,6 @@ const (
 	HeaderDeviceToken   = "Authorization" // "Bearer <device token>"
 	HeaderProtocol      = "X-OpenBackup-Protocol"
 	HeaderChunkPlainLen = "X-OpenBackup-Plain-Length"
-	HeaderEncrypted     = "X-OpenBackup-Encrypted"
 )
 
 // Platform identifies an agent's operating system.
@@ -60,13 +59,12 @@ type ErrorResponse struct {
 
 // Error codes that clients act on.
 const (
-	CodeInvalidToken   = "invalid_token"
-	CodeQuotaExceeded  = "quota_exceeded"
-	CodeKeyMismatch    = "key_mismatch"
-	CodeProtocolTooOld = "protocol_too_old"
-	CodeNotFound       = "not_found"
-	CodeConflict       = "conflict"
-	CodeRateLimited    = "rate_limited"
+	CodeInvalidToken  = "invalid_token"
+	CodeQuotaExceeded = "quota_exceeded"
+	CodeKeyMismatch   = "key_mismatch"
+	CodeNotFound      = "not_found"
+	CodeConflict      = "conflict"
+	CodeRateLimited   = "rate_limited"
 	// CodeEncryptionRequired tells an agent to turn on end-to-end encryption
 	// before retrying, rather than to keep resending a chunk that will never be
 	// accepted.

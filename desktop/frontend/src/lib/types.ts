@@ -130,7 +130,6 @@ export interface RestoreRequest {
 export interface RestoreProgress {
   running: boolean
   target: string
-  path: string
   files: number
   of_files: number
   bytes: number
@@ -162,7 +161,6 @@ export interface UpdateCheck {
   update_available: boolean
   release_url: string
   download_url?: string
-  name?: string
 }
 
 export interface ActivityEvent {

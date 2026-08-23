@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -423,7 +424,12 @@ func waitForBackupIdle(ctx context.Context, client *ipc.Client) error {
 	deadline := time.Now().Add(6 * time.Hour)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
+	// The daemon may finish the tiny incremental backup between our request
+	// and the first poll, so "idle at first sight" counts as done; waiting for
+	// a busy→idle edge we never observed would hang for hours. An explicit
+	// pause is reported instead of silently waited out.
 	sawBusy := false
+	first := true
 	for {
 		var status engine.Status
 		if err := client.Status(ctx, &status); err != nil {
@@ -432,11 +438,22 @@ func waitForBackupIdle(ctx context.Context, client *ipc.Client) error {
 		busy := status.State == api.StateScanning || status.State == api.StateUploading
 		if busy {
 			sawBusy = true
+			first = false
 		}
-		if sawBusy && !busy && !status.Paused {
+		switch {
+		case status.State == api.StateError:
+			return fmt.Errorf("backup failed: %s", strings.TrimSpace(status.Message))
+		case status.Paused:
+			return fmt.Errorf("the agent is paused (%s); run 'openbackup resume' and try again",
+				strings.TrimSpace(status.PauseReason))
+		case sawBusy && !busy:
 			fmt.Println("Backup finished.")
 			return nil
+		case first && !busy:
+			fmt.Println("Backup already finished.")
+			return nil
 		}
+		first = false
 		if time.Now().After(deadline) {
 			return fmt.Errorf("timed out waiting for the backup to finish (state=%s)", status.State)
 		}
@@ -1075,22 +1092,33 @@ func shortID(id string) string {
 	return id
 }
 
-// parseBytes accepts sizes such as "5MB", "500KB" or a plain byte count.
+// parseBytes accepts sizes such as "5MB", "500KB", "2TB" or a plain byte
+// count. Anything else is rejected rather than silently misparsed: "5TB"
+// becoming five bytes per second is the kind of mistake that must be loud.
 func parseBytes(s string) (int64, error) {
 	s = strings.TrimSpace(strings.ToUpper(s))
+	if s == "" {
+		return 0, errors.New("a size is required, for example 5MB")
+	}
 	multiplier := int64(1)
 	switch {
+	case strings.HasSuffix(s, "TB"):
+		multiplier, s = 1<<40, strings.TrimSuffix(s, "TB")
+	case strings.HasSuffix(s, "T"):
+		multiplier, s = 1<<40, strings.TrimSuffix(s, "T")
 	case strings.HasSuffix(s, "GB"), strings.HasSuffix(s, "G"):
-		multiplier = 1 << 30
+		multiplier, s = 1<<30, strings.TrimRight(s, "GB")
 	case strings.HasSuffix(s, "MB"), strings.HasSuffix(s, "M"):
-		multiplier = 1 << 20
+		multiplier, s = 1<<20, strings.TrimRight(s, "MB")
 	case strings.HasSuffix(s, "KB"), strings.HasSuffix(s, "K"):
-		multiplier = 1 << 10
+		multiplier, s = 1<<10, strings.TrimRight(s, "KB")
+	case strings.HasSuffix(s, "B"):
+		s = strings.TrimSuffix(s, "B")
 	}
-	digits := strings.TrimRight(s, "KMGB ")
-	var value float64
-	if _, err := fmt.Sscanf(digits, "%f", &value); err != nil {
-		return 0, fmt.Errorf("cannot understand the size %q; try something like 5MB", s)
+	digits := strings.TrimSpace(s)
+	value, err := strconv.ParseFloat(digits, 64)
+	if err != nil || value < 0 || strings.ContainsAny(digits, "+-") {
+		return 0, fmt.Errorf("cannot understand the size %q; try something like 5MB or 500KB", s)
 	}
 	return int64(value * float64(multiplier)), nil
 }

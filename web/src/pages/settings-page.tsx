@@ -5,7 +5,7 @@
  * deserves an answer inside the product rather than in a wiki.
  */
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, type IgnoreRules, type Me, type Settings } from '@/lib/api'
 import { bytes } from '@/lib/format'
 import { message, useLoader } from '@/lib/use-loader'
@@ -45,14 +45,20 @@ export default function SettingsPage() {
 function PolicyCard({ initial }: { initial: Settings }) {
   const [settings, setSettings] = useState(initial)
   const [state, setState] = useState<{ busy?: boolean; saved?: boolean; error?: string }>({})
+  // Track the saved-notice timer so a second save cannot be clobbered by the
+  // first one's cleanup: an unmanaged setTimeout would re-enable the controls
+  // mid-request and let two PUTs race.
+  const savedTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(savedTimer.current), [])
 
   const save = (changes: Partial<Settings>) => {
+    window.clearTimeout(savedTimer.current)
     setState({ busy: true })
     api.updateSettings(changes).then(
       (updated) => {
         setSettings(updated)
         setState({ saved: true })
-        setTimeout(() => setState({}), 2500)
+        savedTimer.current = window.setTimeout(() => setState((s) => ({ ...s, saved: false })), 2500)
       },
       (err: unknown) => setState({ error: message(err, 'Could not save') }),
     )

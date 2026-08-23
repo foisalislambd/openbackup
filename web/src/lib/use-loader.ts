@@ -33,6 +33,9 @@ export function useLoader<T>(fetcher: () => Promise<T>, options: Options = {}): 
   const [nonce, setNonce] = useState(0)
   const depsKey = JSON.stringify(deps)
   const depsKeyRef = useRef(depsKey)
+  // Monotonic sequence for out-of-order responses: whichever request started
+  // last is the only one allowed to land.
+  const seqRef = useRef(0)
 
   const fetcherRef = useRef(fetcher)
   useEffect(() => {
@@ -43,6 +46,7 @@ export function useLoader<T>(fetcher: () => Promise<T>, options: Options = {}): 
 
   useEffect(() => {
     let active = true
+    const seq = ++seqRef.current
     const depsChanged = depsKeyRef.current !== depsKey
     depsKeyRef.current = depsKey
     // Drop stale rows when the query identity changes (folder, snapshot, …).
@@ -52,12 +56,14 @@ export function useLoader<T>(fetcher: () => Promise<T>, options: Options = {}): 
     }
 
     const run = () => {
+      // A slow poll must never overwrite a newer answer: only the most recent
+      // request is allowed to set state.
       fetcherRef.current().then(
         (data) => {
-          if (active) setResult({ data })
+          if (active && seq === seqRef.current) setResult({ data })
         },
         (err: unknown) => {
-          if (active) {
+          if (active && seq === seqRef.current) {
             setResult((prev) => ({ data: prev.data, error: message(err) }))
           }
         },
@@ -118,5 +124,5 @@ export function useAction() {
     }
   }, [])
 
-  return { busy, error, run, clearError: () => setError(undefined) }
+  return { busy, error, run }
 }

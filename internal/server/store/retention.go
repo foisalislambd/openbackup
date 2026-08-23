@@ -65,25 +65,49 @@ func (db *DB) SetSnapshotPinned(ctx context.Context, userID, snapshotID string, 
 
 // DeleteSnapshotCascade removes a snapshot and everything chained onto it,
 // without an ownership check. Only internal maintenance may call it.
+//
+// Victim selection and deletion happen in one transaction and the recursive
+// tree is joined against live rows, so the returned count reflects only
+// snapshots that actually existed — re-running over a subtree that a previous
+// cascade already removed reports zero rather than inflating the tally.
 func (db *DB) DeleteSnapshotCascade(ctx context.Context, snapshotID string) (int, error) {
-	ids, err := db.descendants(ctx, snapshotID)
-	if err != nil {
-		return 0, err
-	}
 	tx, err := db.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx, `
+		WITH RECURSIVE tree(id) AS (
+			SELECT ? UNION ALL
+			SELECT s.id FROM snapshots s JOIN tree t ON s.parent_id = t.id
+		)
+		SELECT tree.id FROM tree JOIN snapshots ON snapshots.id = tree.id`, snapshotID)
+	if err != nil {
+		return 0, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+
 	for _, id := range ids {
+		// Entries, deletions and chunk references cascade from the snapshot row.
 		if _, err := tx.ExecContext(ctx, `DELETE FROM snapshots WHERE id = ?`, id); err != nil {
 			return 0, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return len(ids), nil
+	return len(ids), tx.Commit()
 }
 
 // CountRows returns the row count of a whitelisted table, for the status page.

@@ -194,10 +194,13 @@ export const api = {
 
   devices: () => request<{ devices: Device[] }>('/devices').then((r) => r.devices ?? []),
   renameDevice: (id: string, name: string) =>
-    request<void>(`/devices/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
-  removeDevice: (id: string) => request<void>(`/devices/${id}`, { method: 'DELETE' }),
+    request<void>(`/devices/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  removeDevice: (id: string) => request<void>(`/devices/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   sendCommand: (id: string, kind: string) =>
-    request<void>(`/devices/${id}/commands`, { method: 'POST', body: JSON.stringify({ kind }) }),
+    request<void>(`/devices/${encodeURIComponent(id)}/commands`, {
+      method: 'POST',
+      body: JSON.stringify({ kind }),
+    }),
 
   usage: () => request<Usage>('/usage'),
 
@@ -205,10 +208,10 @@ export const api = {
     request<{ snapshots: Snapshot[] }>(
       `/snapshots?limit=${limit}${deviceId ? `&device_id=${encodeURIComponent(deviceId)}` : ''}`,
     ).then((r) => r.snapshots ?? []),
-  deleteSnapshot: (id: string) => request<void>(`/snapshots/${id}`, { method: 'DELETE' }),
+  deleteSnapshot: (id: string) => request<void>(`/snapshots/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   browse: (id: string, prefix = '', cursor = '', limit = 200) =>
     request<{ entries: Entry[]; next_cursor: string }>(
-      `/snapshots/${id}/browse?children=1&prefix=${encodeURIComponent(
+      `/snapshots/${encodeURIComponent(id)}/browse?children=1&prefix=${encodeURIComponent(
         prefix,
       )}&cursor=${encodeURIComponent(cursor)}&limit=${limit}`,
     ),
@@ -233,14 +236,16 @@ export const api = {
   ignoreRules: () => request<IgnoreRules>('/ignore-rules'),
 }
 
-/** downloadUrl builds a restore link the browser can follow directly. */
-export function downloadUrl(snapshotId: string, path: string): string {
-  return `/api/v1/ui/snapshots/${snapshotId}/download?path=${encodeURIComponent(path)}`
+/** downloadUrl builds a restore link the browser can follow directly. Kept
+ * module-internal plus exported helpers below; callers should use the async
+ * download functions so errors surface in the UI. */
+function downloadUrl(snapshotId: string, path: string): string {
+  return `/api/v1/ui/snapshots/${encodeURIComponent(snapshotId)}/download?path=${encodeURIComponent(path)}`
 }
 
 /** archiveUrl builds a link that streams a folder as a ZIP. */
-export function archiveUrl(snapshotId: string, prefix: string): string {
-  return `/api/v1/ui/snapshots/${snapshotId}/archive?prefix=${encodeURIComponent(prefix)}`
+function archiveUrl(snapshotId: string, prefix: string): string {
+  return `/api/v1/ui/snapshots/${encodeURIComponent(snapshotId)}/archive?prefix=${encodeURIComponent(prefix)}`
 }
 
 /** downloadSnapshotFile fetches a file with credentials and surfaces API errors. */
