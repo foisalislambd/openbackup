@@ -8,6 +8,7 @@ import { bytes, count, formatVersion, platformLabel, relative, until } from '@/l
 import { useAction, useLoader } from '@/lib/use-loader'
 import { isEncryptedDevice } from '@/lib/file-kind'
 import { HealthBadge } from '@/components/health-badge'
+import { cn } from '@/lib/cn'
 import { Badge, Button, Card, Empty, ErrorNote, inputClass } from '@/components/ui'
 import { DevicesSkeleton } from '@/components/skeleton'
 import { LockBadge } from '@/components/file-icon'
@@ -37,22 +38,25 @@ export default function DevicesPage() {
         }
       >
         {code ? (
-          <div className="space-y-3">
+          <div className="space-y-4">
             <p className="text-sm text-gray-500">
-              Run on that computer. Code expires {until(code.expires_at)}.
+              Open the desktop app on that computer and paste these in. Code expires {until(code.expires_at)}.
             </p>
-            <CopyBlock text={`openbackup connect --server ${code.server_url} --code ${code.code}`} />
-            <p className="text-xs leading-relaxed text-gray-500">
-              Not installed? Linux/macOS:{' '}
-              <code className="break-all rounded bg-gray-100 px-1 py-0.5 dark:bg-gray-800">
-                curl -fsSL https://raw.githubusercontent.com/foisalislambd/openbackup/main/scripts/install-agent.sh | sh
-              </code>
-              . Windows: download the installer.
-            </p>
+            <CopyRow label="Connection code" action="Copy code" text={code.code} emphasize />
+            <CopyRow label="Server address" action="Copy address" text={code.server_url} />
+            <div className="border-t border-gray-100 pt-4 dark:border-gray-800">
+              <CopyRow
+                label="Command line"
+                action="Copy command"
+                text={`openbackup connect --server ${code.server_url} --code ${code.code}`}
+                compact
+              />
+            </div>
           </div>
         ) : (
           <p className="text-sm text-gray-500">
-            One-time code per device. The agent picks personal folders and skips system junk.
+            One-time code per device. Paste the code and server address into the desktop app, or use
+            the CLI if you prefer.
           </p>
         )}
       </Card>
@@ -180,7 +184,19 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
   )
 }
 
-function CopyBlock({ text }: { text: string }) {
+function CopyRow({
+  label,
+  action,
+  text,
+  emphasize,
+  compact,
+}: {
+  label: string
+  action: string
+  text: string
+  emphasize?: boolean
+  compact?: boolean
+}) {
   const [copied, setCopied] = useState(false)
   const [failed, setFailed] = useState(false)
   // Plain-HTTP deployments (http://192.168.x.x on a LAN) have no clipboard
@@ -192,7 +208,7 @@ function CopyBlock({ text }: { text: string }) {
       setTimeout(() => setCopied(false), 2000)
     }
     if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).then(mark, () => fallbackCopy(text) ? mark() : setFailed(true))
+      navigator.clipboard.writeText(text).then(mark, () => (fallbackCopy(text) ? mark() : setFailed(true)))
       return
     }
     if (fallbackCopy(text)) {
@@ -202,17 +218,32 @@ function CopyBlock({ text }: { text: string }) {
     }
   }
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-100 p-3 sm:flex-row sm:items-center dark:border-gray-800 dark:bg-gray-800">
-      <code className="min-w-0 flex-1 overflow-x-auto break-all font-mono text-xs whitespace-pre-wrap sm:whitespace-nowrap sm:break-normal">
-        {text}
-      </code>
-      <Button className="shrink-0 self-end sm:self-auto" onClick={copy}>
-        {copied ? 'Copied' : 'Copy'}
-      </Button>
+    <div>
+      <div className="mb-1.5 text-xs font-medium text-gray-500">{label}</div>
+      <div
+        className={cn(
+          'flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:flex-row sm:items-center dark:border-gray-800 dark:bg-gray-800/80',
+          emphasize && 'bg-white dark:bg-gray-900',
+        )}
+      >
+        <code
+          className={cn(
+            'min-w-0 flex-1 select-all overflow-x-auto break-all font-mono text-gray-900 dark:text-white',
+            emphasize
+              ? 'text-lg font-semibold tracking-[0.18em] sm:text-xl'
+              : compact
+                ? 'text-xs whitespace-pre-wrap sm:whitespace-nowrap sm:break-normal'
+                : 'text-sm',
+          )}
+        >
+          {text}
+        </code>
+        <Button className="shrink-0 self-end sm:self-auto" onClick={copy}>
+          {copied ? 'Copied' : action}
+        </Button>
+      </div>
       {failed && (
-        <span className="self-end text-xs text-error-600 sm:self-auto">
-          Copy failed — select the text manually
-        </span>
+        <p className="mt-1 text-xs text-error-600">Copy failed — select the text manually</p>
       )}
     </div>
   )

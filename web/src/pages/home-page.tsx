@@ -210,11 +210,8 @@ function HealthBanner({ devices, newest }: { devices: Device[]; newest?: Snapsho
               Ready when you are
             </h2>
             <p className="mt-1 max-w-xl text-sm text-brand-100/90">
-              Create a connection code, then run{' '}
-              <code className="rounded-md bg-white/15 px-1.5 py-0.5 font-mono text-[11px] text-white">
-                openbackup connect
-              </code>{' '}
-              on the computer you want to protect.
+              Create a connection code, then paste the code and server address into the desktop
+              app on the computer you want to protect.
             </p>
           </div>
 
