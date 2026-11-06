@@ -2,7 +2,7 @@ import { api } from '../lib/bridge'
 import { ago, bytes, count } from '../lib/format'
 import { useAction } from '../lib/use-status'
 import type { Overview } from '../lib/types'
-import { Button, Card, Notice } from '../components/ui'
+import { Button, Card, Notice, Progress } from '../components/ui'
 
 /** Home answers one question: is my data safe right now?
  *
@@ -27,29 +27,41 @@ export function Home({
         : status.health === 'paused' || status.health === 'never_run'
           ? 'info'
           : 'warn'
+  const hero =
+    tone === 'good'
+      ? 'from-[#12b76a] via-[#039855] to-[#027a48]'
+      : tone === 'warn'
+        ? 'from-[#f79009] via-[#dc6803] to-[#b54708]'
+        : 'from-[#465fff] via-[#3641f5] to-[#2a31d8]'
 
   const progress =
     status.files_total > 0 ? Math.min(100, (status.files_done / status.files_total) * 100) : null
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-5">
-      <section className="rounded-xl border border-border-subtle bg-surface p-6">
+      <section className={`relative overflow-hidden rounded-2xl bg-gradient-to-br px-6 py-5 text-white ${hero}`}>
         <div className="flex items-start justify-between gap-6">
           <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+            <p className="text-xs font-medium text-white/80">
               {status.encrypted ? 'End-to-end encrypted' : 'This device'}
             </p>
-            <h1 className="mt-1 text-2xl font-semibold text-ink">{status.headline}</h1>
-            <p className="selectable mt-1.5 text-sm text-ink-muted">{status.detail}</p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight">{status.headline}</h1>
+            <p className="selectable mt-1.5 text-sm text-white/85">{status.detail}</p>
           </div>
           <div className="flex shrink-0 flex-col gap-2">
             {status.paused ? (
-              <Button tone="primary" busy={action.busy} onClick={() => action.run(api.resume)}>
+              <Button
+                tone="primary"
+                className="!bg-white !text-[#101828] hover:!bg-white/90"
+                busy={action.busy}
+                onClick={() => action.run(api.resume)}
+              >
                 Resume backups
               </Button>
             ) : (
               <Button
                 tone="primary"
+                className="!bg-white !text-[#101828] hover:!bg-white/90"
                 busy={action.busy}
                 disabled={!status.agent_running}
                 onClick={() => action.run(api.backupNow)}
@@ -58,20 +70,23 @@ export function Home({
               </Button>
             )}
             {!status.paused && status.agent_running && (
-              <Button tone="quiet" onClick={() => action.run(() => api.pause(60))}>
+              <Button
+                tone="quiet"
+                className="!text-white hover:!bg-white/15"
+                onClick={() => action.run(() => api.pause(60))}
+              >
                 Pause for an hour
               </Button>
             )}
           </div>
         </div>
 
-        {progress !== null && status.state === 'uploading' && (
+        {progress !== null && (status.state === 'uploading' || status.state === 'scanning') && (
           <div className="mt-5">
-            <div className="h-1.5 overflow-hidden rounded-full bg-surface-muted">
-              <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${progress}%` }} />
-            </div>
-            <p className="mt-2 truncate text-xs text-ink-muted" title={status.current_path}>
-              {status.current_path || 'Working...'}
+            <Progress value={progress} onDark />
+            <p className="mt-2 truncate text-xs text-white/80" title={status.current_path}>
+              {status.files_done} of {status.files_total}
+              {status.current_path ? ` · ${status.current_path}` : ''}
             </p>
           </div>
         )}

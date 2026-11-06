@@ -91,7 +91,9 @@ browser. See [desktop-app.md](desktop-app.md).
 
 Every backup is a restorable point in time. Retention defaults to 30 days and is
 set per account in the dashboard (**Settings → keep backups for**); `0` keeps
-everything.
+everything. The same page can thin that window to a number of daily, weekly, and
+monthly copies, and a backup can be pinned from **Files → Backup history** so it
+is kept past the window.
 
 Because identical data is stored once, history is far cheaper than it sounds:
 ninety days of a home directory that changes slowly costs a small fraction of

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { api, message, on } from '../lib/bridge'
 import { ago } from '../lib/format'
 import type { ActivityEvent, Overview, RestoreProgress } from '../lib/types'
-import { Button, Card, Notice } from '../components/ui'
+import { Button, Card, Notice, Progress } from '../components/ui'
 
 /** Logs shows live backup/restore progress and recent file activity. */
 export function Logs({ status }: { status: Overview }) {
@@ -53,13 +53,8 @@ export function Logs({ status }: { status: Overview }) {
               {restore.current || 'Preparing…'}
             </p>
             {restore.of_files > 0 && (
-              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-muted">
-                <div
-                  className="h-full rounded-full bg-brand transition-all"
-                  style={{
-                    width: `${Math.min(100, (restore.files / restore.of_files) * 100)}%`,
-                  }}
-                />
+              <div className="mt-3">
+                <Progress value={(restore.files / restore.of_files) * 100} />
               </div>
             )}
             <p className="mt-2 text-xs text-ink-muted">
@@ -74,9 +69,9 @@ export function Logs({ status }: { status: Overview }) {
             <p className="mt-1 truncate font-mono text-xs text-ink-muted" title={status.current_path}>
               {status.current_path || status.detail || 'Working…'}
             </p>
-            {progress !== null && status.state === 'uploading' && (
-              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-muted">
-                <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${progress}%` }} />
+            {progress !== null && (
+              <div className="mt-3">
+                <Progress value={progress} />
               </div>
             )}
           </div>

@@ -308,6 +308,8 @@ type Snapshot struct {
 	SkippedCount  int64          `json:"skipped_count"`
 	Roots         []SnapshotRoot `json:"roots"`
 	Error         string         `json:"error,omitempty"`
+	// Pinned snapshots are kept past the retention window.
+	Pinned bool `json:"pinned"`
 	// Encrypted mirrors the device key: the server can list paths but cannot
 	// decode file bytes when this is true.
 	Encrypted bool `json:"encrypted"`

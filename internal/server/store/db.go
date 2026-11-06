@@ -244,6 +244,48 @@ CREATE TABLE account_chunks (
     PRIMARY KEY (user_id, digest)
 ) WITHOUT ROWID;
 `},
+
+	// Account-level history thinning, stale-backup alerts, dashboard session
+	// ids, and the record of sampled integrity checks. All of it is additive:
+	// existing rows pick up the defaults, and agents never see these columns.
+	{"0005_policy_alerts_integrity", `
+ALTER TABLE users ADD COLUMN keep_daily INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN keep_weekly INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN keep_monthly INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN alert_after_hours INTEGER NOT NULL DEFAULT 48;
+
+ALTER TABLE sessions ADD COLUMN session_id TEXT NOT NULL DEFAULT '';
+UPDATE sessions SET session_id = lower(hex(randomblob(9))) WHERE session_id = '';
+CREATE UNIQUE INDEX idx_sessions_public ON sessions(session_id);
+
+CREATE TABLE alerts (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id  TEXT NOT NULL DEFAULT '',
+    kind       TEXT NOT NULL,
+    level      TEXT NOT NULL DEFAULT 'warn',
+    message    TEXT NOT NULL,
+    opened_at  INTEGER NOT NULL,
+    acked_at   INTEGER
+);
+CREATE INDEX idx_alerts_open ON alerts(user_id, opened_at DESC);
+
+CREATE TABLE integrity_state (
+    digest     TEXT PRIMARY KEY,
+    checked_at INTEGER NOT NULL,
+    ok         INTEGER NOT NULL,
+    detail     TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE integrity_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at  INTEGER NOT NULL,
+    finished_at INTEGER NOT NULL,
+    checked     INTEGER NOT NULL,
+    failed      INTEGER NOT NULL,
+    detail      TEXT NOT NULL DEFAULT ''
+);
+`},
 }
 
 func (db *DB) migrate(ctx context.Context) error {

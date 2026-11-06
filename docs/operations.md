@@ -62,7 +62,14 @@ Once an hour by default (`OPENBACKUP_GC_INTERVAL`), a maintenance pass:
   in-progress backup.
 - **Applies retention.** Snapshots past the account's window are deleted, along
   with the deltas depending on them. The newest complete snapshot is always kept,
-  however old.
+  however old. If the account sets daily, weekly, or monthly counts, only those
+  copies are kept inside the window; counts left at zero keep every snapshot in
+  the window. Pinned snapshots are kept either way.
+- **Samples stored blocks.** A few dozen blobs are read. Unencrypted ones are
+  decoded and checked against their digest. Encrypted ones are checked for
+  presence and a sealed header, because the server does not have the key. A
+  failure becomes an alert on the dashboard. `openbackup-server check` is still
+  the full walk.
 - **Collects garbage.** Blocks no longer referenced by any snapshot are deleted, in
   batches of 5000 so uploads are never blocked for long.
 - **Prunes the activity log** to 30 days or 200,000 rows, whichever comes first.
@@ -119,8 +126,9 @@ of a full disk is much less pleasant than a refused upload.
 
 - `GET /api/v1/health` for a liveness probe. `openbackup-server health` does the
   same from inside the container, which is what the image's healthcheck uses.
-- The dashboard's **Overview** answers "is every device backing up", and
-  **Activity** shows errors with the device that reported them.
+- The dashboard's **Overview** answers "is every device backing up", shows open
+  alerts, and **Activity** shows errors with the device that reported them.
+  Settings chooses how long a device may stay quiet before that alert appears.
 - On a machine you care about, `openbackup doctor` exits non-zero when something is
   wrong, so it composes with whatever alerting you already have:
 

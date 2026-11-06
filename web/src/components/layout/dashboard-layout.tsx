@@ -13,6 +13,7 @@ import { SIDEBAR_WIDTH_COLLAPSED, SIDEBAR_WIDTH_EXPANDED } from '@/lib/sidebar'
 import { normalizePath, pageMeta } from '@/lib/nav'
 import { AppSidebar } from '@/components/layout/app-sidebar'
 import { AppHeader } from '@/components/layout/app-header'
+import { MobileNav } from '@/components/layout/mobile-nav'
 import { AuthScreen } from '@/components/layout/auth-screen'
 
 const THEME_KEY = 'openbackup-theme'
@@ -119,14 +120,11 @@ function DashboardChrome({
       )}
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <AppHeader
-          title={heading.title}
-          dark={dark}
-          onToggleTheme={onToggleTheme}
-        />
+        <AppHeader title={heading.title} dark={dark} onToggleTheme={onToggleTheme} />
         <main className="admin-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-          <div className="w-full px-3 py-4 sm:px-6 sm:py-6 lg:px-8">{children}</div>
+          <div className="w-full px-3 py-4 pb-24 sm:px-6 sm:py-6 lg:px-8 lg:pb-8">{children}</div>
         </main>
+        <MobileNav />
       </div>
     </div>
   )

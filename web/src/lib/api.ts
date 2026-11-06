@@ -46,6 +46,7 @@ export type Snapshot = {
   /** Bytes actually uploaded for this run after dedup (new data this backup). */
   uploaded_bytes: number
   encrypted?: boolean
+  pinned?: boolean
 }
 
 export type Entry = {
@@ -105,6 +106,36 @@ export type Settings = {
   retention_days: number
   max_upload_bytes_per_sec: number
   require_encryption: boolean
+  keep_daily: number
+  keep_weekly: number
+  keep_monthly: number
+  alert_after_hours: number
+}
+
+export type BackupAlert = {
+  id: string
+  device_id?: string
+  device_name?: string
+  kind: string
+  level: string
+  message: string
+  opened_at: string
+}
+
+export type IntegrityReport = {
+  checked: number
+  failed: number
+  detail?: string
+  started_at?: string
+  finished_at?: string
+}
+
+export type DashboardSession = {
+  id: string
+  created_at: string
+  expires_at: string
+  user_agent: string
+  current: boolean
 }
 
 export type IgnoreRule = { pattern: string; reason: string }
@@ -212,6 +243,24 @@ export const api = {
       `/snapshots?limit=${limit}${deviceId ? `&device_id=${encodeURIComponent(deviceId)}` : ''}`,
     ).then((r) => r.snapshots ?? []),
   deleteSnapshot: (id: string) => request<void>(`/snapshots/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  pinSnapshot: (id: string, pinned: boolean) =>
+    request<void>(`/snapshots/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ pinned }),
+    }),
+  searchSnapshot: (id: string, query: string) =>
+    request<{ entries?: Entry[] }>(
+      `/snapshots/${encodeURIComponent(id)}/search?q=${encodeURIComponent(query)}&limit=50`,
+    ).then((r) => r.entries ?? []),
+
+  alerts: () => request<{ alerts: BackupAlert[] }>('/alerts').then((r) => r.alerts ?? []),
+  ackAlert: (id: string) => request<void>(`/alerts/${encodeURIComponent(id)}/ack`, { method: 'POST' }),
+
+  sessions: () => request<{ sessions: DashboardSession[] }>('/sessions').then((r) => r.sessions ?? []),
+  revokeSession: (id: string) => request<void>(`/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  integrity: () => request<IntegrityReport>('/integrity'),
+  runIntegrity: () => request<IntegrityReport>('/integrity', { method: 'POST' }),
   browse: (id: string, prefix = '', cursor = '', limit = 200) =>
     request<{ entries?: Entry[]; next_cursor?: string; encrypted?: boolean }>(
       `/snapshots/${encodeURIComponent(id)}/browse?children=1&prefix=${encodeURIComponent(

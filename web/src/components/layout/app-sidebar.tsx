@@ -49,10 +49,12 @@ export function AppSidebar({
             O
           </span>
           {showLabels && (
-            <div className="min-w-0 leading-tight">
-              <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">OpenBackup</p>
-              <p className="truncate text-[11px] text-gray-500">{formatVersion(version)}</p>
-            </div>
+            <span className="flex min-w-0 items-baseline gap-1.5">
+              <span className="truncate text-sm font-semibold text-gray-900 dark:text-white">OpenBackup</span>
+              <span className="shrink-0 text-[11px] font-medium text-gray-400 dark:text-gray-500">
+                {formatVersion(version)}
+              </span>
+            </span>
           )}
         </Link>
         {!isDesktop && (

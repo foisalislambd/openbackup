@@ -19,6 +19,9 @@ type RetentionRow struct {
 	StartedAt     time.Time
 	Pinned        bool
 	RetentionDays int
+	KeepDaily     int
+	KeepWeekly    int
+	KeepMonthly   int
 }
 
 // SnapshotsForRetention lists every snapshot with its account's retention
@@ -26,7 +29,7 @@ type RetentionRow struct {
 func (db *DB) SnapshotsForRetention(ctx context.Context) ([]RetentionRow, error) {
 	rows, err := db.sql.QueryContext(ctx, `
 		SELECT s.id, s.user_id, s.device_id, s.kind, COALESCE(s.parent_id, ''), s.started_at, s.pinned,
-		       u.retention_days
+		       u.retention_days, u.keep_daily, u.keep_weekly, u.keep_monthly
 		FROM snapshots s JOIN users u ON u.id = s.user_id
 		WHERE s.status = ?
 		ORDER BY s.device_id, s.started_at DESC`, api.SnapshotStatusComplete)
@@ -44,7 +47,7 @@ func (db *DB) SnapshotsForRetention(ctx context.Context) ([]RetentionRow, error)
 			pinned  int
 		)
 		if err := rows.Scan(&r.ID, &r.UserID, &r.DeviceID, &kind, &r.ParentID, &started, &pinned,
-			&r.RetentionDays); err != nil {
+			&r.RetentionDays, &r.KeepDaily, &r.KeepWeekly, &r.KeepMonthly); err != nil {
 			return nil, err
 		}
 		r.Kind = api.SnapshotKind(kind)

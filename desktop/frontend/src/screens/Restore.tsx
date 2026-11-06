@@ -4,7 +4,7 @@ import { api, on } from '../lib/bridge'
 import { bytes, count, fileName, parentPath, when } from '../lib/format'
 import { useAction, useAsync, useStatus } from '../lib/use-status'
 import type { Entry, FileVersion, RestoreProgress, Snapshot } from '../lib/types'
-import { Badge, Button, Card, Empty, Notice, Rows, Spinner } from '../components/ui'
+import { Badge, Button, Card, Empty, Notice, Progress, Rows, Spinner } from '../components/ui'
 
 /** Restore browses the latest backup like a drive. Click a file for older
  *  versions. Snapshot history stays secondary. */
@@ -486,12 +486,7 @@ function RestoreStatus({
         </Button>
       }
     >
-      <div className="h-1.5 overflow-hidden rounded-full bg-surface-muted">
-        <div
-          className="h-full rounded-full bg-brand transition-all"
-          style={{ width: `${percent ?? 15}%` }}
-        />
-      </div>
+      <Progress value={percent ?? 0} />
       <p className="tabular mt-2 text-xs text-ink-muted">
         {count(progress.files)}
         {progress.of_files > 0 && ` of ${count(progress.of_files)}`} files · {bytes(progress.bytes)}

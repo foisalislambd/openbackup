@@ -50,8 +50,14 @@ type Report struct {
 	PrunedEvents      int64         `json:"pruned_events"`
 	ExpiredSessions   int64         `json:"expired_sessions"`
 	ExpiredJoinTokens int64         `json:"expired_join_tokens"`
+	CheckedChunks     int           `json:"checked_chunks"`
+	FailedChunks      int           `json:"failed_chunks"`
 	Duration          time.Duration `json:"duration"`
 }
+
+// samplePerPass is how many blobs an automatic pass reads. A full walk stays
+// on `openbackup-server check`; this is the ongoing spot check.
+const samplePerPass = 24
 
 // Run executes one maintenance pass.
 func (r *Runner) Run(ctx context.Context) (Report, error) {
@@ -91,6 +97,15 @@ func (r *Runner) Run(ctx context.Context) (Report, error) {
 		report.ExpiredJoinTokens = n
 	} else {
 		r.log.Warn("delete expired join tokens", "error", err)
+	}
+	if run, err := r.VerifySample(ctx, samplePerPass); err == nil {
+		report.CheckedChunks = run.Checked
+		report.FailedChunks = run.Failed
+	} else if ctx.Err() == nil {
+		r.log.Warn("integrity sample", "error", err)
+	}
+	if err := r.reconcileAlerts(ctx); err != nil && ctx.Err() == nil {
+		r.log.Warn("reconcile alerts", "error", err)
 	}
 	if report.DeletedChunks > 0 || report.ExpiredSnapshots > 0 {
 		if err := r.db.Vacuum(ctx); err != nil {
@@ -146,7 +161,10 @@ func (r *Runner) Start(ctx context.Context, interval time.Duration) {
 //   - the newest snapshot of every device is never deleted, so a machine that
 //     has been off for a year still has something to restore from;
 //   - a snapshot that a kept snapshot depends on is never deleted, because a
-//     delta without its base full snapshot cannot be restored.
+//     delta without its base full snapshot cannot be restored;
+//   - when the account sets daily, weekly or monthly counts, only those
+//     buckets are kept inside the window. Counts of zero keep every snapshot
+//     in the window, which is the historical behaviour.
 func (r *Runner) applyRetention(ctx context.Context) (int, error) {
 	rows, err := r.db.SnapshotsForRetention(ctx)
 	if err != nil {
@@ -156,50 +174,8 @@ func (r *Runner) applyRetention(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	byID := make(map[string]store.RetentionRow, len(rows))
-	newestPerDevice := make(map[string]string, 8)
-	for _, row := range rows {
-		byID[row.ID] = row
-		// Rows arrive newest first per device.
-		if _, seen := newestPerDevice[row.DeviceID]; !seen {
-			newestPerDevice[row.DeviceID] = row.ID
-		}
-	}
-
 	now := time.Now().UTC()
-	keep := make(map[string]struct{}, len(rows))
-	markKept := func(id string) {
-		// Walking up the parent chain keeps every base a kept delta needs.
-		for hops := 0; id != "" && hops < 1000; hops++ {
-			if _, ok := keep[id]; ok {
-				return
-			}
-			keep[id] = struct{}{}
-			row, ok := byID[id]
-			if !ok {
-				return
-			}
-			id = row.ParentID
-		}
-	}
-
-	for _, id := range newestPerDevice {
-		markKept(id)
-	}
-	for _, row := range rows {
-		if row.Pinned {
-			markKept(row.ID)
-			continue
-		}
-		if row.RetentionDays <= 0 {
-			// Retention disabled for this account: keep everything.
-			markKept(row.ID)
-			continue
-		}
-		if now.Sub(row.StartedAt) <= time.Duration(row.RetentionDays)*24*time.Hour {
-			markKept(row.ID)
-		}
-	}
+	keep := planRetention(rows, now)
 
 	var deleted int
 	deletedIDs := make(map[string]struct{}, len(rows))

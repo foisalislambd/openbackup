@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { Spinner } from './components/ui'
 import { useStatus } from './lib/use-status'
@@ -21,8 +21,21 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'health', label: 'Diagnostics', icon: 'M4 12h3l2-5 3 10 2.5-5H20' },
 ]
 
+const THEME_KEY = 'openbackup-desktop-theme'
+
+function useTheme() {
+  const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', dark)
+    document.documentElement.classList.toggle('light', !dark)
+    localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light')
+  }, [dark])
+  return { dark, toggle: () => setDark((value) => !value) }
+}
+
 export default function App() {
   const { status, error, refresh } = useStatus()
+  const theme = useTheme()
   const [tab, setTab] = useState<Tab>('home')
   // Stay on onboarding after Connect until Done, so a status poll cannot hide
   // the recovery code before the user copies it.
@@ -65,10 +78,12 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-full">
-      <nav className="flex w-52 shrink-0 flex-col border-r border-border-subtle bg-surface/60 p-3">
-        <div className="mb-4 flex items-center gap-2 px-2 pt-1">
-          <Mark health={status.health} />
+    <div className="flex h-full bg-surface-muted">
+      <nav className="flex w-56 shrink-0 flex-col border-r border-border-subtle bg-surface px-3 py-4" aria-label="Sections">
+        <div className="mb-5 flex items-center gap-3 px-2">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand text-sm font-bold text-white">
+            O
+          </span>
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-ink">OpenBackup</p>
             <p className="truncate text-xs text-ink-muted">{status.device_name}</p>
@@ -79,10 +94,12 @@ export default function App() {
           <button
             key={item.id}
             onClick={() => setTab(item.id)}
-            className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors
+            aria-current={tab === item.id ? 'page' : undefined}
+            className={`mb-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors
+              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40
               ${
                 tab === item.id
-                  ? 'bg-brand-soft font-medium text-brand'
+                  ? 'bg-brand-soft font-semibold text-brand'
                   : 'text-ink-muted hover:bg-surface-muted hover:text-ink'
               }`}
           >
@@ -93,11 +110,22 @@ export default function App() {
           </button>
         ))}
 
-        <div className="mt-auto px-2.5 pb-1 text-xs text-ink-muted">
-          <p className="truncate" title={status.server_url}>
-            {status.server_url.replace(/^https?:\/\//, '')}
-          </p>
-          <p className="mt-0.5">Version {status.version}</p>
+        <div className="mt-auto space-y-2 px-2 pb-1">
+          <button
+            type="button"
+            onClick={theme.toggle}
+            className="flex w-full items-center justify-between rounded-lg px-1 py-1.5 text-xs font-semibold text-ink-muted hover:text-ink"
+            aria-label={theme.dark ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            <span>{theme.dark ? 'Dark' : 'Light'}</span>
+            <span className="rounded-md border border-border-subtle px-2 py-0.5">{theme.dark ? 'Light' : 'Dark'}</span>
+          </button>
+          <div className="text-xs text-ink-muted">
+            <p className="truncate" title={status.server_url}>
+              {status.server_url.replace(/^https?:\/\//, '')}
+            </p>
+            <p className="mt-0.5">Version {status.version}</p>
+          </div>
         </div>
       </nav>
 
@@ -112,27 +140,5 @@ export default function App() {
         {tab === 'health' && <Health status={status} />}
       </main>
     </div>
-  )
-}
-
-/** Mark is the shield from the app icon, tinted by health, so the window itself
- *  carries the same signal as the tray. */
-function Mark({ health }: { health: string }) {
-  const colour =
-    health === 'protected'
-      ? 'text-good'
-      : health === 'working'
-        ? 'text-brand'
-        : health === 'paused' || health === 'never_run'
-          ? 'text-ink-muted'
-          : 'text-warn'
-  return (
-    <svg viewBox="0 0 24 24" className={`h-7 w-7 ${colour}`} fill="currentColor" aria-hidden>
-      <path d="M12 2.5 4.5 5.5v7.2c0 4.4 3.2 7.6 7.5 9 4.3-1.4 7.5-4.6 7.5-9V5.5z" opacity="0.18" />
-      <path
-        d="M12 3.6 5.6 6.2v6.5c0 3.8 2.7 6.6 6.4 7.9 3.7-1.3 6.4-4.1 6.4-7.9V6.2zm-.6 11.2L8.6 12l1.1-1.1 1.7 1.7 4-4L16.5 9.7z"
-        fillRule="evenodd"
-      />
-    </svg>
   )
 }

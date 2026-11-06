@@ -14,19 +14,19 @@ export type NavItem = {
 }
 
 export const navItems: NavItem[] = [
-  { href: '/', label: 'Home', icon: Home },
+  { href: '/', label: 'Overview', icon: Home },
   { href: '/files', label: 'My files', icon: FolderOpen },
   { href: '/devices', label: 'Devices', icon: HardDrive },
   { href: '/logs', label: 'Logs', icon: Activity },
   { href: '/settings', label: 'Settings', icon: Settings },
 ]
 
-export const pageMeta: Record<string, { title: string; subtitle: string }> = {
-  '/': { title: 'Home', subtitle: 'Status and computers' },
-  '/files': { title: 'My files', subtitle: 'Browse and restore' },
-  '/devices': { title: 'Devices', subtitle: 'Connect and manage' },
-  '/logs': { title: 'Logs', subtitle: 'Uploads and errors' },
-  '/settings': { title: 'Settings', subtitle: 'Account and policy' },
+export const pageMeta: Record<string, { title: string }> = {
+  '/': { title: 'Overview' },
+  '/files': { title: 'Files' },
+  '/devices': { title: 'Devices' },
+  '/logs': { title: 'Activity' },
+  '/settings': { title: 'Settings' },
 }
 
 /** Normalize legacy paths so old bookmarks keep working. */

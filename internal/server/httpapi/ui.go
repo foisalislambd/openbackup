@@ -55,6 +55,11 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "", "invalid request body")
 		return
 	}
+	if !s.loginLimiter.Allow("setup:" + s.clientIP(r)) {
+		w.Header().Set("Retry-After", "900")
+		writeError(w, http.StatusTooManyRequests, api.CodeRateLimited, "too many setup attempts, try again later")
+		return
+	}
 	if !strings.Contains(req.Email, "@") {
 		writeError(w, http.StatusBadRequest, "", "a valid email address is required")
 		return
@@ -195,10 +200,16 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, us
 		writeError(w, http.StatusBadRequest, "", "invalid request body")
 		return
 	}
+	if !s.loginLimiter.Allow("password:" + user.ID) {
+		w.Header().Set("Retry-After", "900")
+		writeError(w, http.StatusTooManyRequests, api.CodeRateLimited, "too many password attempts, try again later")
+		return
+	}
 	if err := auth.VerifyPassword(req.Current, user.PasswordHash); err != nil {
 		writeError(w, http.StatusUnauthorized, "", "current password is incorrect")
 		return
 	}
+	s.loginLimiter.Reset("password:" + user.ID)
 	hash, err := auth.HashPassword(req.New)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "", err.Error())
@@ -479,6 +490,10 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request, us
 		QuotaBytes           *int64 `json:"quota_bytes"`
 		MaxUploadBytesPerSec *int64 `json:"max_upload_bytes_per_sec"`
 		RequireEncryption    *bool  `json:"require_encryption"`
+		KeepDaily            *int   `json:"keep_daily"`
+		KeepWeekly           *int   `json:"keep_weekly"`
+		KeepMonthly          *int   `json:"keep_monthly"`
+		AlertAfterHours      *int   `json:"alert_after_hours"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "", "invalid request body")
@@ -497,9 +512,30 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request, us
 	if req.RequireEncryption != nil {
 		policy.RequireEncryption = *req.RequireEncryption
 	}
+	if req.KeepDaily != nil {
+		policy.KeepDaily = *req.KeepDaily
+	}
+	if req.KeepWeekly != nil {
+		policy.KeepWeekly = *req.KeepWeekly
+	}
+	if req.KeepMonthly != nil {
+		policy.KeepMonthly = *req.KeepMonthly
+	}
+	if req.AlertAfterHours != nil {
+		policy.AlertAfterHours = *req.AlertAfterHours
+	}
 
 	if policy.RetentionDays < 0 || policy.RetentionDays > 3650 {
 		writeError(w, http.StatusBadRequest, "", "retention must be between 0 (keep forever) and 3650 days")
+		return
+	}
+	if policy.KeepDaily < 0 || policy.KeepDaily > 3650 || policy.KeepWeekly < 0 || policy.KeepWeekly > 3650 ||
+		policy.KeepMonthly < 0 || policy.KeepMonthly > 3650 {
+		writeError(w, http.StatusBadRequest, "", "history counts must be between 0 and 3650")
+		return
+	}
+	if policy.AlertAfterHours < 0 || policy.AlertAfterHours > 24*365 {
+		writeError(w, http.StatusBadRequest, "", "alert window must be between 0 (off) and 8760 hours")
 		return
 	}
 	if policy.QuotaBytes < 0 {
@@ -536,6 +572,10 @@ func settingsPayload(p store.UserPolicy, publicURL, gcInterval string) map[strin
 		"quota_bytes":              p.QuotaBytes,
 		"max_upload_bytes_per_sec": p.MaxUploadBytesPerSec,
 		"require_encryption":       p.RequireEncryption,
+		"keep_daily":               p.KeepDaily,
+		"keep_weekly":              p.KeepWeekly,
+		"keep_monthly":             p.KeepMonthly,
+		"alert_after_hours":        p.AlertAfterHours,
 		"public_url":               publicURL,
 		"gc_interval":              gcInterval,
 	}

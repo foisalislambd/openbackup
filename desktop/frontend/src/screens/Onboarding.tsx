@@ -43,12 +43,17 @@ export function Onboarding({
 
   return (
     <div className="mx-auto flex h-full max-w-md flex-col justify-center gap-6 p-8">
-      <header>
-        <h1 className="text-xl font-semibold text-ink">Connect this device</h1>
-        <p className="mt-1.5 text-sm text-ink-muted">
-          Your files are backed up to your own server. Get an address and a code from its dashboard,
-          then paste them here.
-        </p>
+      <header className="flex items-start gap-3">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand text-lg font-bold text-white">
+          O
+        </span>
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-ink">Connect this device</h1>
+          <p className="mt-1.5 text-sm text-ink-muted">
+            Your files are backed up to your own server. Get an address and a code from its dashboard,
+            then paste them here.
+          </p>
+        </div>
       </header>
 
       <form

@@ -108,7 +108,8 @@ func (db *DB) ListDevices(ctx context.Context, userID string) ([]api.Device, err
 		                 ORDER BY s.started_at DESC LIMIT 1), 0) AS logical_bytes,
 		       COALESCE((SELECT s.completed_at FROM snapshots s
 		                 WHERE s.device_id = d.id AND s.status = ?
-		                 ORDER BY s.started_at DESC LIMIT 1), 0) AS last_complete
+		                 ORDER BY s.started_at DESC LIMIT 1), 0) AS last_complete,
+		       COALESCE((SELECT u.alert_after_hours FROM users u WHERE u.id = d.user_id), 48)
 		FROM devices d WHERE d.user_id = ? AND d.revoked = 0
 		ORDER BY d.created_at ASC`,
 		api.SnapshotStatusComplete, api.SnapshotStatusComplete, api.SnapshotStatusComplete, userID)
@@ -125,11 +126,12 @@ func (db *DB) ListDevices(ctx context.Context, userID string) ([]api.Device, err
 			created      int64
 			lastSeen     sql.NullInt64
 			lastComplete int64
+			alertHours   int
 		)
 		if err := rows.Scan(&d.ID, &d.Name, &d.Hostname, &platform, &d.OSVersion, &d.AgentVersion, &d.KeyID,
 			&created, &lastSeen, &d.State, &d.StateReason, &d.QueuedFiles, &d.QueuedBytes, &d.LastError,
 			&d.CurrentPath, &d.FilesDone, &d.FilesTotal,
-			&d.SnapshotCount, &d.LogicalBytes, &lastComplete); err != nil {
+			&d.SnapshotCount, &d.LogicalBytes, &lastComplete, &alertHours); err != nil {
 			return nil, err
 		}
 		d.Platform = api.Platform(platform)
@@ -139,7 +141,7 @@ func (db *DB) ListDevices(ctx context.Context, userID string) ([]api.Device, err
 			t := fromMillis(lastComplete)
 			d.LastBackupAt = &t
 		}
-		d.Health = deviceHealth(d, fromMillis(lastComplete))
+		d.Health = deviceHealth(d, fromMillis(lastComplete), time.Duration(alertHours)*time.Hour)
 		d.Encrypted = d.KeyID != ""
 		out = append(out, d)
 	}
@@ -151,13 +153,13 @@ func (db *DB) ListDevices(ctx context.Context, userID string) ([]api.Device, err
 // A backup tool that says "OK" while a device has silently been offline for a
 // week is worse than useless, so health is derived from when the device last
 // *completed* a snapshot, not from whether it is currently connected.
-func deviceHealth(d api.Device, lastComplete time.Time) string {
+func deviceHealth(d api.Device, lastComplete time.Time, staleAfter time.Duration) string {
 	switch {
 	case d.LastError != "" || d.State == api.StateError:
 		return api.HealthError
 	case lastComplete.IsZero():
 		return api.HealthNeverRun
-	case time.Since(lastComplete) > 48*time.Hour:
+	case staleAfter > 0 && time.Since(lastComplete) > staleAfter:
 		return api.HealthStale
 	default:
 		return api.HealthOK
