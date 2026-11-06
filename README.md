@@ -6,6 +6,24 @@ Install once on a cheap VPS. On your PC or Mac, connect with one short code. Aft
 
 Free. Open source (MIT). No subscription. Nothing phones home.
 
+## Screenshots
+
+<table>
+<tr>
+<td width="33%"><img src="docs/images/overview.webp" alt="Dashboard overview" width="320"><br>Overview</td>
+<td width="33%"><img src="docs/images/devices.webp" alt="Devices page" width="320"><br>Devices</td>
+<td width="33%"><img src="docs/images/files.webp" alt="File browser" width="320"><br>File browser and restore</td>
+</tr>
+<tr>
+<td><img src="docs/images/settings.webp" alt="Settings" width="320"><br>Settings</td>
+<td><img src="docs/images/overview-dark.webp" alt="Dashboard in dark mode" width="320"><br>Dark mode</td>
+<td><img src="docs/images/overview-mobile.webp" alt="Dashboard on a phone" width="160"><br>Phone width</td>
+</tr>
+<tr>
+<td colspan="3"><img src="docs/images/desktop-overview.webp" alt="Desktop app overview" width="640"><br>Desktop app</td>
+</tr>
+</table>
+
 ---
 
 ## Why we built this
@@ -162,7 +180,7 @@ Full command list: [CLI reference](docs/cli.md).
 
 ## Desktop app
 
-![OpenBackup desktop overview](docs/images/desktop-overview.png)
+![OpenBackup desktop overview](docs/images/desktop-overview.webp)
 
 A simple window for: connect device, see status, browse backups, restore, pause/resume.  
 Closing the window does **not** stop backups — a small tray icon keeps watch.
