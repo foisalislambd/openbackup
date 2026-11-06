@@ -3,8 +3,11 @@
 
 SHELL := /bin/sh
 
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+# VERSION.md is the release version. `make VERSION=v9.9.9` still overrides a
+# local build; CI does not, so a published binary matches the file.
+BARE_VERSION := $(shell sh scripts/read-version.sh)
+VERSION ?= v$(BARE_VERSION)
+COMMIT  ?= $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # Version metadata is injected at link time, so the binary can report exactly
@@ -39,6 +42,7 @@ help:
 	@echo "make dev          Run the server and the dashboard dev server together"
 	@echo "make release      Cross-compile release binaries for all platforms"
 	@echo "make docker       Build the container image"
+	@echo "make version      Print the version from VERSION.md"
 	@echo "make clean        Remove build output"
 
 # ---------------------------------------------------------------------------
@@ -81,7 +85,7 @@ tidy:
 cross:
 	@for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do \
 		echo "checking $$target"; \
-		GOOS=$${target%/*} GOARCH=$${target#*/} CGO_ENABLED=0 go build $(PKGS) || exit 1; \
+		GOOS=$${target%/*} GOARCH=$${target#*/} CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' $(PKGS) || exit 1; \
 	done
 
 # ---------------------------------------------------------------------------
@@ -116,8 +120,7 @@ web-check:
 desktop:
 	@command -v wails >/dev/null || \
 		(echo "install the Wails CLI: go install github.com/wailsapp/wails/v2/cmd/wails@latest" && exit 1)
-	@pv=$$(printf '%s' "$(VERSION)" | sed 's/^v//'); \
-	node -e "const fs=require('fs');const p='desktop/wails.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.info=j.info||{};j.info.productVersion=process.argv[1];fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');" "$$pv"
+	go run ./internal/version/cmd stamp-wails desktop/wails.json
 	@if [ "$$(uname -s)" = Linux ]; then \
 		cd desktop && wails build -trimpath -ldflags '$(LDFLAGS)' -tags webkit2_41; \
 	else \
@@ -157,11 +160,15 @@ desktop-linux-package: desktop
 .PHONY: dev
 dev:
 	@echo "server on :18200, dashboard on :5173 (proxying /api to the server)"
-	@( go run ./cmd/openbackup-server & cd web && npm run dev; kill %1 )
+	@( go run -ldflags '$(LDFLAGS)' ./cmd/openbackup-server & cd web && npm run dev; kill %1 )
 
 .PHONY: run-server
 run-server:
-	OPENBACKUP_DATA_DIR=./data go run ./cmd/openbackup-server
+	OPENBACKUP_DATA_DIR=./data go run -ldflags '$(LDFLAGS)' ./cmd/openbackup-server
+
+.PHONY: version
+version:
+	@echo $(VERSION)
 
 # ---------------------------------------------------------------------------
 # Release
@@ -188,7 +195,9 @@ docker:
 		--build-arg VERSION=$(VERSION) \
 		--build-arg COMMIT=$(COMMIT) \
 		--build-arg DATE=$(DATE) \
-		-t foisalislambd/openbackup:$(VERSION) -t foisalislambd/openbackup:latest .
+		-t foisalislambd/openbackup:$(VERSION) \
+		-t foisalislambd/openbackup:$(BARE_VERSION) \
+		-t foisalislambd/openbackup:latest .
 
 .PHONY: clean
 clean:

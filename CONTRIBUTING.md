@@ -116,7 +116,9 @@ whether a restore produced the right bytes.
 
 ## Container image releases
 
-Pushes to `main` that create a GitHub Release also build and push the server
+[`VERSION.md`](VERSION.md) is the version that gets tagged and shipped. A push
+to `main` creates a GitHub Release when that version is strictly newer than the
+latest tag and GitHub Release, and that release also builds and pushes the server
 image for `linux/amd64` and `linux/arm64` to both registries (`latest` plus the
 version tag):
 

@@ -45,9 +45,21 @@ function Step($message) {
 }
 
 # Version metadata is injected at link time so the binary reports exactly what
-# it is, with no generated file in the tree.
-$version = try { (git describe --tags --always --dirty 2>$null) } catch { 'dev' }
-if (-not $version) { $version = 'dev' }
+# it is. VERSION.md is the source of truth (the same file CI releases from).
+function Read-OpenBackupVersion {
+    $path = Join-Path $root 'VERSION.md'
+    if (-not (Test-Path -LiteralPath $path)) { throw "VERSION.md not found at $path" }
+    foreach ($line in Get-Content -LiteralPath $path) {
+        $t = $line.Trim()
+        if ($t -eq '' -or $t.StartsWith('#')) { continue }
+        if ($t.StartsWith('v') -or $t.StartsWith('V')) { $t = $t.Substring(1) }
+        return $t
+    }
+    throw "VERSION.md has no version"
+}
+
+$bare = Read-OpenBackupVersion
+$version = "v$bare"
 $commit = try { (git rev-parse --short HEAD 2>$null) } catch { 'unknown' }
 if (-not $commit) { $commit = 'unknown' }
 $date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -113,7 +125,7 @@ if ($Desktop -or $Installer) {
     }
     Push-Location (Join-Path $root 'desktop')
     try {
-        $productVersion = ($Version -replace '^v', '')
+        $productVersion = ($bare -split '[+-]')[0]
         if (-not $productVersion) { $productVersion = '0.0.0' }
         $wailsJsonPath = Join-Path (Get-Location) 'wails.json'
         $wailsJson = Get-Content $wailsJsonPath -Raw | ConvertFrom-Json

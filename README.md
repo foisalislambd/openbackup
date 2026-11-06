@@ -240,6 +240,13 @@ Android is not ready yet. See [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## Cutting a release
+
+The version lives in [`VERSION.md`](VERSION.md) (first line, SemVer such as `0.3.1`).
+Merging a higher version to `main` tags `vX.Y.Z` and publishes the GitHub Release,
+desktop builds, and server image. The same or a lower version does not release.
+Details: [Development → Release](docs/development.md#release).
+
 ## Contributing & help
 
 - How to contribute: [CONTRIBUTING.md](CONTRIBUTING.md)  

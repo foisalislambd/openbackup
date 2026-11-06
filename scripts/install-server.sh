@@ -258,8 +258,14 @@ else
 		}
 	fi
 	IMAGE="foisalislambd/openbackup:local"
-	# Bake the git revision into the binary so the dashboard does not show "vdev".
-	build_version=$(git -C src describe --tags --always 2>/dev/null || echo "$REF")
+	# Stamp the same version the repository releases, so the dashboard does not
+	# show the unstamped "dev" build.
+	if [ -f src/scripts/read-version.sh ]; then
+		build_version=$(sh src/scripts/read-version.sh src/VERSION.md)
+		build_version="v${build_version}"
+	else
+		build_version=$(git -C src describe --tags --always 2>/dev/null || echo "$REF")
+	fi
 	build_commit=$(git -C src rev-parse --short HEAD 2>/dev/null || echo unknown)
 	build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 fi

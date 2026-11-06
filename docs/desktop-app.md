@@ -60,8 +60,8 @@ LaunchAgent). Headless / server installs can still use `openbackup service`.
    autostart, and deletes local OpenBackup data on that PC. Server-side backups
    are not deleted.
 
-The installer and the in-app version string both use the GitHub release tag
-(for example `v0.2.1` / product version `0.2.1`).
+The installer and the in-app version string both use [`VERSION.md`](../VERSION.md)
+(for example `0.3.1` in the file, `v0.3.1` in the app, product version `0.3.1`).
 
 ## The tray icon
 

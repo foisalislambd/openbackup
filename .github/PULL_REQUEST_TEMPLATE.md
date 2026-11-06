@@ -28,6 +28,7 @@ restore elsewhere, diff.
 - [ ] Comments explain *why*, not what, and none of them describe this change
 - [ ] Docs updated in this change if behaviour, a flag or a default moved
 - [ ] `CHANGELOG.md` updated under `## Unreleased` if a user would notice
+- [ ] `VERSION.md` bumped when this change should publish a release
 - [ ] No new dependency, or the reason for it is in the description
 - [ ] Nothing here reads or writes outside the user's own data
 

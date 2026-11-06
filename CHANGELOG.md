@@ -12,6 +12,7 @@ older agent keeps working against a newer server, so upgrade the server first.
 
 ### Added
 
+- `VERSION.md` is the release version for the server, agent, desktop app, dashboard, and container image. A push to `main` publishes a GitHub Release only when that version is a strictly higher semver than the latest tag and GitHub Release.
 - Dashboard overview shows backup health, per-device progress, storage, open alerts, and recent activity. The file browser searches a whole backup, and a backup can be pinned so retention will not remove it.
 - Retention can thin history to a chosen number of daily, weekly, and monthly copies inside the existing window. Leaving the counts at zero keeps every snapshot in the window, as before.
 - The server samples stored blocks during maintenance (and on demand from Settings), checks unencrypted blocks against their digest, and raises an alert when a sample fails. Encrypted blocks are checked for presence only; the agent still verifies them on restore.
@@ -21,6 +22,10 @@ older agent keeps working against a newer server, so upgrade the server first.
   `ghcr.io/foisalislambd/openbackup` (`latest` + version tags), alongside Docker Hub.
 - Desktop **Check for updates** (Settings → About): compares this build to the
   latest GitHub Release and opens the Windows installer download in the browser.
+
+### Changed
+
+- Release tags come from `VERSION.md`. Bump that file to cut the next release.
 
 ### Fixed
 
@@ -33,7 +38,7 @@ older agent keeps working against a newer server, so upgrade the server first.
   for bind address / firewall, and prints that URL after upgrade.
 - Windows installer stops the running app before upgrade, and uninstall removes
   login autostart plus local OpenBackup data (the in-process agent goes with the
-  app). Release builds set NSIS/file `productVersion` from the GitHub tag.
+  app). Release builds set NSIS/file `productVersion` from `VERSION.md`.
 - Device badges no longer show a doubled `vv` prefix when the agent version
   already includes `v`.
 

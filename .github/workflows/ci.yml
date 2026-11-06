@@ -21,6 +21,73 @@ env:
   PKGS: ./cmd/... ./internal/...
 
 jobs:
+  version:
+    name: Version file
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+          cache: true
+
+      # Invalid semver fails the check. A version that is not newer than the
+      # latest tag / GitHub Release fails only when this PR changed the version
+      # number — that PR is trying to cut a release that CI will not publish.
+      # Leaving VERSION.md alone warns and still passes, so other work can merge.
+      - name: Check VERSION.md against released versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.base_ref }}
+        run: |
+          set -eu
+          git fetch --tags --force origin
+          tmp=$(mktemp)
+          git tag -l 'v*' > "$tmp"
+          gh release list --limit 200 --json tagName --jq '.[].tagName' >> "$tmp"
+
+          changed=
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git fetch --no-tags origin "$PR_BASE"
+            base_ref="origin/${PR_BASE}"
+            if git cat-file -e "${base_ref}:VERSION.md" 2>/dev/null; then
+              git show "${base_ref}:VERSION.md" > "${tmp}.base"
+              base_ver=$(sh scripts/read-version.sh "${tmp}.base")
+              head_ver=$(sh scripts/read-version.sh VERSION.md)
+              if [ "$base_ver" != "$head_ver" ]; then
+                changed=--changed
+              fi
+            else
+              changed=--changed
+            fi
+          fi
+
+          out=$(go run ./internal/version/cmd pr-check $changed < "$tmp")
+          printf '%s\n' "$out"
+          status=$(printf '%s\n' "$out" | awk -F= '/^status=/{print substr($0, index($0, "=")+1); exit}')
+          message=$(printf '%s\n' "$out" | awk -F= '/^message=/{print substr($0, index($0, "=")+1); exit}')
+          case "$status" in
+            ok)
+              echo "::notice title=Version::$message"
+              ;;
+            warn)
+              echo "::warning title=Version::$message"
+              ;;
+            fail)
+              echo "::error title=Version::$message"
+              exit 1
+              ;;
+            *)
+              echo "::error title=Version::could not read the version check result"
+              printf '%s\n' "$out"
+              exit 1
+              ;;
+          esac
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -37,7 +104,8 @@ jobs:
           cache: true
 
       - name: Build
-        run: go build ${{ env.PKGS }}
+        shell: bash
+        run: go build -trimpath -ldflags "$(sh scripts/go-ldflags.sh .)" ${{ env.PKGS }}
 
       - name: Test
         run: go test -count=1 ${{ env.PKGS }}
@@ -98,9 +166,13 @@ jobs:
       # from one machine with no cgo.
       - name: Build every target
         run: |
+          set -eu
+          ldflags=$(sh scripts/go-ldflags.sh .)
           for target in linux/amd64 linux/arm64 linux/arm darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
             echo "::group::$target"
-            GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build $PKGS
+            # PKGS is several paths; word splitting is the list of packages.
+            # shellcheck disable=SC2086
+            GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" $PKGS
             echo "::endgroup::"
           done
 
@@ -137,7 +209,7 @@ jobs:
           rm -rf internal/server/web/dist
           mkdir -p internal/server/web/dist
           cp -r web/dist/. internal/server/web/dist/
-          go build ./cmd/openbackup-server
+          go build -trimpath -ldflags "$(sh scripts/go-ldflags.sh .)" ./cmd/openbackup-server
 
   desktop:
     name: Desktop app (${{ matrix.os }})
@@ -186,7 +258,10 @@ jobs:
       - name: Build (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          wails build -tags webkit2_41
+          set -eu
+          (cd .. && go run ./internal/version/cmd stamp-wails desktop/wails.json)
+          ldflags=$(cd .. && sh scripts/go-ldflags.sh .)
+          wails build -trimpath -ldflags "$ldflags" -tags webkit2_41
           arch=$(uname -m)
           case "$arch" in x86_64|amd64) goarch=amd64 ;; aarch64|arm64) goarch=arm64 ;; *) echo "unsupported $arch"; exit 1 ;; esac
           cp build/bin/openbackup-desktop "build/bin/openbackup-desktop-linux-${goarch}"
@@ -196,11 +271,17 @@ jobs:
 
       - name: Build (Windows)
         if: matrix.os == 'windows-latest'
-        run: wails build
+        shell: bash
+        run: |
+          set -eu
+          (cd .. && go run ./internal/version/cmd stamp-wails desktop/wails.json)
+          ldflags=$(cd .. && sh scripts/go-ldflags.sh .)
+          wails build -trimpath -ldflags "$ldflags"
         working-directory: desktop
 
       - name: Install NSIS
         if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
           choco install nsis -y --no-progress
           echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -209,9 +290,12 @@ jobs:
       # The installer is what a user actually downloads, so a broken one must fail.
       - name: Build the installer
         if: matrix.os == 'windows-latest'
+        shell: bash
         run: |
+          set -eu
           makensis -VERSION
-          wails build -nsis
+          ldflags=$(cd .. && sh scripts/go-ldflags.sh .)
+          wails build -nsis -trimpath -ldflags "$ldflags"
         working-directory: desktop
 
       - name: Upload the Windows build
@@ -245,9 +329,13 @@ jobs:
       - name: Version metadata
         id: meta
         run: |
-          echo "version=$(git describe --tags --always)" >> "$GITHUB_OUTPUT"
-          echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          set -eu
+          ver=$(sh scripts/read-version.sh)
+          {
+            echo "version=v${ver}"
+            echo "commit=$(git rev-parse --short=7 HEAD)"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
       - name: Build the image
         uses: docker/build-push-action@v7
         with:

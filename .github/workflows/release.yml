@@ -1,13 +1,11 @@
-# Auto-release: every push to main creates a version tag and a GitHub Release
-# with CLI binaries (cross-compiled), Windows and Linux desktop apps, and
+# Release: a push to main (or a manual run) reads VERSION.md and, only when
+# that semver is strictly greater than the latest git tag and GitHub Release,
+# tags vX.Y.Z and publishes CLI binaries, Windows and Linux desktop apps, and
 # container images on Docker Hub and GHCR (latest + version tags).
 #
-# Skip a release for a docs-only / WIP commit by including [skip release] in the
-# commit message. You can also run this workflow manually (Actions → Release)
-# and optionally set an exact tag like v0.3.0.
-#
-# Auto versioning: patch runs 0–9, then the minor bumps
-# (v0.1.9 → v0.2.0, v0.2.9 → v0.3.0).
+# The same or a lower version skips the release jobs and says why. Tests still
+# run in ci.yml. Put [skip release] in the commit message to skip even when
+# VERSION.md is newer.
 #
 # Docker Hub push needs repository secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN.
 # GHCR push uses GITHUB_TOKEN (packages: write).
@@ -17,11 +15,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Exact tag (e.g. v0.2.0). Leave empty to auto-bump (…9 → next minor.0).'
-        required: false
-        type: string
 
 permissions:
   contents: write
@@ -44,75 +37,66 @@ jobs:
       skip: ${{ steps.decide.outputs.skip }}
       tag: ${{ steps.decide.outputs.tag }}
       version: ${{ steps.decide.outputs.version }}
+      product: ${{ steps.decide.outputs.product }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Decide next tag
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Read VERSION.md and compare with releases
         id: decide
         env:
-          INPUT_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
           msg=$(git log -1 --pretty=%B)
           if printf '%s' "$msg" | grep -qi '\[skip release\]'; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "tag=" >> "$GITHUB_OUTPUT"
-            echo "version=" >> "$GITHUB_OUTPUT"
-            echo "Skipping release ([skip release] in commit message)."
+            {
+              echo "skip=true"
+              echo "tag="
+              echo "version="
+              echo "product="
+            } >> "$GITHUB_OUTPUT"
+            echo "::notice title=Release skipped::Skipping release ([skip release] in the commit message)."
             exit 0
           fi
 
-          if [ -n "${INPUT_VERSION:-}" ]; then
-            tag="$INPUT_VERSION"
+          git fetch --tags --force origin
+          tmp=$(mktemp)
+          git tag -l 'v*' > "$tmp"
+          gh release list --limit 200 --json tagName --jq '.[].tagName' >> "$tmp"
+
+          # Invalid VERSION.md fails this step (the release does not run).
+          # A version that is not strictly newer exits 0 with skip=true.
+          out=$(go run ./internal/version/cmd decide < "$tmp")
+          printf '%s\n' "$out"
+          skip=$(printf '%s\n' "$out" | awk -F= '/^skip=/{print substr($0, index($0, "=")+1); exit}')
+          version=$(printf '%s\n' "$out" | awk -F= '/^version=/{print substr($0, index($0, "=")+1); exit}')
+          tag=$(printf '%s\n' "$out" | awk -F= '/^tag=/{print substr($0, index($0, "=")+1); exit}')
+          product=$(printf '%s\n' "$out" | awk -F= '/^product=/{print substr($0, index($0, "=")+1); exit}')
+          message=$(printf '%s\n' "$out" | awk -F= '/^message=/{print substr($0, index($0, "=")+1); exit}')
+          {
+            echo "skip=$skip"
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "product=$product"
+          } >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$message"
+          if [ "$skip" = "true" ]; then
+            echo "::notice title=Release skipped::$message"
           else
-            git fetch --tags --force
-            last=$(git tag -l 'v*' --sort=-v:refname | head -n1 || true)
-            if [ -z "$last" ]; then
-              tag="v0.1.0"
-            else
-              # vMAJOR.MINOR.PATCH — patch stays 0–9; after .9 bump minor
-              # (v0.1.9 → v0.2.0, v0.2.9 → v0.3.0). Also rolls up if last
-              # patch is already ≥9 (e.g. a leftover v0.1.10 → v0.2.0).
-              ver=${last#v}
-              major=${ver%%.*}
-              rest=${ver#*.}
-              minor=${rest%%.*}
-              patch=${rest#*.}
-              patch=${patch%%[!0-9]*}
-              if [ -z "$patch" ]; then patch=0; fi
-              next_patch=$((patch + 1))
-              if [ "$next_patch" -gt 9 ]; then
-                minor=$((minor + 1))
-                next_patch=0
-              fi
-              tag="v${major}.${minor}.${next_patch}"
-            fi
+            echo "::notice title=Releasing::$message"
           fi
-
-          case "$tag" in
-            v*) ;;
-            *) tag="v$tag" ;;
-          esac
-
-          if git rev-parse "$tag" >/dev/null 2>&1; then
-            echo "Tag $tag already exists — skipping duplicate release."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "tag=" >> "$GITHUB_OUTPUT"
-            echo "version=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "skip=false" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
-          echo "Next release tag: $tag"
 
   cli:
     name: CLI + server binaries
     needs: version
-    if: needs.version.outputs.skip != 'true'
+    if: needs.version.result == 'success' && needs.version.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -127,8 +111,6 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Build release binaries
-        env:
-          VERSION: ${{ needs.version.outputs.tag }}
         run: make release
 
       - uses: actions/upload-artifact@v7
@@ -140,7 +122,7 @@ jobs:
   desktop-windows:
     name: Desktop (Windows)
     needs: version
-    if: needs.version.outputs.skip != 'true'
+    if: needs.version.result == 'success' && needs.version.outputs.skip != 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -160,6 +142,7 @@ jobs:
 
       # windows-latest does not ship makensis; Wails -nsis needs it on PATH.
       - name: Install NSIS
+        shell: pwsh
         run: |
           choco install nsis -y --no-progress
           echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -168,29 +151,19 @@ jobs:
       - name: Build desktop + NSIS installer
         working-directory: desktop
         shell: bash
-        env:
-          VERSION: ${{ needs.version.outputs.tag }}
-          PRODUCT_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -eu
           command -v makensis
-          # Keep Windows file version / NSIS DisplayVersion in sync with the GitHub tag.
-          node -e "
-            const fs = require('fs');
-            const path = 'wails.json';
-            const j = JSON.parse(fs.readFileSync(path, 'utf8'));
-            j.info = j.info || {};
-            j.info.productVersion = process.env.PRODUCT_VERSION;
-            fs.writeFileSync(path, JSON.stringify(j, null, 2) + '\n');
-            console.log('wails productVersion=', j.info.productVersion);
-          "
-          LDFLAGS="-s -w -X github.com/foisalislambd/openbackup/internal/version.Version=${VERSION} -X github.com/foisalislambd/openbackup/internal/version.Commit=${GITHUB_SHA::7} -X github.com/foisalislambd/openbackup/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # Windows file version / NSIS DisplayVersion come from VERSION.md.
+          (cd .. && go run ./internal/version/cmd stamp-wails desktop/wails.json)
+          export COMMIT="${GITHUB_SHA::7}"
+          LDFLAGS=$(cd .. && sh scripts/go-ldflags.sh .)
           # One -nsis build produces both the app and the installer.
           wails build -nsis -trimpath -ldflags "$LDFLAGS"
           mkdir -p dist
           cp build/bin/openbackup-desktop.exe dist/openbackup-desktop-windows-amd64.exe
-          ls -la build/bin
-          installer=$(ls build/bin/*installer*.exe build/bin/*-setup.exe build/bin/*Setup*.exe 2>/dev/null | head -n1 || true)
+          find build/bin -maxdepth 1 -type f -print
+          installer=$(find build/bin -maxdepth 1 -type f \( -name '*installer*.exe' -o -name '*-setup.exe' -o -name '*Setup*.exe' \) | head -n1 || true)
           if [ -z "$installer" ]; then
             for f in build/bin/*.exe; do
               base=$(basename "$f")
@@ -215,7 +188,7 @@ jobs:
   desktop-linux:
     name: Desktop (Linux)
     needs: version
-    if: needs.version.outputs.skip != 'true'
+    if: needs.version.result == 'success' && needs.version.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -240,11 +213,11 @@ jobs:
 
       - name: Build desktop
         working-directory: desktop
-        env:
-          VERSION: ${{ needs.version.outputs.tag }}
         run: |
           set -eu
-          LDFLAGS="-s -w -X github.com/foisalislambd/openbackup/internal/version.Version=${VERSION} -X github.com/foisalislambd/openbackup/internal/version.Commit=${GITHUB_SHA::7} -X github.com/foisalislambd/openbackup/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          (cd .. && go run ./internal/version/cmd stamp-wails desktop/wails.json)
+          export COMMIT="${GITHUB_SHA::7}"
+          LDFLAGS=$(cd .. && sh scripts/go-ldflags.sh .)
           wails build -trimpath -ldflags "$LDFLAGS" -tags webkit2_41
           mkdir -p dist
           cp build/bin/openbackup-desktop dist/openbackup-desktop-linux-amd64
@@ -261,7 +234,7 @@ jobs:
   docker:
     name: Publish Docker image
     needs: version
-    if: needs.version.outputs.skip != 'true'
+    if: needs.version.result == 'success' && needs.version.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -327,7 +300,7 @@ jobs:
   publish:
     name: Create GitHub Release
     needs: [version, cli, desktop-windows, desktop-linux, docker]
-    if: needs.version.outputs.skip != 'true'
+    if: needs.version.result == 'success' && needs.version.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -352,7 +325,7 @@ jobs:
           cp artifacts/openbackup-desktop-linux/* release/
           cd release
           # Refresh checksums for the full set of assets.
-          sha256sum * > SHA256SUMS
+          sha256sum ./* > SHA256SUMS
           ls -la
 
       - name: Create tag and release
@@ -366,25 +339,37 @@ jobs:
           git tag -a "$TAG" -m "Release $TAG"
           git push origin "$TAG"
 
-          notes=$(printf '%s\n' \
-            "## OpenBackup ${TAG}" \
-            "" \
-            "Automated release from \`main\`." \
-            "" \
-            "### Downloads" \
-            "- **Windows desktop:** \`openbackup-desktop-windows-amd64-setup.exe\` (installer) or \`.exe\` (portable) — window + background agent in one binary" \
-            "- **Linux desktop:** \`openbackup-desktop-linux-amd64\` (+ \`.desktop\` + \`openbackup.png\`) — same: GUI + agent in one binary" \
-            "- **Agent / server CLI:** \`openbackup-<os>-<arch>\` and \`openbackup-server-<os>-<arch>\` (optional; for headless/servers or the terminal)" \
-            "- **Server container (Docker Hub):** \`docker pull foisalislambd/openbackup:${TAG}\` (also tagged \`latest\`)" \
-            "- **Server container (GHCR):** \`docker pull ghcr.io/foisalislambd/openbackup:${TAG}\` (also tagged \`latest\`)" \
-            "" \
-            "### Notes" \
-            "- Linux desktop needs WebKitGTK 4.1 at runtime (\`libwebkit2gtk-4.1-0\` on Debian/Ubuntu)." \
-            "- macOS desktop is not built in CI yet — use \`make desktop\` on a Mac." \
-            "- Agent/server CLI binaries are static; desktop apps are native per OS." \
-          )
+          extra=$(awk '
+            { sub(/\r$/, "") }
+            found { print; next }
+            /^[[:space:]]*#/ { next }
+            /^[[:space:]]*$/ { next }
+            { found = 1; next }
+          ' VERSION.md)
+
+          {
+            printf '%s\n' \
+              "## OpenBackup ${TAG}" \
+              "" \
+              "Release ${TAG} from VERSION.md on \`main\`." \
+              "" \
+              "### Downloads" \
+              "- **Windows desktop:** \`openbackup-desktop-windows-amd64-setup.exe\` (installer) or \`.exe\` (portable) — window + background agent in one binary" \
+              "- **Linux desktop:** \`openbackup-desktop-linux-amd64\` (+ \`.desktop\` + \`openbackup.png\`) — same: GUI + agent in one binary" \
+              "- **Agent / server CLI:** \`openbackup-<os>-<arch>\` and \`openbackup-server-<os>-<arch>\` (optional; for headless/servers or the terminal)" \
+              "- **Server container (Docker Hub):** \`docker pull foisalislambd/openbackup:${TAG}\` (also tagged \`latest\`)" \
+              "- **Server container (GHCR):** \`docker pull ghcr.io/foisalislambd/openbackup:${TAG}\` (also tagged \`latest\`)" \
+              "" \
+              "### Notes" \
+              "- Linux desktop needs WebKitGTK 4.1 at runtime (\`libwebkit2gtk-4.1-0\` on Debian/Ubuntu)." \
+              "- macOS desktop is not built in CI yet — use \`make desktop\` on a Mac." \
+              "- Agent/server CLI binaries are static; desktop apps are native per OS."
+            if [ -n "$extra" ]; then
+              printf '\n### VERSION.md\n\n%s\n' "$extra"
+            fi
+          } > release-notes.md
 
           gh release create "$TAG" release/* \
             --title "OpenBackup ${TAG}" \
-            --notes "$notes" \
+            --notes-file release-notes.md \
             --latest

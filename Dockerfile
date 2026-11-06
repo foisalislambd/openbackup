@@ -8,6 +8,9 @@
 FROM node:22-alpine AS web
 
 WORKDIR /web
+# The dashboard build reads this file (vite.config.ts looks one directory up)
+# so the version baked into the UI is the same one the binary reports.
+COPY VERSION.md /VERSION.md
 # Dependencies are copied on their own so a change to the app does not reinstall
 # them on every build.
 COPY web/package.json web/package-lock.json ./
@@ -27,19 +30,26 @@ COPY . .
 # The export lands where //go:embed expects it, so the binary carries the UI.
 COPY --from=web /web/dist/ ./internal/server/web/dist/
 
-ARG VERSION=dev
-ARG COMMIT=unknown
-ARG DATE=unknown
+# Empty means "use VERSION.md". A non-empty VERSION must match that file so a
+# caller cannot publish an image whose binary disagrees with the source of truth.
+ARG VERSION=
+ARG COMMIT=
+ARG DATE=
 
 # CGO stays off: the SQLite driver is pure Go, which is what lets this run on a
 # scratch image and cross-compile without a C toolchain.
 ENV CGO_ENABLED=0
-RUN mkdir -p /data && go build -trimpath \
-	-ldflags "-s -w \
-	-X github.com/foisalislambd/openbackup/internal/version.Version=${VERSION} \
-	-X github.com/foisalislambd/openbackup/internal/version.Commit=${COMMIT} \
-	-X github.com/foisalislambd/openbackup/internal/version.Date=${DATE}" \
-	-o /out/openbackup-server ./cmd/openbackup-server
+RUN set -eu; \
+	file_ver=v$$(sh scripts/read-version.sh VERSION.md); \
+	if [ -n "$$VERSION" ] && [ "$$VERSION" != "$$file_ver" ]; then \
+		echo "VERSION=$$VERSION does not match VERSION.md ($$file_ver)"; \
+		exit 1; \
+	fi; \
+	export COMMIT DATE; \
+	ldflags=$$(sh scripts/go-ldflags.sh .); \
+	mkdir -p /data; \
+	go build -trimpath -ldflags "$$ldflags" \
+		-o /out/openbackup-server ./cmd/openbackup-server
 
 # --- 3. Runtime -------------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot
