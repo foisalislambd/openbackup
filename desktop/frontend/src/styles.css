@@ -7,19 +7,20 @@
  * the desktop binary, and neither should be able to break the other's build.
  */
 @theme {
-  --color-surface: oklch(100% 0 0);
-  --color-surface-muted: oklch(98% 0.004 250);
-  --color-border-subtle: oklch(92% 0.006 250);
-  --color-ink: oklch(24% 0.02 260);
-  --color-ink-muted: oklch(52% 0.015 260);
-  --color-brand: oklch(56% 0.16 250);
-  --color-brand-soft: oklch(96% 0.03 250);
-  --color-good: oklch(62% 0.14 155);
-  --color-warn: oklch(72% 0.15 75);
-  --color-bad: oklch(58% 0.19 25);
+  /* Matches the dashboard brand so the window and the browser are one product. */
+  --color-surface: #ffffff;
+  --color-surface-muted: #f9fafb;
+  --color-border-subtle: #e4e7ec;
+  --color-ink: #101828;
+  --color-ink-muted: #667085;
+  --color-brand: #465fff;
+  --color-brand-soft: #ecf3ff;
+  --color-good: #12b76a;
+  --color-warn: #f79009;
+  --color-bad: #f04438;
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, monospace;
+  --font-sans: 'Outfit Variable', Outfit, 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Menlo, monospace;
 }
 
 :root {
@@ -32,22 +33,39 @@
   --scrollbar-thumb-active: var(--color-brand);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --scrollbar-thumb: oklch(96% 0.005 260 / 0.18);
-    --scrollbar-thumb-hover: oklch(96% 0.005 260 / 0.32);
+/* .dark is set from the theme toggle (and from the system preference before
+   anyone chooses). Tokens live on :root so utilities like bg-surface update. */
+:root.dark {
+  --scrollbar-thumb: rgb(255 255 255 / 0.18);
+  --scrollbar-thumb-hover: rgb(255 255 255 / 0.32);
 
-    --color-surface: oklch(21% 0.015 265);
-    --color-surface-muted: oklch(17% 0.012 265);
-    --color-border-subtle: oklch(32% 0.015 265);
-    --color-ink: oklch(96% 0.005 260);
-    --color-ink-muted: oklch(72% 0.015 260);
-    --color-brand: oklch(70% 0.14 250);
-    --color-brand-soft: oklch(30% 0.05 250);
-    --color-good: oklch(70% 0.14 155);
-    --color-warn: oklch(78% 0.15 75);
-    --color-bad: oklch(66% 0.18 25);
-  }
+  --color-surface: #1a2231;
+  --color-surface-muted: #0c111d;
+  --color-border-subtle: #1d2939;
+  --color-ink: #f9fafb;
+  --color-ink-muted: #b4becc;
+  --color-brand: #7592ff;
+  --color-brand-soft: #252dae;
+  --color-good: #32d583;
+  --color-warn: #fdb022;
+  --color-bad: #f97066;
+}
+
+.progress-track {
+  height: 0.4rem;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: #f2f4f7;
+}
+
+:root.dark .progress-track {
+  background: #1d2939;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 9999px;
+  background: var(--color-brand);
 }
 
 html,

@@ -27,12 +27,31 @@ export function Button({
     <button
       {...rest}
       disabled={rest.disabled || busy}
-      className={`inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium
-        transition-colors disabled:cursor-not-allowed ${toneClasses[tone]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold
+        transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40
+        disabled:cursor-not-allowed ${toneClasses[tone]} ${className}`}
     >
       {busy && <Spinner />}
       {children}
     </button>
+  )
+}
+
+export function Progress({ value, onDark = false }: { value: number; onDark?: boolean }) {
+  const width = Math.max(0, Math.min(100, value))
+  return (
+    <div
+      className={onDark ? 'h-1.5 overflow-hidden rounded-full bg-white/25' : 'progress-track'}
+      role="progressbar"
+      aria-valuenow={Math.round(width)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+    >
+      <div
+        className={onDark ? 'h-full rounded-full bg-white' : 'progress-fill'}
+        style={{ width: `${width}%` }}
+      />
+    </div>
   )
 }
 
