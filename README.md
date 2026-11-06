@@ -33,7 +33,7 @@ If you’ve never heard of a “VPS”, that’s fine. Think of it as a small al
 - **Automatic backups** of Documents, Pictures, Videos, Music, Desktop (and more if you add folders)
 - **Only changed pieces** of files are uploaded — so daily backups stay fast
 - **History** — restore yesterday’s version, or last week’s
-- **Dashboard in the browser** — see devices, download a file or folder as a ZIP
+- **Dashboard in the browser** — backup health, storage, alerts, and a file browser that can search, pin a backup, and download a file or folder as a ZIP
 - **Desktop app** (optional) — for people who prefer buttons over a terminal
 - **Optional encryption** — so even the server can’t read your files (you keep a recovery code)
 - **Windows, macOS, and Linux**

@@ -12,6 +12,7 @@ import { cn } from '@/lib/cn'
 import { Badge, Button, Card, Empty, ErrorNote, inputClass } from '@/components/ui'
 import { DevicesSkeleton } from '@/components/skeleton'
 import { LockBadge } from '@/components/file-icon'
+import { useToast } from '@/lib/toast-context'
 
 export default function DevicesPage() {
   const { data: devices, error, loading, reload } = useLoader<Device[]>(() => api.devices(), { pollMs: 15000 })
@@ -79,6 +80,7 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
   const [renaming, setRenaming] = useState(false)
   const [name, setName] = useState(device.name)
   const { busy, error, run } = useAction()
+  const toast = useToast()
 
   return (
     <li className="py-4 first:pt-0 last:pb-0">
@@ -129,6 +131,7 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
             {count(device.snapshot_count)} backups · {bytes(device.logical_bytes)} · last{' '}
             {relative(device.last_backup_at)}
           </div>
+          <DeviceProgress device={device} />
           {device.last_error && <div className="mt-1 text-xs text-error-500">{device.last_error}</div>}
           {error && <div className="mt-1 text-xs text-error-500">{error}</div>}
         </div>
@@ -137,7 +140,16 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
           <Button href={`/files?device=${encodeURIComponent(device.id)}`}>Browse files</Button>
           <Button
             disabled={!!busy}
-            onClick={() => void run('backup', () => api.sendCommand(device.id, 'backup_now'), onChanged)}
+            onClick={() =>
+              void run(
+                'backup',
+                () => api.sendCommand(device.id, 'backup_now'),
+                () => {
+                  toast.push('Backup requested. It starts on the next check-in.')
+                  onChanged()
+                },
+              )
+            }
           >
             {busy === 'backup' ? 'Sending…' : 'Back up'}
           </Button>
@@ -178,6 +190,23 @@ function DeviceRow({ device, onChanged }: { device: Device; onChanged: () => voi
         </div>
       </div>
     </li>
+  )
+}
+
+function DeviceProgress({ device }: { device: Device }) {
+  if (!device.files_total || (device.state !== 'uploading' && device.state !== 'scanning')) return null
+  const done = device.files_done ?? 0
+  const ratio = Math.max(0, Math.min(1, done / device.files_total))
+  return (
+    <div className="mt-2 max-w-md">
+      <div className="progress-track" role="progressbar" aria-valuenow={Math.round(ratio * 100)} aria-valuemin={0} aria-valuemax={100}>
+        <div className="progress-fill" style={{ width: `${ratio * 100}%` }} />
+      </div>
+      <p className="mt-1 truncate text-xs text-gray-500">
+        {done} of {device.files_total} files
+        {device.current_path ? ` · ${device.current_path}` : ''}
+      </p>
+    </div>
   )
 }
 

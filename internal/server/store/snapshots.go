@@ -280,7 +280,8 @@ func (db *DB) HasSnapshots(ctx context.Context, userID string) (bool, error) {
 }
 
 const snapshotColumns = `s.id, s.device_id, s.kind, s.status, COALESCE(s.parent_id, ''), s.started_at,
-	s.completed_at, s.file_count, s.dir_count, s.total_bytes, s.uploaded_bytes, s.skipped_count, s.roots, s.error`
+	s.completed_at, s.file_count, s.dir_count, s.total_bytes, s.uploaded_bytes, s.skipped_count, s.roots, s.error,
+	s.pinned`
 
 // SnapshotByID reads one snapshot, scoped to an account.
 func (db *DB) SnapshotByID(ctx context.Context, userID, snapshotID string) (*api.Snapshot, error) {
@@ -288,30 +289,13 @@ func (db *DB) SnapshotByID(ctx context.Context, userID, snapshotID string) (*api
 		`SELECT `+snapshotColumns+`, COALESCE(d.name, ''), COALESCE(d.key_id, '') FROM snapshots s
 		 LEFT JOIN devices d ON d.id = s.device_id
 		 WHERE s.id = ? AND s.user_id = ?`, snapshotID, userID)
-	var (
-		s          api.Snapshot
-		kind       string
-		started    int64
-		completed  sql.NullInt64
-		roots      string
-		deviceName string
-		keyID      string
-	)
-	err := row.Scan(&s.ID, &s.DeviceID, &kind, &s.Status, &s.ParentID, &started, &completed,
-		&s.FileCount, &s.DirCount, &s.TotalBytes, &s.UploadedBytes, &s.SkippedCount, &roots, &s.Error,
-		&deviceName, &keyID)
+	s, err := scanSnapshot(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	s.Kind = api.SnapshotKind(kind)
-	s.StartedAt = fromMillis(started)
-	s.CompletedAt = nullTime(completed)
-	s.DeviceName = deviceName
-	s.Encrypted = keyID != ""
-	_ = json.Unmarshal([]byte(roots), &s.Roots)
 	return &s, nil
 }
 
@@ -340,29 +324,40 @@ func (db *DB) ListSnapshots(ctx context.Context, userID, deviceID string, limit 
 
 	out := []api.Snapshot{}
 	for rows.Next() {
-		var (
-			s          api.Snapshot
-			kind       string
-			started    int64
-			completed  sql.NullInt64
-			roots      string
-			deviceName string
-			keyID      string
-		)
-		if err := rows.Scan(&s.ID, &s.DeviceID, &kind, &s.Status, &s.ParentID, &started, &completed,
-			&s.FileCount, &s.DirCount, &s.TotalBytes, &s.UploadedBytes, &s.SkippedCount, &roots, &s.Error,
-			&deviceName, &keyID); err != nil {
+		s, err := scanSnapshot(rows.Scan)
+		if err != nil {
 			return nil, err
 		}
-		s.Kind = api.SnapshotKind(kind)
-		s.StartedAt = fromMillis(started)
-		s.CompletedAt = nullTime(completed)
-		s.DeviceName = deviceName
-		s.Encrypted = keyID != ""
-		_ = json.Unmarshal([]byte(roots), &s.Roots)
 		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+func scanSnapshot(scan func(dest ...any) error) (api.Snapshot, error) {
+	var (
+		s          api.Snapshot
+		kind       string
+		started    int64
+		completed  sql.NullInt64
+		roots      string
+		pinned     int
+		deviceName string
+		keyID      string
+	)
+	err := scan(&s.ID, &s.DeviceID, &kind, &s.Status, &s.ParentID, &started, &completed,
+		&s.FileCount, &s.DirCount, &s.TotalBytes, &s.UploadedBytes, &s.SkippedCount, &roots, &s.Error, &pinned,
+		&deviceName, &keyID)
+	if err != nil {
+		return api.Snapshot{}, err
+	}
+	s.Kind = api.SnapshotKind(kind)
+	s.StartedAt = fromMillis(started)
+	s.CompletedAt = nullTime(completed)
+	s.Pinned = pinned != 0
+	s.DeviceName = deviceName
+	s.Encrypted = keyID != ""
+	_ = json.Unmarshal([]byte(roots), &s.Roots)
+	return s, nil
 }
 
 // LatestSnapshotID returns a device's newest completed snapshot, which is what
@@ -426,6 +421,9 @@ type TreeQuery struct {
 	// browser shows one folder at a time. A restore needs the whole subtree, so
 	// this stays off unless a browser asks for it.
 	DirectOnly bool
+	// Query keeps paths whose full name contains this substring, case-insensitive.
+	// Empty means no name filter.
+	Query string
 }
 
 // Tree resolves the effective file list of a snapshot.
@@ -549,6 +547,12 @@ func (db *DB) treeRange(ctx context.Context, snapshotID string, q TreeQuery) ([]
 		// need no escaping of % or _ in user paths.
 		pathFilter = ` AND (e2.path = ? OR (e2.path >= ? AND e2.path < ?))`
 	}
+	needle := strings.ToLower(strings.TrimSpace(q.Query))
+	nameFilter := ""
+	if needle != "" {
+		// instr rather than LIKE so a search for "100%" cannot become a wildcard.
+		nameFilter = ` AND instr(lower(e2.path), ?) > 0`
+	}
 
 	query := `WITH chain(sid, seq) AS (VALUES ` + strings.Join(values, ", ") + `),
 	latest AS (
@@ -563,7 +567,7 @@ func (db *DB) treeRange(ctx context.Context, snapshotID string, q TreeQuery) ([]
 			SELECT e2.path AS path, MAX(c2.seq) AS seq
 			FROM entries e2
 			JOIN chain c2 ON c2.sid = e2.snapshot_id
-			WHERE e2.path > ?` + pathFilter + `
+			WHERE e2.path > ?` + pathFilter + nameFilter + `
 			GROUP BY e2.path
 		) m ON m.path = e.path AND m.seq = c.seq
 	),
@@ -582,6 +586,9 @@ func (db *DB) treeRange(ctx context.Context, snapshotID string, q TreeQuery) ([]
 	args = append(args, q.Cursor)
 	if prefix != "" {
 		args = append(args, prefix, prefix+"/", prefix+"0")
+	}
+	if needle != "" {
+		args = append(args, needle)
 	}
 	args = append(args, limit+1)
 

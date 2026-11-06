@@ -121,10 +121,15 @@ at, within a minute.
 | `GET /api/v1/ui/usage`, `GET /api/v1/ui/history` | Storage totals and the trend |
 | `GET /api/v1/ui/snapshots`, `GET …/{id}`, `DELETE …/{id}` | Browse and remove backups |
 | `GET /api/v1/ui/snapshots/{id}/browse` | List a snapshot; `children=1` for one folder at a time |
+| `GET /api/v1/ui/snapshots/{id}/search?q=` | Find paths in one snapshot by name |
+| `PATCH /api/v1/ui/snapshots/{id}` | Pin or unpin a snapshot (`{"pinned": true}`) |
 | `GET /api/v1/ui/snapshots/{id}/download?path=…` | Download one file |
 | `GET /api/v1/ui/snapshots/{id}/archive?prefix=…` | Download a folder as a streamed ZIP |
 | `GET /api/v1/ui/events` | The activity log |
-| `GET` / `PUT /api/v1/ui/settings` | Account policy: retention, quota, upload ceiling, required encryption |
+| `GET /api/v1/ui/alerts`, `POST …/{id}/ack` | Open backup alerts, and dismiss one |
+| `GET /api/v1/ui/sessions`, `DELETE …/{id}` | Browsers signed in to this account |
+| `GET` / `POST /api/v1/ui/integrity` | Last sampled integrity check, or run one |
+| `GET` / `PUT /api/v1/ui/settings` | Account policy: retention, history thinning, stale-backup alert, quota, upload ceiling, required encryption |
 | `GET /api/v1/ui/ignore-rules` | The default rules and project markers, with reasons |
 
 ### Listing: subtree or one level

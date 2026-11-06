@@ -3,23 +3,35 @@
  */
 
 import { Link, useNavigate } from 'react-router-dom'
-import { api, type Device, type Snapshot, type Usage } from '@/lib/api'
+import { api, type ActivityEvent, type BackupAlert, type Device, type Snapshot, type Usage } from '@/lib/api'
 import { bytes, count, platformLabel, relative } from '@/lib/format'
 import { useLoader } from '@/lib/use-loader'
 import { HealthBadge } from '@/components/health-badge'
-import { Empty, ErrorNote, Meter, Stat } from '@/components/ui'
+import { Button, Empty, ErrorNote, Meter, Stat } from '@/components/ui'
 import { OverviewSkeleton } from '@/components/skeleton'
 import { EntryIcon, LockBadge } from '@/components/file-icon'
 import { isEncryptedDevice } from '@/lib/file-kind'
 
-type Overview = { devices: Device[]; usage: Usage; snapshots: Snapshot[] }
+type Overview = {
+  devices: Device[]
+  usage: Usage
+  snapshots: Snapshot[]
+  alerts: BackupAlert[]
+  events: ActivityEvent[]
+}
 
 export default function HomePage() {
   const navigate = useNavigate()
-  const { data, error, loading } = useLoader<Overview>(
+  const { data, error, loading, reload } = useLoader<Overview>(
     async () => {
-      const [devices, usage, snapshots] = await Promise.all([api.devices(), api.usage(), api.snapshots()])
-      return { devices, usage, snapshots }
+      const [devices, usage, snapshots, alerts, events] = await Promise.all([
+        api.devices(),
+        api.usage(),
+        api.snapshots(),
+        api.alerts(),
+        api.events(8),
+      ])
+      return { devices, usage, snapshots, alerts, events }
     },
     { pollMs: 15000 },
   )
@@ -29,7 +41,7 @@ export default function HomePage() {
   if (error && !data) return <ErrorNote>{error}</ErrorNote>
   if (loading || !data) return <OverviewSkeleton />
 
-  const { devices, usage, snapshots } = data
+  const { devices, usage, snapshots, alerts, events } = data
   const problems = devices.filter((d) => d.health === 'error' || d.health === 'stale')
   const complete = snapshots.filter((s) => s.status === 'complete')
   const newest = complete[0]
@@ -46,6 +58,7 @@ export default function HomePage() {
     <div className="space-y-8">
       {error && <ErrorNote>{error}</ErrorNote>}
       <HealthBanner devices={devices} newest={newest} />
+      <AlertsPanel alerts={alerts} onDismissed={reload} />
 
       <section>
         <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
@@ -144,7 +157,8 @@ export default function HomePage() {
                     <div className="tabular text-sm font-semibold text-gray-900 dark:text-white">
                       {bytes(device.logical_bytes)}
                     </div>
-                    <div>{relative(device.last_backup_at)}</div>
+                    <div>Last backup {relative(device.last_backup_at)}</div>
+                    <DeviceProgress device={device} />
                   </div>
                 </li>
               ))}
@@ -183,6 +197,80 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      <section className="admin-card overflow-hidden">
+        <header className="flex items-center justify-between border-b border-gray-200 px-5 py-3.5 dark:border-gray-800">
+          <h2 className="text-sm font-semibold">Recent activity</h2>
+          <Link to="/logs" className="text-xs font-semibold text-brand-500 hover:underline">
+            All activity
+          </Link>
+        </header>
+        {events.length === 0 ? (
+          <Empty title="No activity yet" hint="A backup will show up here as it runs." />
+        ) : (
+          <ul>
+            {events.map((event) => (
+              <li
+                key={`${event.at}-${event.message}`}
+                className="flex flex-col gap-0.5 border-b border-gray-100 px-5 py-3 last:border-0 sm:flex-row sm:items-baseline sm:justify-between dark:border-gray-800"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-sm">{event.message}</div>
+                  {event.device_name && <div className="text-xs text-gray-500">{event.device_name}</div>}
+                </div>
+                <div className="shrink-0 text-xs text-gray-500">{relative(event.at)}</div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function AlertsPanel({ alerts, onDismissed }: { alerts: BackupAlert[]; onDismissed: () => void }) {
+  if (alerts.length === 0) return null
+  return (
+    <section id="alerts" className="space-y-2" aria-label="Alerts">
+      {alerts.map((alert) => (
+        <div
+          key={alert.id}
+          className={`flex flex-col gap-2 rounded-xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${
+            alert.level === 'bad'
+              ? 'border-error-200 bg-error-50 dark:border-error-500/30 dark:bg-error-500/10'
+              : 'border-warning-200 bg-warning-50 dark:border-warning-500/30 dark:bg-warning-500/10'
+          }`}
+        >
+          <div className="min-w-0">
+            <div className="text-sm font-semibold">{alert.message}</div>
+            <div className="text-xs text-gray-500">{relative(alert.opened_at)}</div>
+          </div>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              void api.ackAlert(alert.id).then(onDismissed)
+            }}
+          >
+            Dismiss
+          </Button>
+        </div>
+      ))}
+    </section>
+  )
+}
+
+function DeviceProgress({ device }: { device: Device }) {
+  if (!device.files_total || (device.state !== 'uploading' && device.state !== 'scanning')) return null
+  const ratio = Math.max(0, Math.min(1, (device.files_done ?? 0) / device.files_total))
+  return (
+    <div className="mt-2 max-w-xs sm:ml-auto">
+      <div className="progress-track" aria-hidden>
+        <div className="progress-fill" style={{ width: `${ratio * 100}%` }} />
+      </div>
+      <div className="mt-1 truncate text-[11px] text-gray-500">
+        {device.files_done} / {device.files_total}
+        {device.current_path ? ` · ${device.current_path}` : ''}
+      </div>
     </div>
   )
 }

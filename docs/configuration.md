@@ -176,6 +176,8 @@ says so instead of quietly encrypting with two keys.
 ## Per-account settings on the server
 
 These live in the dashboard (**Settings**) rather than in either config, because
-they belong to the account and apply to every device on it: retention, quota,
-upload ceiling and whether encryption is required. A device picks them up on its
-next heartbeat, within a minute.
+they belong to the account and apply to every device on it: retention (including
+optional daily/weekly/monthly thinning), how long a device may go without a
+backup before the dashboard warns, quota, upload ceiling and whether encryption
+is required. A device picks up the parts it has to honour on its next heartbeat,
+within a minute. History thinning and alerts are applied on the server.

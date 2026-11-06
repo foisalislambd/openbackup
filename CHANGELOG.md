@@ -12,6 +12,10 @@ older agent keeps working against a newer server, so upgrade the server first.
 
 ### Added
 
+- Dashboard overview shows backup health, per-device progress, storage, open alerts, and recent activity. The file browser searches a whole backup, and a backup can be pinned so retention will not remove it.
+- Retention can thin history to a chosen number of daily, weekly, and monthly copies inside the existing window. Leaving the counts at zero keeps every snapshot in the window, as before.
+- The server samples stored blocks during maintenance (and on demand from Settings), checks unencrypted blocks against their digest, and raises an alert when a sample fails. Encrypted blocks are checked for presence only; the agent still verifies them on restore.
+- Settings can warn when a device has not finished a backup within a chosen number of hours, and can sign out other browsers. Setup and password changes are rate limited the same way sign-in already was.
 - Release workflow also publishes the server image to GHCR as
   `ghcr.io/foisalislambd/openbackup` (`latest` + version tags), alongside Docker Hub.
 - Desktop **Check for updates** (Settings → About): compares this build to the

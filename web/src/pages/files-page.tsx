@@ -8,6 +8,7 @@ import { absolute, bytes, count, relative } from '@/lib/format'
 import { isEncryptedDevice } from '@/lib/file-kind'
 import { useAction, useLoader } from '@/lib/use-loader'
 import { Badge, Button, Empty, ErrorNote } from '@/components/ui'
+import { useToast } from '@/lib/toast-context'
 import { BackupsSkeleton } from '@/components/skeleton'
 import { EntryIcon, LockBadge } from '@/components/file-icon'
 import { FileBrowser } from '@/components/file-browser'
@@ -31,6 +32,7 @@ export default function FilesPage() {
     { pollMs: 15000 },
   )
   const { busy, error: actionError, run } = useAction()
+  const toast = useToast()
 
   const setQuery = (next: Record<string, string | undefined>) => {
     const q = new URLSearchParams()
@@ -149,6 +151,13 @@ export default function FilesPage() {
               return
             }
             void run(id, () => api.deleteSnapshot(id), reload)
+          }}
+          onPin={(snapshot) => {
+            const next = !snapshot.pinned
+            void run(`pin-${snapshot.id}`, () => api.pinSnapshot(snapshot.id, next), () => {
+              toast.push(next ? 'This backup will be kept' : 'This backup can expire again')
+              reload()
+            })
           }}
         />
       ) : !deviceId ? (
@@ -292,6 +301,7 @@ function HistoryList({
   onClearDevice,
   onOpen,
   onDelete,
+  onPin,
 }: {
   snapshots: Snapshot[]
   showDevice: boolean
@@ -300,6 +310,7 @@ function HistoryList({
   onClearDevice: () => void
   onOpen: (snapshot: Snapshot) => void
   onDelete: (id: string) => void
+  onPin: (snapshot: Snapshot) => void
 }) {
   if (snapshots.length === 0) {
     return (
@@ -371,6 +382,7 @@ function HistoryList({
                       {snapshot.kind === 'full' && <Badge>full scan</Badge>}
                       {snapshot.status === 'running' && <Badge tone="warn">running</Badge>}
                       {snapshot.status === 'failed' && <Badge tone="bad">failed</Badge>}
+                      {snapshot.pinned && <Badge tone="brand">kept</Badge>}
                     </span>
                   </span>
                 </button>
@@ -392,6 +404,9 @@ function HistoryList({
                   )}
                 </span>
                 <div className="flex items-center justify-end gap-2">
+                  {complete && (
+                    <Button onClick={() => onPin(snapshot)}>{snapshot.pinned ? 'Unpin' : 'Keep'}</Button>
+                  )}
                   {complete && <Button onClick={() => onOpen(snapshot)}>Browse</Button>}
                   <Button variant="danger" disabled={busy === snapshot.id} onClick={() => onDelete(snapshot.id)}>
                     Delete

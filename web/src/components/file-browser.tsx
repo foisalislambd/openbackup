@@ -61,6 +61,12 @@ export function FileBrowser({
   const [extra, setExtra] = useState<{ key: string; entries: Entry[]; cursor: string }>()
   const [dlError, setDlError] = useState<string>()
   const [query, setQuery] = useState('')
+  const [remote, setRemote] = useState<{
+    q: string
+    entries: Entry[]
+    loading: boolean
+    error?: string
+  }>()
   const [layout, setLayout] = useState<'grid' | 'list'>(() =>
     typeof window !== 'undefined' && localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid',
   )
@@ -71,6 +77,27 @@ export function FileBrowser({
     localStorage.setItem(VIEW_KEY, layout)
   }, [layout])
 
+  useEffect(() => {
+    const needle = query.trim()
+    if (needle.length < 2) return
+    let cancel = false
+    const timer = window.setTimeout(() => {
+      setRemote({ q: needle, entries: [], loading: true })
+      api.searchSnapshot(snapshotId, needle).then(
+        (entries) => {
+          if (!cancel) setRemote({ q: needle, entries, loading: false })
+        },
+        (err: unknown) => {
+          if (!cancel) setRemote({ q: needle, entries: [], loading: false, error: message(err, 'Search failed') })
+        },
+      )
+    }, 250)
+    return () => {
+      cancel = true
+      window.clearTimeout(timer)
+    }
+  }, [query, snapshotId])
+
   if (error && !data) return <ErrorNote>{error}</ErrorNote>
   if (loading || !data) return <BrowseSkeleton />
 
@@ -79,10 +106,16 @@ export function FileBrowser({
   const appended = extra?.key === key ? extra.entries : []
   const cursor = extra?.key === key ? extra.cursor : data.cursor
   const entries = [...data.entries, ...appended]
-  const needle = query.trim().toLowerCase()
-  const visible = needle
-    ? entries.filter((entry) => baseName(entry.path).toLowerCase().includes(needle))
-    : entries
+  const needle = query.trim()
+  const searching = needle.length >= 2
+  const remoteReady = searching && remote?.q === needle && !remote.loading
+  const visible = searching
+    ? remoteReady
+      ? remote.entries
+      : []
+    : needle
+      ? entries.filter((entry) => baseName(entry.path).toLowerCase().includes(needle.toLowerCase()))
+      : entries
   const folders = visible
     .filter((e) => e.type === 'dir')
     .slice()
@@ -176,7 +209,7 @@ export function FileBrowser({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search this folder"
+            placeholder="Search this backup"
             className="h-10 w-full rounded-lg border border-gray-200 bg-white pr-3 pl-10 text-sm outline-none focus:border-brand-400 dark:border-gray-800 dark:bg-gray-900"
           />
         </label>
@@ -202,10 +235,16 @@ export function FileBrowser({
 
       <div className={`grid gap-4 ${versionsPath ? 'xl:grid-cols-[1fr_20rem]' : ''}`}>
         <div className="admin-card overflow-hidden">
-          {folders.length === 0 && files.length === 0 ? (
+          {searching && remote?.loading && remote.q === needle ? (
+            <Empty title="Searching this backup…" />
+          ) : remote?.error && searching ? (
+            <div className="p-4">
+              <ErrorNote>{remote.error}</ErrorNote>
+            </div>
+          ) : folders.length === 0 && files.length === 0 ? (
             <Empty
               title={needle ? 'Nothing matches that name' : 'This folder is empty in the backup'}
-              hint={needle ? 'Try a different word, or clear the search box.' : undefined}
+              hint={needle ? 'Try another word. Search looks through the whole backup, not only this folder.' : undefined}
             />
           ) : layout === 'grid' ? (
             <div className="file-grid p-3">
@@ -228,6 +267,9 @@ export function FileBrowser({
                 >
                   <EntryIcon path={file.path} type={file.type} locked={locked} large />
                   <span className="line-clamp-2 text-sm font-semibold">{baseName(file.path)}</span>
+                  {searching && (
+                    <span className="line-clamp-2 text-[11px] text-gray-500">{file.path}</span>
+                  )}
                   <span className="text-[11px] text-gray-500">
                     {locked ? 'Locked' : file.type === 'symlink' ? 'Link' : bytes(file.size)}
                   </span>
@@ -297,7 +339,7 @@ export function FileBrowser({
               ))}
             </ul>
           )}
-          {cursor && (
+          {cursor && !searching && (
             <div className="border-t border-gray-200 px-5 py-4 text-center dark:border-gray-800">
               <Button
                 disabled={more.busy === 'more'}

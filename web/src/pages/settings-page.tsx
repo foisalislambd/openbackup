@@ -6,18 +6,39 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { api, type IgnoreRules, type Me, type Settings } from '@/lib/api'
+import {
+  api,
+  type DashboardSession,
+  type IgnoreRules,
+  type IntegrityReport,
+  type Me,
+  type Settings,
+} from '@/lib/api'
 import { bytes } from '@/lib/format'
 import { message, useLoader } from '@/lib/use-loader'
 import { Button, Card, ErrorNote, Field, inputClass } from '@/components/ui'
+import { useToast } from '@/lib/toast-context'
+import { absolute } from '@/lib/format'
 import { SettingsSkeleton } from '@/components/skeleton'
 
-type Data = { settings: Settings; me: Me; rules: IgnoreRules }
+type Data = {
+  settings: Settings
+  me: Me
+  rules: IgnoreRules
+  integrity: IntegrityReport
+  sessions: DashboardSession[]
+}
 
 export default function SettingsPage() {
-  const { data, error, loading } = useLoader<Data>(async () => {
-    const [settings, me, rules] = await Promise.all([api.settings(), api.me(), api.ignoreRules()])
-    return { settings, me, rules }
+  const { data, error, loading, reload } = useLoader<Data>(async () => {
+    const [settings, me, rules, integrity, sessions] = await Promise.all([
+      api.settings(),
+      api.me(),
+      api.ignoreRules(),
+      api.integrity(),
+      api.sessions(),
+    ])
+    return { settings, me, rules, integrity, sessions }
   })
 
   if (error) return <ErrorNote>{error}</ErrorNote>
@@ -37,6 +58,10 @@ export default function SettingsPage() {
 
       <PolicyCard initial={data.settings} />
 
+      <IntegrityCard initial={data.integrity} onChanged={reload} />
+
+      <SessionsCard sessions={data.sessions} onChanged={reload} />
+
       <IgnoreRulesCard rules={data.rules} />
     </div>
   )
@@ -49,6 +74,7 @@ function PolicyCard({ initial }: { initial: Settings }) {
   // first one's cleanup: an unmanaged setTimeout would re-enable the controls
   // mid-request and let two PUTs race.
   const savedTimer = useRef<number | undefined>(undefined)
+  const toast = useToast()
   useEffect(() => () => window.clearTimeout(savedTimer.current), [])
 
   const save = (changes: Partial<Settings>) => {
@@ -58,6 +84,7 @@ function PolicyCard({ initial }: { initial: Settings }) {
       (updated) => {
         setSettings(updated)
         setState({ saved: true })
+        toast.push('Settings saved')
         savedTimer.current = window.setTimeout(() => setState((s) => ({ ...s, saved: false })), 2500)
       },
       (err: unknown) => setState({ error: message(err, 'Could not save') }),
@@ -95,6 +122,77 @@ function PolicyCard({ initial }: { initial: Settings }) {
             <option value={90}>90 days</option>
             <option value={365}>1 year</option>
             <option value={0}>Forever</option>
+          </select>
+        </Field>
+
+        <Field
+          label="Which backups to keep"
+          hint="Inside that window. “Every backup” is the original behaviour. Thinning keeps the newest copy of each day, week, and month."
+        >
+          <select
+            className={inputClass}
+            disabled={state.busy}
+            value={historyPreset(settings)}
+            onChange={(e) => {
+              const preset = e.target.value
+              if (preset === 'all') save({ keep_daily: 0, keep_weekly: 0, keep_monthly: 0 })
+              if (preset === 'balanced') save({ keep_daily: 14, keep_weekly: 8, keep_monthly: 12 })
+              if (preset === 'custom') {
+                save({
+                  keep_daily: settings.keep_daily || 7,
+                  keep_weekly: settings.keep_weekly || 4,
+                  keep_monthly: settings.keep_monthly || 6,
+                })
+              }
+            }}
+          >
+            <option value="all">Every backup in the window</option>
+            <option value="balanced">14 daily, 8 weekly, 12 monthly</option>
+            <option value="custom">Custom counts</option>
+          </select>
+        </Field>
+
+        {historyPreset(settings) === 'custom' && (
+          <>
+            <CountField
+              label="Daily copies"
+              value={settings.keep_daily}
+              disabled={!!state.busy}
+              onCommit={(keep_daily) => save({ keep_daily })}
+            />
+            <CountField
+              label="Weekly copies"
+              value={settings.keep_weekly}
+              disabled={!!state.busy}
+              onCommit={(keep_weekly) => save({ keep_weekly })}
+            />
+            <CountField
+              label="Monthly copies"
+              value={settings.keep_monthly}
+              disabled={!!state.busy}
+              onCommit={(keep_monthly) => save({ keep_monthly })}
+            />
+          </>
+        )}
+
+        <Field
+          label="Warn when a device is quiet"
+          hint="Overview shows an alert if a computer has not finished a backup in this time. Off keeps the status green until an error."
+        >
+          <select
+            className={inputClass}
+            value={settings.alert_after_hours}
+            disabled={state.busy}
+            onChange={(e) => save({ alert_after_hours: Number(e.target.value) })}
+          >
+            {![24, 48, 72, 168, 0].includes(settings.alert_after_hours) && (
+              <option value={settings.alert_after_hours}>{settings.alert_after_hours} hours</option>
+            )}
+            <option value={24}>24 hours</option>
+            <option value={48}>2 days</option>
+            <option value={72}>3 days</option>
+            <option value={168}>7 days</option>
+            <option value={0}>Off</option>
           </select>
         </Field>
 
@@ -158,6 +256,148 @@ function PolicyCard({ initial }: { initial: Settings }) {
           </label>
         </Field>
       </div>
+    </Card>
+  )
+}
+
+function historyPreset(settings: Settings): 'all' | 'balanced' | 'custom' {
+  if (settings.keep_daily === 0 && settings.keep_weekly === 0 && settings.keep_monthly === 0) return 'all'
+  if (settings.keep_daily === 14 && settings.keep_weekly === 8 && settings.keep_monthly === 12) return 'balanced'
+  return 'custom'
+}
+
+function CountField({
+  label,
+  value,
+  disabled,
+  onCommit,
+}: {
+  label: string
+  value: number
+  disabled: boolean
+  onCommit: (value: number) => void
+}) {
+  return (
+    <Field label={label} hint="0 turns this bucket off.">
+      <input
+        className={inputClass}
+        type="text"
+        inputMode="numeric"
+        defaultValue={String(value)}
+        key={value}
+        disabled={disabled}
+        onBlur={(e) => {
+          const n = Number(e.target.value.trim())
+          if (Number.isNaN(n) || n < 0) return
+          onCommit(Math.round(n))
+        }}
+      />
+    </Field>
+  )
+}
+
+function IntegrityCard({ initial, onChanged }: { initial: IntegrityReport; onChanged: () => void }) {
+  const [report, setReport] = useState(initial)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const toast = useToast()
+
+  return (
+    <Card
+      title="Stored data check"
+      action={
+        <Button
+          disabled={busy}
+          onClick={() => {
+            setBusy(true)
+            setError('')
+            api.runIntegrity().then(
+              (next) => {
+                setReport(next)
+                setBusy(false)
+                toast.push(next.failed ? 'Integrity check found a problem' : 'Sampled blocks look intact', next.failed ? 'bad' : 'ok')
+                onChanged()
+              },
+              (err: unknown) => {
+                setBusy(false)
+                setError(message(err, 'Could not check stored data'))
+              },
+            )
+          }}
+        >
+          {busy ? 'Checking…' : 'Check a sample'}
+        </Button>
+      }
+    >
+      {error && (
+        <div className="mb-3">
+          <ErrorNote>{error}</ErrorNote>
+        </div>
+      )}
+      {report.finished_at ? (
+        <p className="text-sm text-gray-600 dark:text-gray-300">
+          Last sample {absolute(report.finished_at)} checked {report.checked} block{report.checked === 1 ? '' : 's'}
+          {report.failed ? ` and ${report.failed} failed.` : ' and they matched.'}
+        </p>
+      ) : (
+        <p className="text-sm text-gray-500">
+          No check has run yet. The server also samples stored blocks about once an hour. Encrypted blocks are
+          checked for presence; the computer that holds the recovery code still verifies their contents on restore.
+        </p>
+      )}
+      {report.detail && <p className="mt-2 text-xs text-error-500">{report.detail}</p>}
+    </Card>
+  )
+}
+
+function SessionsCard({ sessions, onChanged }: { sessions: DashboardSession[]; onChanged: () => void }) {
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState('')
+
+  return (
+    <Card title="Signed-in browsers">
+      {error && (
+        <div className="mb-3">
+          <ErrorNote>{error}</ErrorNote>
+        </div>
+      )}
+      <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+        {sessions.map((session) => (
+          <li key={session.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium">{session.user_agent || 'Unknown browser'}</div>
+              <div className="text-xs text-gray-500">
+                Signed in {absolute(session.created_at)}
+                {session.current ? ' · this browser' : ''}
+              </div>
+            </div>
+            {session.current ? (
+              <span className="text-xs font-semibold text-gray-500">Current</span>
+            ) : (
+              <Button
+                variant="danger"
+                disabled={busy === session.id}
+                onClick={() => {
+                  setBusy(session.id)
+                  setError('')
+                  api.revokeSession(session.id).then(
+                    () => {
+                      setBusy('')
+                      onChanged()
+                    },
+                    (err: unknown) => {
+                      setBusy('')
+                      setError(message(err, 'Could not sign that browser out'))
+                    },
+                  )
+                }}
+              >
+                Sign out
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
     </Card>
   )
 }

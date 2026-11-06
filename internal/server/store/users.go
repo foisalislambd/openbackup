@@ -34,12 +34,27 @@ type UserPolicy struct {
 	MaxUploadBytesPerSec int64
 	// RequireEncryption rejects data from devices without end-to-end encryption.
 	RequireEncryption bool
+	// KeepDaily, KeepWeekly and KeepMonthly thin history inside the retention
+	// window. Zero for all three keeps every snapshot in that window, which is
+	// how accounts created before this setting behaved.
+	KeepDaily   int
+	KeepWeekly  int
+	KeepMonthly int
+	// AlertAfterHours is how long a device may go without a completed backup
+	// before the dashboard calls it stale. Zero disables that warning.
+	AlertAfterHours int
 }
 
 // userColumns keeps the SELECT list in one place so adding a column cannot leave
 // one query behind.
 const userColumns = `id, email, password_hash, is_admin, quota_bytes, retention_days,
-	max_upload_bytes_per_sec, require_encryption, created_at`
+	max_upload_bytes_per_sec, require_encryption, keep_daily, keep_weekly, keep_monthly,
+	alert_after_hours, created_at`
+
+// defaultAlertAfterHours matches the stale threshold the dashboard used before
+// the setting existed, so an upgraded server does not suddenly change who looks
+// healthy.
+const defaultAlertAfterHours = 48
 
 // CreateUser inserts a user. Email comparison is case-insensitive because
 // treating Alice@ and alice@ as different accounts only ever confuses people.
@@ -50,14 +65,17 @@ func (db *DB) CreateUser(ctx context.Context, email, passwordHash string, isAdmi
 		PasswordHash: passwordHash,
 		IsAdmin:      isAdmin,
 		CreatedAt:    time.Now().UTC(),
-		Policy:       UserPolicy{RetentionDays: api.DefaultPolicy().RetentionDays},
+		Policy:       defaultPolicy(),
 	}
 	_, err := db.sql.ExecContext(ctx,
 		`INSERT INTO users (id, email, password_hash, is_admin, quota_bytes, retention_days,
-		 max_upload_bytes_per_sec, require_encryption, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 max_upload_bytes_per_sec, require_encryption, keep_daily, keep_weekly, keep_monthly,
+		 alert_after_hours, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.ID, u.Email, u.PasswordHash, boolToInt(isAdmin), u.Policy.QuotaBytes, u.Policy.RetentionDays,
-		u.Policy.MaxUploadBytesPerSec, boolToInt(u.Policy.RequireEncryption), toMillis(u.CreatedAt))
+		u.Policy.MaxUploadBytesPerSec, boolToInt(u.Policy.RequireEncryption),
+		u.Policy.KeepDaily, u.Policy.KeepWeekly, u.Policy.KeepMonthly, u.Policy.AlertAfterHours,
+		toMillis(u.CreatedAt))
 	if err != nil {
 		return nil, err
 	}
@@ -75,14 +93,17 @@ func (db *DB) CreateFirstUser(ctx context.Context, email, passwordHash string) (
 		PasswordHash: passwordHash,
 		IsAdmin:      true,
 		CreatedAt:    time.Now().UTC(),
-		Policy:       UserPolicy{RetentionDays: api.DefaultPolicy().RetentionDays},
+		Policy:       defaultPolicy(),
 	}
 	res, err := db.sql.ExecContext(ctx,
 		`INSERT INTO users (id, email, password_hash, is_admin, quota_bytes, retention_days,
-		 max_upload_bytes_per_sec, require_encryption, created_at)
-		 SELECT ?, ?, ?, 1, 0, ?, 0, 0, ?
+		 max_upload_bytes_per_sec, require_encryption, keep_daily, keep_weekly, keep_monthly,
+		 alert_after_hours, created_at)
+		 SELECT ?, ?, ?, 1, 0, ?, 0, 0, ?, ?, ?, ?, ?
 		 WHERE NOT EXISTS (SELECT 1 FROM users)`,
-		u.ID, u.Email, u.PasswordHash, u.Policy.RetentionDays, toMillis(u.CreatedAt))
+		u.ID, u.Email, u.PasswordHash, u.Policy.RetentionDays,
+		u.Policy.KeepDaily, u.Policy.KeepWeekly, u.Policy.KeepMonthly, u.Policy.AlertAfterHours,
+		toMillis(u.CreatedAt))
 	if err != nil {
 		return nil, err
 	}
@@ -106,6 +127,13 @@ func (db *DB) UserByID(ctx context.Context, id string) (*User, error) {
 		`SELECT `+userColumns+` FROM users WHERE id = ?`, id))
 }
 
+func defaultPolicy() UserPolicy {
+	return UserPolicy{
+		RetentionDays:   api.DefaultPolicy().RetentionDays,
+		AlertAfterHours: defaultAlertAfterHours,
+	}
+}
+
 func (db *DB) scanUser(row *sql.Row) (*User, error) {
 	var (
 		u         User
@@ -114,7 +142,9 @@ func (db *DB) scanUser(row *sql.Row) (*User, error) {
 		created   int64
 	)
 	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &admin, &u.Policy.QuotaBytes, &u.Policy.RetentionDays,
-		&u.Policy.MaxUploadBytesPerSec, &encrypted, &created)
+		&u.Policy.MaxUploadBytesPerSec, &encrypted,
+		&u.Policy.KeepDaily, &u.Policy.KeepWeekly, &u.Policy.KeepMonthly, &u.Policy.AlertAfterHours,
+		&created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -153,8 +183,10 @@ func (db *DB) UpdateUserPassword(ctx context.Context, userID, passwordHash strin
 func (db *DB) UpdateUserPolicy(ctx context.Context, userID string, p UserPolicy) error {
 	res, err := db.sql.ExecContext(ctx,
 		`UPDATE users SET retention_days = ?, quota_bytes = ?, max_upload_bytes_per_sec = ?,
-		 require_encryption = ? WHERE id = ?`,
-		p.RetentionDays, p.QuotaBytes, p.MaxUploadBytesPerSec, boolToInt(p.RequireEncryption), userID)
+		 require_encryption = ?, keep_daily = ?, keep_weekly = ?, keep_monthly = ?,
+		 alert_after_hours = ? WHERE id = ?`,
+		p.RetentionDays, p.QuotaBytes, p.MaxUploadBytesPerSec, boolToInt(p.RequireEncryption),
+		p.KeepDaily, p.KeepWeekly, p.KeepMonthly, p.AlertAfterHours, userID)
 	return affected(res, err)
 }
 
@@ -163,9 +195,57 @@ func (db *DB) UpdateUserPolicy(ctx context.Context, userID string, p UserPolicy)
 func (db *DB) CreateSession(ctx context.Context, userID, tokenHash, userAgent string, ttl time.Duration) error {
 	now := time.Now().UTC()
 	_, err := db.sql.ExecContext(ctx,
-		`INSERT INTO sessions (token_hash, user_id, created_at, expires_at, user_agent) VALUES (?, ?, ?, ?, ?)`,
-		tokenHash, userID, toMillis(now), toMillis(now.Add(ttl)), truncate(userAgent, 256))
+		`INSERT INTO sessions (token_hash, user_id, created_at, expires_at, user_agent, session_id)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		tokenHash, userID, toMillis(now), toMillis(now.Add(ttl)), truncate(userAgent, 256), idgen.New())
 	return err
+}
+
+// DashboardSession is a browser sign-in the owner can see and revoke. The
+// token itself is never returned.
+type DashboardSession struct {
+	ID        string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	UserAgent string
+	Current   bool
+}
+
+// ListSessions returns live sign-ins for an account, newest first.
+func (db *DB) ListSessions(ctx context.Context, userID, currentTokenHash string) ([]DashboardSession, error) {
+	rows, err := db.sql.QueryContext(ctx,
+		`SELECT session_id, token_hash, created_at, expires_at, user_agent FROM sessions
+		 WHERE user_id = ? AND expires_at > ? ORDER BY created_at DESC`, userID, nowMillis())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DashboardSession{}
+	for rows.Next() {
+		var (
+			s       DashboardSession
+			hash    string
+			created int64
+			expires int64
+		)
+		if err := rows.Scan(&s.ID, &hash, &created, &expires, &s.UserAgent); err != nil {
+			return nil, err
+		}
+		s.CreatedAt = fromMillis(created)
+		s.ExpiresAt = fromMillis(expires)
+		s.Current = hash == currentTokenHash && currentTokenHash != ""
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// DeleteSessionByID revokes one sign-in. It refuses the caller's own session so
+// "remove" cannot be confused with signing out.
+func (db *DB) DeleteSessionByID(ctx context.Context, userID, sessionID, currentTokenHash string) error {
+	res, err := db.sql.ExecContext(ctx,
+		`DELETE FROM sessions WHERE user_id = ? AND session_id = ? AND token_hash <> ?`,
+		userID, sessionID, currentTokenHash)
+	return affected(res, err)
 }
 
 // SessionUser resolves a session token hash to its account, refusing expired

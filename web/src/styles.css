@@ -3,8 +3,8 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: Outfit, 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --font-sans: 'Outfit Variable', Outfit, 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
 
   --color-brand-25: #f2f7ff;
   --color-brand-50: #ecf3ff;
@@ -196,6 +196,109 @@ body {
 .dark .file-tile:hover,
 .dark .file-tile:focus-visible {
   background: rgba(255, 255, 255, 0.06);
+}
+
+.progress-track {
+  height: 0.4rem;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--color-gray-100);
+}
+
+.dark .progress-track {
+  background: var(--color-gray-800);
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 9999px;
+  background: var(--color-brand-500);
+}
+
+.mobile-tabbar {
+  position: fixed;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  left: 0.75rem;
+  z-index: 40;
+  /* display is set by utilities so the desktop hide rule is not overridden. */
+  justify-content: space-between;
+  gap: 0.15rem;
+  border: 1px solid var(--color-gray-200);
+  border-radius: 1rem;
+  background: color-mix(in srgb, white 92%, transparent);
+  padding: 0.3rem;
+  box-shadow: var(--shadow-theme-md);
+  backdrop-filter: blur(10px);
+}
+
+.dark .mobile-tabbar {
+  border-color: var(--color-gray-800);
+  background: color-mix(in srgb, var(--color-gray-900) 92%, transparent);
+}
+
+.mobile-tab {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  border-radius: 0.75rem;
+  padding: 0.35rem 0.15rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--color-gray-500);
+  text-decoration: none;
+}
+
+.mobile-tab-active {
+  background: var(--color-brand-50);
+  color: var(--color-brand-600);
+}
+
+.dark .mobile-tab-active {
+  background: color-mix(in srgb, var(--color-brand-500) 18%, transparent);
+  color: var(--color-brand-300);
+}
+
+.toast-stack {
+  position: fixed;
+  right: 1rem;
+  bottom: 5.5rem;
+  z-index: 60;
+  display: flex;
+  width: min(22rem, calc(100vw - 2rem));
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+@media (min-width: 1024px) {
+  .toast-stack {
+    bottom: 1.25rem;
+  }
+}
+
+.toast {
+  border-radius: 0.85rem;
+  border: 1px solid var(--color-gray-200);
+  background: white;
+  padding: 0.75rem 0.9rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-gray-900);
+  box-shadow: var(--shadow-theme-md);
+}
+
+.dark .toast {
+  border-color: var(--color-gray-700);
+  background: var(--color-gray-800);
+  color: white;
+}
+
+.toast-bad {
+  border-color: var(--color-error-200);
+  color: var(--color-error-600);
 }
 
 .file-row {
