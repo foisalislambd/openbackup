@@ -38,17 +38,20 @@ ARG DATE=
 
 # CGO stays off: the SQLite driver is pure Go, which is what lets this run on a
 # scratch image and cross-compile without a C toolchain.
+#
+# This shell is /bin/sh inside the image. BuildKit does not rewrite "$$" the
+# way Make does, so "$$(" is a syntax error there. Use ordinary shell "$".
 ENV CGO_ENABLED=0
 RUN set -eu; \
-	file_ver=v$$(sh scripts/read-version.sh VERSION.md); \
-	if [ -n "$$VERSION" ] && [ "$$VERSION" != "$$file_ver" ]; then \
-		echo "VERSION=$$VERSION does not match VERSION.md ($$file_ver)"; \
+	file_ver=v$(sh scripts/read-version.sh VERSION.md); \
+	if [ -n "${VERSION-}" ] && [ "${VERSION-}" != "$file_ver" ]; then \
+		echo "VERSION=${VERSION-} does not match VERSION.md ($file_ver)"; \
 		exit 1; \
 	fi; \
 	export COMMIT DATE; \
-	ldflags=$$(sh scripts/go-ldflags.sh .); \
+	ldflags=$(sh scripts/go-ldflags.sh .); \
 	mkdir -p /data; \
-	go build -trimpath -ldflags "$$ldflags" \
+	go build -trimpath -ldflags "$ldflags" \
 		-o /out/openbackup-server ./cmd/openbackup-server
 
 # --- 3. Runtime -------------------------------------------------------------
