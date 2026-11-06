@@ -123,6 +123,7 @@ change a file, back up again, restore elsewhere, `diff`.
 
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs:
 
+- a check that `VERSION.md` is valid semver, and that a changed version is newer than the latest release
 - tests on Linux, macOS and Windows, plus the race detector on Linux
 - `gofmt`, `go vet`, `go mod tidy` cleanliness, and `shellcheck` on the installers
 - cross-compilation for every release target with `CGO_ENABLED=0`
@@ -135,11 +136,26 @@ in the pipeline.
 
 ## Release
 
-Pushing to `main` runs [`.github/workflows/release.yml`](../.github/workflows/release.yml):
-it auto-bumps the version, creates a git tag, and publishes a GitHub Release.
+[`VERSION.md`](../VERSION.md) at the repository root is the only release version.
+The first non-empty, non-comment line is SemVer with no leading `v` (for example
+`0.3.1`). Lines after it are notes. `make`, `scripts/build.ps1`, the container
+build, and the desktop build all stamp that version into binaries (`-ldflags`),
+the Windows product version, the dashboard, and image tags.
 
-Patch numbers run `0`–`9`, then the minor version increases
-(`v0.1.9` → `v0.2.0`, `v0.2.9` → `v0.3.0`). Each release includes:
+Pushing to `main` runs [`.github/workflows/release.yml`](../.github/workflows/release.yml).
+It reads `VERSION.md`, checks that it is valid SemVer, and compares it with the
+highest version among `v*` git tags and GitHub Releases. A release is published
+only when `VERSION.md` is **strictly greater**. The same or a lower version skips
+the release jobs and prints why; CI tests still run. When it is greater, the
+workflow builds artifacts, tags `vX.Y.Z`, and creates a GitHub Release.
+
+To publish:
+
+1. Set the new version on the first line of `VERSION.md` (`0.3.1` → `0.4.0`).
+2. Describe the change under `## Unreleased` in [`CHANGELOG.md`](../CHANGELOG.md).
+3. Merge to `main`.
+
+Each release includes:
 
 - cross-compiled **agent + server** binaries (`make release`)
 - **Windows** desktop app + NSIS installer
@@ -147,21 +163,27 @@ Patch numbers run `0`–`9`, then the minor version increases
 - **Docker Hub** image `foisalislambd/openbackup` and **GHCR** image
   `ghcr.io/foisalislambd/openbackup` (`latest` + version tags)
 
-Put `[skip release]` in the commit message to push without publishing. You can
-also run **Actions → Release → Run workflow** and set an exact tag (e.g. `v0.2.0`).
+Put `[skip release]` in the commit message to push a newer `VERSION.md` without
+publishing. You can also run **Actions → Release → Run workflow**; it uses
+`VERSION.md`, not a version typed into the form.
+
+Pull requests fail when `VERSION.md` is not valid SemVer, and when the version
+number changed but is not greater than the latest release. A pull request that
+leaves the version unchanged only warns, so it can merge without cutting a release.
 
 Locally:
 
 ```bash
+make version                 # print vX.Y.Z from VERSION.md
 make release                 # CLI binaries + SHA256SUMS in ./dist
 make desktop                 # desktop for this machine
 make desktop-linux-package   # Linux release-named binary + .desktop
-make docker                  # container image
+make docker                  # container image (vX.Y.Z, X.Y.Z, and latest)
 ```
 
-Version metadata is injected at link time via `-ldflags` (`git describe` /
-the release tag). Update [`CHANGELOG.md`](../CHANGELOG.md) when you cut a
-meaningful release, not afterwards.
+`make VERSION=v9.9.9` overrides a local build. CI does not. An unstamped
+`go run` inside this checkout still reports `VERSION.md`, because the version
+package reads that file when the binary was not linked with `-ldflags`.
 
 ## Where to start reading
 

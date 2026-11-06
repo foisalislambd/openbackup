@@ -24,6 +24,22 @@ export function formatVersion(v?: string | null): string {
 }
 
 /**
+ * shownVersion is the version in the sidebar.
+ *
+ * A stamped server reports the release from VERSION.md. An unstamped dev
+ * server reports "dev", and the dashboard then shows the version baked in
+ * from the same file at build time.
+ */
+export function shownVersion(apiVersion?: string | null): string {
+  const api = (apiVersion ?? '').trim()
+  const baked = import.meta.env.VITE_OPENBACKUP_VERSION?.trim()
+  if (!api || api === 'dev' || api.toLowerCase() === 'vdev') {
+    return formatVersion(baked || api)
+  }
+  return formatVersion(api)
+}
+
+/**
  * relative renders a timestamp as "4 minutes ago".
  *
  * On a backup dashboard the age of the last backup matters far more than its

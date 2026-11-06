@@ -130,7 +130,8 @@ build_from_git() {
 	say "Building the agent (first time can take a minute)..."
 	(
 		cd "$tmp/src"
-		CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o "$bin" ./cmd/openbackup
+		ldflags=$(sh scripts/go-ldflags.sh .)
+		CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o "$bin" ./cmd/openbackup
 	) || die "go build failed — need network access to module proxies, or install Go ${GO_VERSION}+ yourself"
 	chmod +x "$bin"
 	"$bin" version >/dev/null 2>&1 || die "the built binary does not run on this machine"
