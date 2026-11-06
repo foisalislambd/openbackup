@@ -120,12 +120,7 @@ function DashboardChrome({
       )}
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <AppHeader
-          title={heading.title}
-          subtitle={heading.subtitle}
-          dark={dark}
-          onToggleTheme={onToggleTheme}
-        />
+        <AppHeader title={heading.title} dark={dark} onToggleTheme={onToggleTheme} />
         <main className="admin-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
           <div className="w-full px-3 py-4 pb-24 sm:px-6 sm:py-6 lg:px-8 lg:pb-8">{children}</div>
         </main>

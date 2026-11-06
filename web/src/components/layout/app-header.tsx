@@ -6,12 +6,10 @@ import { cn } from '@/lib/cn'
 
 export function AppHeader({
   title,
-  subtitle,
   dark,
   onToggleTheme,
 }: {
   title: string
-  subtitle?: string
   dark: boolean
   onToggleTheme: () => void
 }) {
@@ -35,7 +33,6 @@ export function AppHeader({
 
         <div className="min-w-0 flex-1">
           <PageTitle title={title} />
-          {subtitle && <p className="truncate text-xs text-gray-500">{subtitle}</p>}
         </div>
 
         <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">

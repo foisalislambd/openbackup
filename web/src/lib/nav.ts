@@ -21,12 +21,12 @@ export const navItems: NavItem[] = [
   { href: '/settings', label: 'Settings', icon: Settings },
 ]
 
-export const pageMeta: Record<string, { title: string; subtitle: string }> = {
-  '/': { title: 'Overview', subtitle: 'Backup health, storage, and recent activity' },
-  '/files': { title: 'Files', subtitle: 'Browse versions, search, and restore' },
-  '/devices': { title: 'Devices', subtitle: 'Connect a computer and watch progress' },
-  '/logs': { title: 'Activity', subtitle: 'Uploads, skips, and errors' },
-  '/settings': { title: 'Settings', subtitle: 'Retention, alerts, and this account' },
+export const pageMeta: Record<string, { title: string }> = {
+  '/': { title: 'Overview' },
+  '/files': { title: 'Files' },
+  '/devices': { title: 'Devices' },
+  '/logs': { title: 'Activity' },
+  '/settings': { title: 'Settings' },
 }
 
 /** Normalize legacy paths so old bookmarks keep working. */
