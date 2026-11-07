@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -272,7 +274,15 @@ func (s *Server) handlePutChunk(w http.ResponseWriter, r *http.Request, device *
 		return
 	}
 
-	blob, err := io.ReadAll(r.Body)
+	release, err := s.admitUpload(r, s.cfg.MaxChunkBytes)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "", "server is busy")
+		return
+	}
+	defer release()
+
+	blob, cleanup, err := readUpload(r.Body, r.ContentLength, s.cfg.MaxChunkBytes)
+	defer cleanup()
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "", "could not read request body")
 		return
@@ -323,6 +333,119 @@ func (s *Server) handlePutChunk(w http.ResponseWriter, r *http.Request, device *
 	// agent could have written far past the limit.
 	s.addUsage(device.UserID, written)
 	w.WriteHeader(http.StatusCreated)
+}
+
+// handlePutChunkBatch stores many small chunks from one request. Each blob is
+// verified the same way as a single upload; the difference is that the filesystem
+// pack and the chunk rows are committed together.
+func (s *Server) handlePutChunkBatch(w http.ResponseWriter, r *http.Request, device *store.Device) {
+	limit := s.cfg.MaxChunkBytes
+	if limit <= 0 {
+		limit = 16 << 20
+	}
+	// A batch is several chunks, so the body cap is the upload budget rather
+	// than the single-chunk cap. withBodyLimit still applies its own ceiling.
+	bodyLimit := s.uploadBudgetWeight()
+	if bodyLimit < limit {
+		bodyLimit = limit
+	}
+	release, err := s.admitUpload(r, bodyLimit)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "", "server is busy")
+		return
+	}
+	defer release()
+
+	body, cleanup, err := readUpload(r.Body, r.ContentLength, bodyLimit)
+	defer cleanup()
+	if err != nil || len(body) == 0 {
+		writeError(w, http.StatusBadRequest, "", "could not read request body")
+		return
+	}
+	blobs, err := api.ReadChunkBatch(bytes.NewReader(body), int(limit))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "", err.Error())
+		return
+	}
+	if err := s.checkQuota(r, device.UserID); err != nil {
+		writeError(w, http.StatusInsufficientStorage, api.CodeQuotaExceeded, err.Error())
+		return
+	}
+
+	parts := make([]store.BlobPart, 0, len(blobs))
+	rows := make([]store.ChunkRegistration, 0, len(blobs))
+	for _, blob := range blobs {
+		if len(blob.Blob) == 0 {
+			writeError(w, http.StatusBadRequest, "", "empty chunk")
+			return
+		}
+		if !codec.IsEncrypted(blob.Blob) {
+			plain, err := s.codec.Decode(blob.Blob)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "", "chunk could not be decoded: "+err.Error())
+				return
+			}
+			if !store.VerifyDigest(blob.Digest, plain) {
+				writeError(w, http.StatusBadRequest, "", "chunk content does not match its digest")
+				return
+			}
+			if s.requiresEncryption(r, device) {
+				writeError(w, http.StatusBadRequest, api.CodeEncryptionRequired,
+					"this account only accepts end-to-end encrypted backups")
+				return
+			}
+		}
+		parts = append(parts, store.BlobPart{Digest: blob.Digest, Data: blob.Blob})
+		plainLen := int64(blob.PlainLen)
+		if plainLen <= 0 {
+			plainLen = int64(len(blob.Blob))
+		}
+		rows = append(rows, store.ChunkRegistration{
+			Digest:     blob.Digest,
+			PlainBytes: plainLen,
+			Encrypted:  codec.IsEncrypted(blob.Blob),
+		})
+	}
+
+	written, err := s.putMany(r, parts)
+	if err != nil {
+		s.log.Error("store blob batch", "error", err)
+		writeStoreError(w, err)
+		return
+	}
+	var total int64
+	for i, n := range written {
+		rows[i].StoredBytes = n
+		if n == 0 {
+			if size, ok := s.blobs.Has(r.Context(), rows[i].Digest); ok {
+				rows[i].StoredBytes = size
+			}
+		}
+		total += n
+	}
+	if err := s.db.RegisterChunks(r.Context(), device.UserID, rows); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	s.addUsage(device.UserID, total)
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (s *Server) putMany(r *http.Request, parts []store.BlobPart) ([]int64, error) {
+	if packer, ok := s.blobs.(interface {
+		PutMany(context.Context, []store.BlobPart) ([]int64, error)
+	}); ok {
+		return packer.PutMany(r.Context(), parts)
+	}
+	out := make([]int64, len(parts))
+	for i, part := range parts {
+		n, err := s.blobs.Put(r.Context(), part.Digest, part.Data)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = n
+	}
+	return out, nil
 }
 
 // requiresEncryption reports whether this device's account refuses plaintext.

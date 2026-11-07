@@ -110,17 +110,18 @@ func (a *App) startup(ctx context.Context) {
 // and two seconds is frequent enough to feel live while costing nothing
 // measurable. The loop stops when the window closes.
 func (a *App) pollStatus(ctx context.Context) {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
 	var lastHealth string
+	var configMod time.Time
 	for {
+		wait := 15 * time.Second
 		if a.agent != nil {
-			// The configuration can be changed by the command line, so it is
-			// re-read before each poll; otherwise the window would show a stale
-			// folder list.
-			if err := a.agent.Reload(); err != nil {
-				a.log.Debug("reload configuration", "error", err)
+			if path := a.agent.Config().Path(); path != "" {
+				if info, err := os.Stat(path); err == nil && !info.ModTime().Equal(configMod) {
+					configMod = info.ModTime()
+					if err := a.agent.Reload(); err != nil {
+						a.log.Debug("reload configuration", "error", err)
+					}
+				}
 			}
 			pollCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			overview := a.agent.Overview(pollCtx)
@@ -135,11 +136,16 @@ func (a *App) pollStatus(ctx context.Context) {
 				a.announce(overview, lastHealth)
 				lastHealth = overview.Health
 			}
+			if overview.Health == "working" {
+				wait = 2 * time.Second
+			}
 		}
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
 }

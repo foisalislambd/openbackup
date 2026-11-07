@@ -66,6 +66,8 @@ type Governor struct {
 	// manualPause is set by the user or by a server command.
 	manualPause bool
 	pauseUntil  time.Time
+	prevCPU     time.Duration
+	prevWall    time.Time
 }
 
 // cacheTTL is how long a verdict is reused. Probing costs a little CPU itself,

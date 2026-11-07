@@ -71,6 +71,17 @@ type Limits struct {
 	PauseWhileFullscreen bool `json:"pause_while_fullscreen"`
 	// UploadConcurrency is how many chunks upload at once.
 	UploadConcurrency int `json:"upload_concurrency"`
+	// ReadBytesPerSec paces reading source files. 0 means unlimited.
+	ReadBytesPerSec int64 `json:"read_bytes_per_sec"`
+	// MemoryLimitBytes is a soft heap target (GOMEMLIMIT). 0 leaves the
+	// process default, which is also what the GOMEMLIMIT environment sets.
+	MemoryLimitBytes int64 `json:"memory_limit_bytes"`
+	// Priority is "background" or "normal". Empty means background.
+	Priority string `json:"priority,omitempty"`
+	// AgentCPUPercent is this process's own CPU budget, as a percent of one
+	// core. 0 means no extra sleeping. MaxCPUPercent still pauses when the
+	// whole machine is busy.
+	AgentCPUPercent float64 `json:"agent_cpu_percent"`
 }
 
 // Schedule controls when work happens.
@@ -142,6 +153,7 @@ func Default() *Config {
 			MinBatteryPercent:    20,
 			PauseWhileFullscreen: true,
 			UploadConcurrency:    3,
+			Priority:             "background",
 		},
 		Schedule: Schedule{
 			FullScanInterval:    12 * time.Hour,
@@ -227,6 +239,9 @@ func (c *Config) normalize() {
 	}
 	if c.Limits.MaxCPUPercent <= 0 {
 		c.Limits.MaxCPUPercent = def.Limits.MaxCPUPercent
+	}
+	if c.Limits.Priority == "" {
+		c.Limits.Priority = "background"
 	}
 	if c.LogLevel == "" {
 		c.LogLevel = def.LogLevel

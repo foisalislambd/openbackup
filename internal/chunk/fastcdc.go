@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+
+	"github.com/foisalislambd/openbackup/internal/bufpool"
 )
 
 // Default chunk size parameters. The 1 MiB average is a deliberate trade-off:
@@ -89,13 +91,67 @@ type Chunker struct {
 	end    int // end of valid data in buf
 	offset int64
 	eof    bool
+	// pooled is set when buf came from bufpool and Release should return it.
+	pooled bool
+	// ownBuf is set when buf was allocated for this chunker alone.
+	ownBuf bool
 
 	thresholdSmall uint64
 	thresholdLarge uint64
 }
 
+// BufferSize is how many bytes a chunker needs for a stream whose length is
+// about hint. hint <= 0 means the length is unknown and the full sliding
+// window (Max*2) is used. A file smaller than Max does not need that window:
+// the cut-point function never looks past the bytes it has, so an 8 KiB file
+// gets an 8 KiB buffer instead of 8 MiB.
+func BufferSize(cfg Config, hint int64) int {
+	c := cfg
+	if err := c.normalize(); err != nil {
+		return DefaultMax * 2
+	}
+	full := c.Max * 2
+	if hint <= 0 || hint >= int64(c.Max) {
+		return full
+	}
+	n := int(hint)
+	if n < 4096 {
+		// Tiny files still share a 4 KiB class so the pool stays coarse.
+		n = 4096
+	}
+	return n
+}
+
 // NewChunker wraps r. A zero Config selects the defaults.
+//
+// The returned chunker owns an internal buffer sized for an unknown-length
+// stream. Callers that know the file size, or that chunk many files, should
+// use Reset and SetBuffer with bufpool so the window is allocated once.
 func NewChunker(r io.Reader, cfg Config) (*Chunker, error) {
+	c, err := newChunker(r, cfg)
+	if err != nil {
+		return nil, err
+	}
+	c.buf = make([]byte, BufferSize(cfg, 0))
+	c.ownBuf = true
+	return c, nil
+}
+
+// NewChunkerSize is NewChunker with a buffer sized for a stream of about
+// hint bytes. The chunk boundaries match NewChunker; only the allocation
+// changes.
+func NewChunkerSize(r io.Reader, cfg Config, hint int64) (*Chunker, error) {
+	c, err := newChunker(r, cfg)
+	if err != nil {
+		return nil, err
+	}
+	c.buf = bufpool.Get(BufferSize(cfg, hint))
+	c.buf = c.buf[:cap(c.buf)]
+	c.pooled = true
+	return c, nil
+}
+
+func newChunker(r io.Reader, cfg Config) (*Chunker, error) {
 	if err := cfg.normalize(); err != nil {
 		return nil, err
 	}
@@ -103,7 +159,6 @@ func NewChunker(r io.Reader, cfg Config) (*Chunker, error) {
 	c := &Chunker{
 		cfg: cfg,
 		r:   r,
-		buf: make([]byte, cfg.Max*2),
 		// A cut point is declared when the rolling fingerprint falls below a
 		// threshold; probability 2^-n, so a smaller threshold means longer
 		// chunks. Before the average size we demand n = avgBits+2 (rare cut),
@@ -112,6 +167,42 @@ func NewChunker(r io.Reader, cfg Config) (*Chunker, error) {
 		thresholdLarge: 1 << uint(64-(avgBits-normalization)),
 	}
 	return c, nil
+}
+
+// Release returns a pooled buffer to the pool. It is safe on a chunker that
+// owns a private buffer or has already been released.
+func (c *Chunker) Release() {
+	if c == nil || !c.pooled || c.buf == nil {
+		return
+	}
+	bufpool.Put(c.buf[:0])
+	c.buf = nil
+	c.pooled = false
+}
+
+// Reset prepares the chunker to read r from the beginning, keeping its buffer.
+func (c *Chunker) Reset(r io.Reader) {
+	c.r = r
+	c.start = 0
+	c.end = 0
+	c.offset = 0
+	c.eof = false
+}
+
+// SetBuffer uses buf for the sliding window. len(buf) must equal cap(buf) and
+// should be at least BufferSize for the files about to be read. The chunker
+// does not free buf; the caller returns it to the pool.
+func (c *Chunker) SetBuffer(buf []byte) {
+	if c.pooled && c.buf != nil {
+		bufpool.Put(c.buf[:0])
+		c.pooled = false
+	}
+	if cap(buf) == 0 {
+		c.buf = nil
+		return
+	}
+	c.buf = buf[:cap(buf)]
+	c.ownBuf = false
 }
 
 // Next returns the next chunk, or io.EOF when the stream is exhausted.
@@ -143,6 +234,13 @@ func (c *Chunker) fill() error {
 		c.start = 0
 	}
 	for c.end < c.cfg.Max && !c.eof {
+		if c.end >= len(c.buf) {
+			// The size hint was short (the file grew after it was stated).
+			// Grow up to the normal window rather than failing the backup.
+			if err := c.grow(); err != nil {
+				return err
+			}
+		}
 		n, err := c.r.Read(c.buf[c.end:])
 		c.end += n
 		if errors.Is(err, io.EOF) {
@@ -156,6 +254,31 @@ func (c *Chunker) fill() error {
 			break
 		}
 	}
+	return nil
+}
+
+// grow extends the window up to Max*2 when a file is larger than the buffer
+// chosen from its size hint.
+func (c *Chunker) grow() error {
+	next := cap(c.buf) * 2
+	if next < 4096 {
+		next = 4096
+	}
+	limit := c.cfg.Max * 2
+	if next > limit {
+		next = limit
+	}
+	if cap(c.buf) >= limit || next <= cap(c.buf) {
+		return io.ErrShortBuffer
+	}
+	nb := make([]byte, next)
+	copy(nb, c.buf[:c.end])
+	if c.pooled {
+		bufpool.Put(c.buf[:0])
+		c.pooled = false
+	}
+	c.buf = nb
+	c.ownBuf = true
 	return nil
 }
 

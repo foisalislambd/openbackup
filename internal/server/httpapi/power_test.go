@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/foisalislambd/openbackup/internal/api"
@@ -104,6 +105,25 @@ func TestIntegritySampleNoticesACorruptBlob(t *testing.T) {
 	}
 	root := h.blobs.Location()
 	path := filepath.Join(root, "blobs", digest[:2], digest[2:4], digest)
+	if _, err := os.Stat(path); err != nil {
+		// Small blobs live in a pack file. Corrupting that file is what the
+		// sample will read back.
+		matches, globErr := filepath.Glob(filepath.Join(root, "packs", "*", "*"))
+		if globErr != nil {
+			t.Fatal(globErr)
+		}
+		path = ""
+		for _, match := range matches {
+			if strings.HasSuffix(match, ".idx") {
+				continue
+			}
+			path = match
+			break
+		}
+		if path == "" {
+			t.Fatal("blob is neither a loose file nor a pack")
+		}
+	}
 	if err := os.WriteFile(path, []byte("not-a-blob"), 0o640); err != nil {
 		t.Fatal(err)
 	}

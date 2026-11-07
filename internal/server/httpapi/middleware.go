@@ -83,8 +83,15 @@ func (s *Server) userOnly(next func(http.ResponseWriter, *http.Request, *store.U
 func (s *Server) withBodyLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		limit := s.cfg.MaxBodyBytes
-		if strings.HasPrefix(r.URL.Path, "/api/v1/agent/chunks/") {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/agent/chunks/") || r.URL.Path == api.PathChunkBatch {
 			limit = s.cfg.MaxChunkBytes
+			if r.URL.Path == api.PathChunkBatch {
+				// A batch carries many chunks. Cap it at the in-flight budget,
+				// which is larger than one chunk and still bounded.
+				if budget := s.uploadBudgetWeight(); budget > limit {
+					limit = budget
+				}
+			}
 		}
 		if limit > 0 && r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, limit)

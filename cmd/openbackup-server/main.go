@@ -18,6 +18,7 @@ import (
 
 	"github.com/foisalislambd/openbackup/internal/idgen"
 	"github.com/foisalislambd/openbackup/internal/logx"
+	"github.com/foisalislambd/openbackup/internal/runtimestats"
 	"github.com/foisalislambd/openbackup/internal/server/auth"
 	"github.com/foisalislambd/openbackup/internal/server/config"
 	"github.com/foisalislambd/openbackup/internal/server/httpapi"
@@ -28,6 +29,7 @@ import (
 )
 
 func main() {
+	defer runtimestats.Dump(os.Getenv("OPENBACKUP_RUNTIME_STATS"))
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)

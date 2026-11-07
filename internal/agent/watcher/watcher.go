@@ -119,6 +119,7 @@ func (w *Watcher) SetMatcher(m *ignore.Matcher) {
 	w.mu.Lock()
 	w.matcher = m
 	w.mu.Unlock()
+	w.dropIgnoredWatches()
 }
 
 // rules returns the current ignore rules.
@@ -201,39 +202,116 @@ func (w *Watcher) AddRoots(ctx context.Context, roots []config.Root) error {
 		if err != nil {
 			continue
 		}
-		err = filepath.WalkDir(absRoot, func(abs string, entry fs.DirEntry, walkErr error) error {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if walkErr != nil {
-				if entry != nil && entry.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if !entry.IsDir() {
-				return nil
-			}
-			if d := matcher.SystemPathOutside(abs, absRoot); d.Skip {
-				return fs.SkipDir
-			}
-			if abs != absRoot {
-				rel, ok := ignore.RelPath(absRoot, abs)
-				if !ok {
-					return fs.SkipDir
-				}
-				if d := matcher.Match(rel, true); d.Skip {
-					return fs.SkipDir
-				}
-			}
-			return w.addDir(abs)
-		})
-		if err != nil && !errors.Is(err, context.Canceled) {
+		if err := w.watchTree(ctx, matcher, root, absRoot, absRoot, "", false); err != nil && !errors.Is(err, context.Canceled) {
 			w.log.Debug("register watches", "root", root.Path, "error", err)
 		}
 	}
+	w.dropIgnoredWatches()
 	w.log.Info("watching for changes", "directories", w.WatchedDirs())
 	return nil
+}
+
+// watchTree registers dir and its children. The directory is listed once:
+// project markers and .openbackupignore are applied before any child watch is
+// added, so a build directory next to package.json is never watched.
+func (w *Watcher) watchTree(ctx context.Context, matcher *ignore.Matcher, root config.Root, absRoot, dir, rel string, queueFiles bool) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	matcher.ObserveDirectory(rel, names, func() ([]byte, error) {
+		return readRulesFile(filepath.Join(dir, ignore.IgnoreFileName))
+	})
+	if d := matcher.SystemPathOutside(dir, absRoot); d.Skip && dir != absRoot {
+		return nil
+	}
+	if rel != "" {
+		if d := matcher.Match(rel, true); d.Skip {
+			return nil
+		}
+	}
+	if err := w.addDir(dir); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		childRel := name
+		if rel != "" {
+			childRel = rel + "/" + name
+		}
+		abs := filepath.Join(dir, name)
+		if entry.IsDir() {
+			if err := w.watchTree(ctx, matcher, root, absRoot, abs, childRel, queueFiles); err != nil {
+				return err
+			}
+			continue
+		}
+		if !queueFiles {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if info.Mode().IsRegular() && matcher.MatchFile(childRel, info.Size()).Skip {
+			continue
+		}
+		if matcher.Match(childRel, false).Skip {
+			continue
+		}
+		w.mu.Lock()
+		w.pending[abs] = Change{AbsPath: abs, Root: root}
+		w.mu.Unlock()
+	}
+	return nil
+}
+
+func readRulesFile(p string) ([]byte, error) {
+	info, err := os.Lstat(p)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 256<<10 {
+		return nil, err
+	}
+	return os.ReadFile(p)
+}
+
+// dropIgnoredWatches releases kernel watches whose directory is now excluded.
+// SetRoots only drops watches that left the configured roots; an exclusion
+// added inside a root has to be reconciled here.
+func (w *Watcher) dropIgnoredWatches() {
+	matcher := w.rules()
+	for _, dir := range w.watchList() {
+		root, ok := w.rootFor(dir)
+		if !ok {
+			w.removeDir(dir)
+			continue
+		}
+		absRoot, err := filepath.Abs(root.Path)
+		if err != nil {
+			continue
+		}
+		if samePath(absRoot, dir) {
+			continue
+		}
+		rel, ok := ignore.RelPath(absRoot, dir)
+		if !ok || rel == "." {
+			w.removeDir(dir)
+			continue
+		}
+		if d := matcher.SystemPathOutside(dir, absRoot); d.Skip {
+			w.removeDir(dir)
+			continue
+		}
+		if d := matcher.Match(rel, true); d.Skip {
+			w.removeDir(dir)
+		}
+	}
 }
 
 // addDir registers one directory.
@@ -373,20 +451,36 @@ func (w *Watcher) handleEvent(ctx context.Context, event fsnotify.Event) bool {
 		return false
 	}
 
-	removed := event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename)
-	isDir := false
-	if info, err := os.Lstat(event.Name); err == nil {
-		isDir = info.IsDir()
-		removed = false
-	}
-
-	// Ignore rules apply to watcher events exactly as they do to a scan, so a
-	// build that writes ten thousand files into dist/ causes no work.
-	if d := matcher.Match(rel, isDir); d.Skip {
+	// A name rule can be decided before the stat. Directory-only patterns and
+	// the size limit still need the file info, which is why oversized files
+	// are rejected here, before they enter the debounce queue.
+	if d := matcher.Match(rel, false); d.Skip {
 		return false
 	}
 
-	if isDir && event.Has(fsnotify.Create) {
+	removed := event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename)
+	info, statErr := os.Lstat(event.Name)
+	isDir := false
+	if statErr != nil {
+		// The path is gone. A directory-only rule does not match when isDir is
+		// false, so test both shapes before queueing a deletion of an ignored
+		// directory.
+		if matcher.Match(rel, true).Skip {
+			return false
+		}
+	} else {
+		removed = false
+		isDir = info.IsDir()
+		if info.Mode().IsRegular() {
+			if matcher.MatchFile(rel, info.Size()).Skip {
+				return false
+			}
+		} else if matcher.Match(rel, isDir).Skip {
+			return false
+		}
+	}
+
+	if isDir && statErr == nil && event.Has(fsnotify.Create) {
 		// A new directory needs its own watch, and its existing contents need to
 		// be picked up: the create event for the directory is all we get.
 		_ = w.addNewTree(ctx, root, event.Name)
@@ -415,31 +509,14 @@ func (w *Watcher) addNewTree(ctx context.Context, root config.Root, dir string) 
 	if err != nil {
 		return err
 	}
-	return filepath.WalkDir(dir, func(abs string, entry fs.DirEntry, walkErr error) error {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if walkErr != nil {
-			return nil
-		}
-		rel, ok := ignore.RelPath(absRoot, abs)
-		if !ok {
-			return nil
-		}
-		if d := w.rules().Match(rel, entry.IsDir()); d.Skip {
-			if entry.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if entry.IsDir() {
-			return w.addDir(abs)
-		}
-		w.mu.Lock()
-		w.pending[abs] = Change{AbsPath: abs, Root: root}
-		w.mu.Unlock()
-		return nil
-	})
+	rel, ok := ignore.RelPath(absRoot, dir)
+	if !ok {
+		return err
+	}
+	if rel == "." {
+		rel = ""
+	}
+	return w.watchTree(ctx, w.rules(), root, absRoot, dir, rel, true)
 }
 
 // rootFor finds the backup root containing a path.
