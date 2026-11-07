@@ -17,6 +17,7 @@ import (
 	"github.com/foisalislambd/openbackup/internal/codec"
 	"github.com/foisalislambd/openbackup/internal/server/config"
 	"github.com/foisalislambd/openbackup/internal/server/store"
+	"golang.org/x/sync/semaphore"
 )
 
 // Server holds the HTTP dependencies.
@@ -42,6 +43,10 @@ type Server struct {
 	usageCache map[string]cachedUsage
 
 	loginLimiter *attemptLimiter
+
+	// uploadBudget bounds the plaintext and wire bytes of chunk uploads that
+	// are being decoded at once, across every device.
+	uploadBudget *semaphore.Weighted
 }
 
 type cachedUsage struct {
@@ -75,6 +80,10 @@ func New(opts Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	budget := opts.Config.UploadBudgetBytes
+	if budget <= 0 {
+		budget = 64 << 20
+	}
 	return &Server{
 		cfg:          opts.Config,
 		db:           opts.DB,
@@ -85,6 +94,7 @@ func New(opts Options) (*Server, error) {
 		commands:     make(map[string][]api.Command),
 		usageCache:   make(map[string]cachedUsage),
 		loginLimiter: newAttemptLimiter(10, 15*time.Minute),
+		uploadBudget: semaphore.NewWeighted(budget),
 	}, nil
 }
 
@@ -102,6 +112,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET "+api.PathDeviceSelf, s.agentOnly(s.handleDeviceSelf))
 	mux.Handle("POST "+api.PathHeartbeat, s.agentOnly(s.handleHeartbeat))
 	mux.Handle("POST "+api.PathChunksMissing, s.agentOnly(s.handleMissingChunks))
+	mux.Handle("PUT "+api.PathChunkBatch, s.agentOnly(s.handlePutChunkBatch))
 	mux.Handle("PUT /api/v1/agent/chunks/{digest}", s.agentOnly(s.handlePutChunk))
 	mux.Handle("GET /api/v1/agent/chunks/{digest}", s.agentOnly(s.handleGetChunk))
 	mux.Handle("POST "+api.PathSnapshots, s.agentOnly(s.handleStartSnapshot))

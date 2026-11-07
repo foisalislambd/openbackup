@@ -23,6 +23,7 @@ const (
 	PathHeartbeat      = "/api/v1/agent/heartbeat"
 	PathChunksMissing  = "/api/v1/agent/chunks/missing"
 	PathChunk          = "/api/v1/agent/chunks/" // + digest
+	PathChunkBatch     = "/api/v1/agent/chunks/batch"
 	PathSnapshots      = "/api/v1/agent/snapshots"
 	PathFileVersions   = "/api/v1/agent/files/versions"
 	PathKeyEscrow      = "/api/v1/agent/key"

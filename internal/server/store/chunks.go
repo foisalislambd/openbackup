@@ -12,6 +12,53 @@ import (
 // sqliteMaxParams keeps generated IN clauses inside SQLite's variable limit.
 const sqliteMaxParams = 500
 
+// ChunkRegistration is one chunk row written by an upload.
+type ChunkRegistration struct {
+	Digest      string
+	StoredBytes int64
+	PlainBytes  int64
+	Encrypted   bool
+}
+
+// RegisterChunks records many chunks in one transaction. A backup of thousands
+// of small files would otherwise prepare and commit a statement per chunk.
+func (db *DB) RegisterChunks(ctx context.Context, userID string, rows []ChunkRegistration) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	chunkStmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO chunks (digest, stored_bytes, plain_bytes, encrypted, created_at) VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(digest) DO NOTHING`)
+	if err != nil {
+		return err
+	}
+	defer chunkStmt.Close()
+	acctStmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO account_chunks (user_id, digest) VALUES (?, ?) ON CONFLICT DO NOTHING`)
+	if err != nil {
+		return err
+	}
+	defer acctStmt.Close()
+	now := nowMillis()
+	for _, row := range rows {
+		if err := hash.Validate(row.Digest); err != nil {
+			return err
+		}
+		if _, err := chunkStmt.ExecContext(ctx, row.Digest, row.StoredBytes, row.PlainBytes, boolToInt(row.Encrypted), now); err != nil {
+			return err
+		}
+		if _, err := acctStmt.ExecContext(ctx, userID, row.Digest); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // RegisterChunk records a stored blob for an account. It is idempotent,
 // matching the blob store, so a retried upload changes nothing.
 func (db *DB) RegisterChunk(ctx context.Context, userID, digest string, storedBytes, plainBytes int64, encrypted bool) error {
@@ -162,6 +209,37 @@ func (db *DB) DeleteChunkRow(ctx context.Context, digest string) error {
 	}
 	_, err := db.sql.ExecContext(ctx, `DELETE FROM account_chunks WHERE digest = ?`, digest)
 	return err
+}
+
+// DeleteChunkRows removes metadata for many digests in one transaction.
+func (db *DB) DeleteChunkRows(ctx context.Context, digests []string) error {
+	if len(digests) == 0 {
+		return nil
+	}
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	chunkStmt, err := tx.PrepareContext(ctx, `DELETE FROM chunks WHERE digest = ?`)
+	if err != nil {
+		return err
+	}
+	defer chunkStmt.Close()
+	accountStmt, err := tx.PrepareContext(ctx, `DELETE FROM account_chunks WHERE digest = ?`)
+	if err != nil {
+		return err
+	}
+	defer accountStmt.Close()
+	for _, digest := range digests {
+		if _, err := chunkStmt.ExecContext(ctx, digest); err != nil {
+			return err
+		}
+		if _, err := accountStmt.ExecContext(ctx, digest); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // IsChunkKnown reports whether a digest has a metadata row. Used by the

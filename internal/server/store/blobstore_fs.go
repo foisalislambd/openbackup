@@ -26,6 +26,11 @@ type FSBlobs struct {
 	// mkdirMu serialises shard directory creation; the writes themselves run
 	// concurrently.
 	mkdirMu sync.Mutex
+	packMu  sync.Mutex
+	// packed locates blobs that live inside a pack file. Legacy blobs are
+	// individual files under blobs/ and are not listed here.
+	packed map[string]packLoc
+	packs  map[string]*packInfo
 }
 
 // compile-time check that the filesystem backend satisfies the interface.
@@ -45,10 +50,17 @@ func NewFSBlobs(root string) (*FSBlobs, error) {
 			return nil, fmt.Errorf("store: create %s: %w", dir, err)
 		}
 	}
-	b := &FSBlobs{root: abs}
+	b := &FSBlobs{
+		root:   abs,
+		packed: make(map[string]packLoc),
+		packs:  make(map[string]*packInfo),
+	}
 	// A crash mid-upload leaves temp files behind; clean them at startup so a
 	// long-running server does not slowly fill the disk with orphans.
 	b.cleanTemp()
+	if err := b.loadPacks(); err != nil {
+		return nil, err
+	}
 	return b, nil
 }
 
@@ -70,6 +82,9 @@ func (b *FSBlobs) Has(_ context.Context, digest string) (int64, bool) {
 	if err := hash.Validate(digest); err != nil {
 		return 0, false
 	}
+	if n, ok := b.packHas(digest); ok {
+		return n, true
+	}
 	st, err := os.Stat(b.path(digest))
 	if err != nil {
 		return 0, false
@@ -79,13 +94,31 @@ func (b *FSBlobs) Has(_ context.Context, digest string) (int64, bool) {
 
 // Put stores a blob under digest. It is idempotent: re-uploading existing
 // content is a no-op, which is what lets agents retry freely.
-func (b *FSBlobs) Put(_ context.Context, digest string, blob []byte) (written int64, err error) {
+//
+// Small blobs are appended to a pack file so a backup of many tiny files does
+// not pay a directory entry and an fsync per blob. Blobs at or above
+// looseBlobThreshold stay as individual files: one fsync is cheap next to the
+// payload, and a legacy repository of loose files is still read as-is.
+func (b *FSBlobs) Put(ctx context.Context, digest string, blob []byte) (written int64, err error) {
+	wrote, err := b.PutMany(ctx, []BlobPart{{Digest: digest, Data: blob}})
+	if err != nil || len(wrote) == 0 {
+		return 0, err
+	}
+	return wrote[0], nil
+}
+
+// putLoose stores one blob as its own file. The body is the historical layout;
+// existing repositories and large chunks still use it.
+func (b *FSBlobs) putLoose(digest string, blob []byte) (written int64, err error) {
 	if err := hash.Validate(digest); err != nil {
 		return 0, err
 	}
 	final := b.path(digest)
 	if _, err := os.Stat(final); err == nil {
 		// Already stored, and content addressing guarantees the bytes match.
+		return 0, nil
+	}
+	if _, ok := b.packHas(digest); ok {
 		return 0, nil
 	}
 
@@ -137,6 +170,9 @@ func (b *FSBlobs) Get(_ context.Context, digest string) ([]byte, error) {
 	if err := hash.Validate(digest); err != nil {
 		return nil, err
 	}
+	if data, ok, err := b.packGet(digest); ok || err != nil {
+		return data, err
+	}
 	data, err := os.ReadFile(b.path(digest))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, ErrBlobNotFound
@@ -148,6 +184,9 @@ func (b *FSBlobs) Get(_ context.Context, digest string) ([]byte, error) {
 func (b *FSBlobs) Open(_ context.Context, digest string) (io.ReadCloser, int64, error) {
 	if err := hash.Validate(digest); err != nil {
 		return nil, 0, err
+	}
+	if data, n, ok, err := b.packOpen(digest); ok || err != nil {
+		return data, n, err
 	}
 	f, err := os.Open(b.path(digest))
 	if errors.Is(err, os.ErrNotExist) {
@@ -170,6 +209,13 @@ func (b *FSBlobs) Delete(_ context.Context, digest string) error {
 	if err := hash.Validate(digest); err != nil {
 		return err
 	}
+	if err := b.packDelete(digest); err != nil {
+		if !errors.Is(err, errNotPacked) {
+			return err
+		}
+	} else {
+		return nil
+	}
 	err := os.Remove(b.path(digest))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -182,7 +228,7 @@ func (b *FSBlobs) Delete(_ context.Context, digest string) error {
 // write and the metadata commit.
 func (b *FSBlobs) Walk(ctx context.Context, fn func(digest string, size int64) error) error {
 	blobs := filepath.Join(b.root, "blobs")
-	return filepath.WalkDir(blobs, func(path string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(blobs, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -205,6 +251,10 @@ func (b *FSBlobs) Walk(ctx context.Context, fn func(digest string, size int64) e
 		}
 		return fn(name, info.Size())
 	})
+	if err != nil {
+		return err
+	}
+	return b.walkPacks(ctx, fn)
 }
 
 // cleanTemp removes leftover partial uploads.
@@ -215,7 +265,7 @@ func (b *FSBlobs) cleanTemp() {
 		return
 	}
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "blob-") {
+		if strings.HasPrefix(e.Name(), "blob-") || strings.HasPrefix(e.Name(), "pack-") {
 			_ = os.Remove(filepath.Join(tmp, e.Name()))
 		}
 	}
