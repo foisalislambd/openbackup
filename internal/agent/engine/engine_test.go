@@ -131,9 +131,12 @@ func newFixture(t *testing.T) *fixture {
 	cfg.Roots = []config.Root{{Name: "home", Path: f.home, Enabled: true}}
 	// Nothing in a test should be paused by a busy CI machine or a laptop on
 	// battery, so the governor is taken out of the way deliberately.
-	cfg.Limits.MaxCPUPercent = 0
+	cfg.Limits.MaxCPUPercent = 100
 	cfg.Limits.PauseOnMetered = false
+	cfg.Limits.PauseOnBattery = false
 	cfg.Limits.PauseWhileFullscreen = false
+	cfg.Limits.Priority = "normal"
+	cfg.Limits.AgentCPUPercent = 0
 	f.cfg = cfg
 	return f
 }
@@ -714,4 +717,60 @@ func keys(m map[string]api.Entry) []string {
 
 func humanSize(n int64) string {
 	return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
+}
+
+func TestProjectBuildOutputIsNotBackedUp(t *testing.T) {
+	f := newFixture(t)
+	f.write("site/package.json", `{"name":"site"}`)
+	f.write("site/src/app.js", "export const n = 1\n")
+	f.write("site/dist/app.js", "built")
+	f.write("photos/dist/keep.jpg", "not a build")
+	f.write(".openbackupignore", "*.skip\n")
+	f.write("notes.skip", "ignore me")
+	f.write("notes.txt", "keep me")
+	f.backup()
+	tree := f.latestTree()
+	if _, ok := tree["home/site/dist/app.js"]; ok {
+		t.Fatal("project dist was backed up")
+	}
+	if _, ok := tree["home/photos/dist/keep.jpg"]; !ok {
+		t.Fatal("a dist folder outside a project should be backed up")
+	}
+	if _, ok := tree["home/notes.skip"]; ok {
+		t.Fatal(".openbackupignore did not skip notes.skip")
+	}
+	if _, ok := tree["home/notes.txt"]; !ok {
+		t.Fatal("notes.txt should be backed up")
+	}
+	if _, ok := tree["home/site/src/app.js"]; !ok {
+		t.Fatal("source should be backed up")
+	}
+}
+
+func TestWipedIndexReusesParentSnapshot(t *testing.T) {
+	f := newFixture(t)
+	f.write("docs/a.txt", "alpha")
+	f.write("docs/b.txt", "bravo")
+	f.backup()
+
+	if err := os.Remove(filepath.Join(f.stateDir, "index.db")); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(filepath.Join(f.stateDir, "index.db-wal"))
+	os.Remove(filepath.Join(f.stateDir, "index.db-shm"))
+
+	ctx := context.Background()
+	eng, err := engine.New(ctx, engine.Options{
+		Config: f.cfg, Logger: slog.New(slog.DiscardHandler), StateDir: f.stateDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	if err := eng.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := eng.Status().BytesUploaded; got != 0 {
+		t.Fatalf("wiped index re-uploaded %d bytes; parent snapshot should have covered the files", got)
+	}
 }

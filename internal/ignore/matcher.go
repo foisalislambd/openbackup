@@ -60,6 +60,9 @@ type Matcher struct {
 
 	mu       sync.RWMutex
 	projects map[string]*compiledProject
+	// fileRules are .openbackupignore patterns keyed by the directory they
+	// were found in, relative to the backup root. An empty key is the root.
+	fileRules map[string][]*Pattern
 }
 
 type categorised struct {
@@ -80,9 +83,10 @@ func New(cfg Config) *Matcher {
 	}
 
 	m := &Matcher{
-		cfg:      cfg,
-		fold:     caseInsensitiveFS(),
-		projects: make(map[string]*compiledProject),
+		cfg:       cfg,
+		fold:      caseInsensitiveFS(),
+		projects:  make(map[string]*compiledProject),
+		fileRules: make(map[string][]*Pattern),
 	}
 
 	switch {
@@ -227,6 +231,74 @@ func (m *Matcher) RegisterProject(p *Project) {
 	m.mu.Unlock()
 }
 
+// UnregisterProject forgets a project rooted at rel. Used when the marker file
+// that created it has been removed.
+func (m *Matcher) UnregisterProject(root string) {
+	key := m.key(root)
+	m.mu.Lock()
+	delete(m.projects, key)
+	m.mu.Unlock()
+}
+
+// IgnoreFileName is the per-directory rules file. It uses the same gitignore
+// syntax as the JSON exclude list. It does not read .gitignore: those rules
+// are for version control, not for what a person wants restored.
+const IgnoreFileName = ".openbackupignore"
+
+// maxIgnoreFile bounds how much of a rules file is parsed. A multi-megabyte
+// file in a backup root is not a rules file.
+const maxIgnoreFile = 256 << 10
+
+// ObserveDirectory records project markers and a .openbackupignore file found
+// among names, which are the immediate child names of rel. readIgnore is
+// called only when the rules file is present; a nil return clears any rules
+// previously recorded for this directory.
+func (m *Matcher) ObserveDirectory(rel string, names []string, readIgnore func() ([]byte, error)) {
+	rel = strings.Trim(strings.ReplaceAll(rel, `\`, "/"), "/")
+	if rel == "." {
+		rel = ""
+	}
+	if project := DetectProject(rel, names); project != nil {
+		m.RegisterProject(project)
+	} else {
+		m.UnregisterProject(rel)
+	}
+	var content []byte
+	for _, name := range names {
+		if name == IgnoreFileName {
+			if readIgnore != nil {
+				content, _ = readIgnore()
+			}
+			break
+		}
+	}
+	m.setFileRules(rel, content)
+}
+
+func (m *Matcher) setFileRules(dir string, content []byte) {
+	key := m.key(dir)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(content) == 0 {
+		delete(m.fileRules, key)
+		return
+	}
+	if len(content) > maxIgnoreFile {
+		content = content[:maxIgnoreFile]
+	}
+	var pats []*Pattern
+	for line := range strings.SplitSeq(string(content), "\n") {
+		if p := ParsePattern(line, "excluded by .openbackupignore"); p != nil {
+			pats = append(pats, p)
+		}
+	}
+	if len(pats) == 0 {
+		delete(m.fileRules, key)
+		return
+	}
+	m.fileRules[key] = pats
+}
+
 // Projects returns the projects detected so far.
 func (m *Matcher) Projects() []*Project {
 	m.mu.RLock()
@@ -306,6 +378,9 @@ func (m *Matcher) Match(relPath string, isDir bool) Decision {
 		}
 		return Decision{Skip: true, Reason: excluded.Reason(), Rule: excluded.String()}
 	}
+	if decided, d := m.matchIgnoreFiles(rel, cands); decided {
+		return d
+	}
 	if m.cfg.SkipHidden {
 		for _, c := range cands {
 			if isHiddenName(c.path) {
@@ -321,6 +396,65 @@ func (m *Matcher) Match(relPath string, isDir bool) Decision {
 		}
 	}
 	return m.matchProject(rel, cands)
+}
+
+// matchIgnoreFiles applies .openbackupignore rules from the backup root down
+// to the file. Within that sequence the last matching pattern wins, which is
+// how a nested file re-includes something a parent file excluded. A negation
+// only cancels an earlier ignore-file pattern; it does not override JSON
+// excludes (those are checked first) or the built-in rules.
+func (m *Matcher) matchIgnoreFiles(rel string, cands []candidate) (bool, Decision) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.fileRules) == 0 {
+		return false, Decision{}
+	}
+	var last *Pattern
+	for _, dir := range ancestorDirs(rel) {
+		pats := m.fileRules[m.key(dir)]
+		for _, p := range pats {
+			for _, c := range cands {
+				sub, inside := relativeTo(dir, c.path)
+				if !inside || sub == "" {
+					continue
+				}
+				if p.Match(sub, c.isDir, m.fold) {
+					last = p
+					break
+				}
+			}
+		}
+	}
+	if last == nil || last.Negated() {
+		return false, Decision{}
+	}
+	return true, Decision{Skip: true, Reason: last.Reason(), Rule: ".openbackupignore: " + last.String()}
+}
+
+// ancestorDirs lists the root and each ancestor of rel, root first.
+func ancestorDirs(rel string) []string {
+	out := []string{""}
+	if rel == "" {
+		return out
+	}
+	var b strings.Builder
+	for i, part := range strings.Split(rel, "/") {
+		if i > 0 {
+			b.WriteByte('/')
+		}
+		b.WriteString(part)
+		out = append(out, b.String())
+		if i == len(strings.Split(rel, "/"))-1 {
+			break
+		}
+	}
+	// The file itself is not a directory that holds rules. Drop the last
+	// component when it was included by the loop above... the loop includes
+	// every prefix including the full path. Rules live in directories, and a
+	// directory's rules are stored under that directory. The full path of a
+	// file is not a rules key unless a directory has that exact name. Keeping
+	// it is harmless (no rules) and needed when rel is the directory.
+	return out
 }
 
 // matchProject applies developer rules within the innermost detected project

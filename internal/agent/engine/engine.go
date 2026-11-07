@@ -62,6 +62,13 @@ type Engine struct {
 	// changing a folder or a limit takes effect without restarting the service.
 	setMu sync.RWMutex
 	set   config.Settings
+	rules *ignore.Matcher
+
+	// staged holds index updates until the matching chunks have been flushed.
+	// Touches for unchanged files are in the same list so they are committed
+	// before a full scan deletes anything it did not see.
+	staged        []index.Change
+	stagedEntries []api.Entry
 
 	// watch is the live watcher, kept here so Reload can adjust which folders are
 	// being watched. It is nil when real-time watching is unavailable.
@@ -207,12 +214,27 @@ func New(ctx context.Context, opts Options) (*Engine, error) {
 		events:  newEventBuffer(),
 		state:   api.StateIdle,
 		set:     set,
+		rules:   ignore.New(set.IgnoreConfig()),
 	}
 	if set.Paused {
 		e.gov.Pause()
 	}
 	up.Progress = e.onProgress
+	up.SetReadLimit(set.Limits.ReadBytesPerSec)
+	up.SetGate(e.pace)
+	e.applyRuntime(set)
 	return e, nil
+}
+
+// pace is the uploader's gate between chunk batches.
+func (e *Engine) pace(ctx context.Context) error { return e.gov.Pace(ctx) }
+
+// applyRuntime installs process limits that live outside the per-file governor
+// check: memory target, scheduling priority and source-read pacing.
+func (e *Engine) applyRuntime(set config.Settings) {
+	governor.ApplyMemoryLimit(set.Limits.MemoryLimitBytes)
+	governor.ApplyPriority(set.Limits.Priority)
+	e.up.SetReadLimit(set.Limits.ReadBytesPerSec)
 }
 
 // config returns the live configuration pointer. Reload swaps it, so reads
@@ -274,7 +296,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		e.log.Warn("initial heartbeat failed; continuing offline", "error", err)
 	}
 
-	w, err := watcher.New(ignore.New(set.IgnoreConfig()), set.Schedule.Debounce, e.log)
+	w, err := watcher.New(e.rules, set.Schedule.Debounce, e.log)
 	if err != nil {
 		e.log.Warn("real-time watching is unavailable; falling back to periodic scans", "error", err)
 	}
@@ -459,6 +481,8 @@ func (e *Engine) Reload(ctx context.Context) error {
 	e.setConfig(fresh)
 	e.bucket.SetRate(next.Limits.UploadBytesPerSec)
 	e.gov.SetLimits(next.Limits)
+	e.applyRuntime(next)
+	e.rules = ignore.New(next.IgnoreConfig())
 	if next.Paused {
 		e.gov.Pause()
 	} else if current.Paused {
@@ -474,7 +498,7 @@ func (e *Engine) Reload(ctx context.Context) error {
 	// interface waiting for a click to feel done, and the settings above are
 	// already live.
 	if w := e.watcher(); w != nil {
-		w.SetMatcher(ignore.New(next.IgnoreConfig()))
+		w.SetMatcher(e.rules)
 		go func() {
 			if err := w.SetRoots(context.WithoutCancel(ctx), next.EnabledRoots()); err != nil {
 				e.log.Warn("could not watch every folder after reload", "error", err)
@@ -755,8 +779,11 @@ func (e *Engine) backupFullTree(ctx context.Context, set config.Settings, roots 
 	if err != nil {
 		return err
 	}
+	if err := e.seedIndex(ctx, roots); err != nil {
+		e.log.Warn("could not reuse the previous snapshot's file list", "error", err)
+	}
 
-	scan := scanner.New(set)
+	scan := scanner.NewWithMatcher(e.rules)
 	scan.Emit = func(item scanner.Item) error {
 		return e.processItem(ctx, item, kind, generation, sender, stats)
 	}
@@ -780,7 +807,12 @@ func (e *Engine) backupFullTree(ctx context.Context, set config.Settings, roots 
 		e.log.Info("developer projects detected", "count", len(result.Projects))
 	}
 
-	// Anything not seen during this walk has been deleted.
+	if err := e.flushPipeline(ctx, sender); err != nil {
+		return err
+	}
+
+	// Anything not seen during this walk has been deleted. Unchanged files were
+	// marked seen in flushPipeline, so they are not treated as deletions.
 	deleted, err := e.idx.Stale(ctx, generation, 20000)
 	if err != nil {
 		return err
@@ -815,7 +847,7 @@ func (e *Engine) backupChanges(ctx context.Context, set config.Settings, changes
 	if err != nil {
 		return err
 	}
-	scan := scanner.New(set)
+	rules := e.rules
 
 	for _, change := range changes {
 		if err := ctx.Err(); err != nil {
@@ -872,7 +904,7 @@ func (e *Engine) backupChanges(ctx context.Context, set config.Settings, changes
 				rel = r
 			}
 		}
-		if d := scan.Matcher().MatchFile(rel, info.Size()); d.Skip {
+		if d := rules.MatchFile(rel, info.Size()); d.Skip {
 			stats.skipped++
 			continue
 		}
@@ -884,6 +916,7 @@ func (e *Engine) backupChanges(ctx context.Context, set config.Settings, changes
 			Size:     info.Size(),
 			ModTime:  info.ModTime().UTC().Truncate(time.Second),
 			Mode:     uint32(info.Mode().Perm()),
+			Inode:    scanner.FileIdent(info),
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			target, err := os.Readlink(change.AbsPath)
@@ -899,7 +932,7 @@ func (e *Engine) backupChanges(ctx context.Context, set config.Settings, changes
 			return err
 		}
 	}
-	return nil
+	return e.flushPipeline(ctx, sender)
 }
 
 // processItem uploads a file if needed and queues its entry.
@@ -908,7 +941,7 @@ func (e *Engine) processItem(ctx context.Context, item scanner.Item, kind api.Sn
 
 	// Between files is the right place to pause: stopping mid-file would leave
 	// the upload to be redone, and pausing per chunk would react too slowly.
-	if _, err := e.gov.WaitUntilAllowed(ctx); err != nil {
+	if err := e.gov.Pace(ctx); err != nil {
 		return err
 	}
 
@@ -928,17 +961,15 @@ func (e *Engine) processItem(ctx context.Context, item scanner.Item, kind api.Sn
 		})
 	}
 
-	state, unchanged := e.idx.Unchanged(ctx, item.AbsPath, item.Size, item.ModTime)
+	state, unchanged := e.idx.Unchanged(ctx, item.AbsPath, item.Size, item.ModTime, item.Inode)
 	if unchanged {
-		if err := e.idx.Touch(ctx, item.AbsPath, generation); err != nil {
-			return err
-		}
+		e.staged = append(e.staged, index.Change{
+			Path: item.AbsPath, Generation: generation, Inode: item.Inode,
+		})
 		stats.files++
 		stats.bytes += item.Size
 		if kind == api.SnapshotFull {
-			// A full snapshot must describe the whole tree, but an unchanged file
-			// needs no upload: its chunks are already known from the index.
-			return sender.add(ctx, api.Entry{
+			e.stagedEntries = append(e.stagedEntries, api.Entry{
 				Path: item.SnapPath, Type: api.EntryFile, Size: state.Size, ModTime: state.ModTime,
 				Mode: state.Mode, Chunks: state.Chunks, Digest: state.Digest,
 			})
@@ -975,17 +1006,48 @@ func (e *Engine) processItem(ctx context.Context, item scanner.Item, kind api.Sn
 		e.flushEvents(ctx)
 	}
 
-	if err := e.idx.Put(ctx, index.FileState{
-		Path: item.AbsPath, Size: result.Size, ModTime: item.ModTime,
-		Digest: result.Digest, Chunks: result.Chunks, Mode: item.Mode,
-	}, generation); err != nil {
+	if err := e.stageUploaded(generation, item, *result); err != nil {
 		return err
 	}
+	return nil
+}
 
-	return sender.add(ctx, api.Entry{
+// stageUploaded remembers a file only after its chunks are queued. The index
+// row and the snapshot entry are written together in flushPipeline, which
+// uploads the queue first.
+func (e *Engine) stageUploaded(generation int64, item scanner.Item, result uploader.FileResult) error {
+	e.staged = append(e.staged, index.Change{
+		Put:        true,
+		Generation: generation,
+		State: index.FileState{
+			Path: item.AbsPath, Size: result.Size, ModTime: item.ModTime,
+			Digest: result.Digest, Chunks: result.Chunks, Mode: item.Mode, Inode: item.Inode,
+		},
+	})
+	e.stagedEntries = append(e.stagedEntries, api.Entry{
 		Path: item.SnapPath, Type: api.EntryFile, Size: result.Size, ModTime: item.ModTime,
 		Mode: item.Mode, Chunks: result.Chunks, Digest: result.Digest,
 	})
+	return nil
+}
+
+// flushPipeline uploads any chunks still held by the uploader, then commits
+// the index and the snapshot entries that depend on those chunks.
+func (e *Engine) flushPipeline(ctx context.Context, sender *entrySender) error {
+	if err := e.up.Flush(ctx); err != nil {
+		return err
+	}
+	if err := e.idx.Apply(ctx, e.staged); err != nil {
+		return err
+	}
+	e.staged = nil
+	for _, ent := range e.stagedEntries {
+		if err := sender.add(ctx, ent); err != nil {
+			return err
+		}
+	}
+	e.stagedEntries = nil
+	return nil
 }
 
 // snapPathFor maps an absolute path back to its snapshot path.
