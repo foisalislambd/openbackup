@@ -28,13 +28,18 @@ breaks compatibility breaks the build.
    detecting projects as it goes ([ignore-rules.md](ignore-rules.md)). It never
    leaves those roots and does not follow symbolic links out of them.
 2. **Detect changes.** The local index — a SQLite file in the agent's state
-   directory — remembers each file's size, modification time and content hash. A
-   file whose size and mtime are unchanged is not read at all, which is what makes
-   a rescan of a large disk cheap.
+   directory — remembers each file's size, modification time, content hash and,
+   when the filesystem reports one, inode. A file whose size and mtime match,
+   and whose inode matches when both sides have one, is not read at all. An
+   empty index is filled from the newest complete full snapshot first, so wiping
+   the cache does not re-read a tree that is already stored.
 3. **Chunk.** Changed files are split with **FastCDC**, content-defined chunking:
    boundaries are chosen by a rolling hash of the content, so inserting a
    paragraph at the top of a document shifts one chunk rather than every chunk
-   after it. Average chunk size is around 1 MiB.
+   after it. Average chunk size is around 1 MiB. The sliding window is reused
+   from a size-class pool; a file smaller than the maximum chunk does not
+   allocate the full window. The boundaries are the same ones earlier versions
+   produced.
 4. **Hash.** Each chunk is identified by its **BLAKE3-256** digest. That digest is
    the chunk's name everywhere: in the index, in the request, on disk.
 5. **Ask what is missing.** The agent sends a batch of digests and the server
@@ -43,9 +48,13 @@ breaks compatibility breaks the build.
    nothing.
 6. **Compress, then encrypt.** Zstandard, then XChaCha20-Poly1305 if end-to-end
    encryption is on. In that order, because encrypted data does not compress.
-7. **Upload** the missing chunks, three at a time by default, through a token
-   bucket that enforces the speed limit. An interrupted upload resumes: chunks
-   already stored are simply not missing next time.
+7. **Upload** the missing chunks. The agent holds them across files and sends a
+   batch (up to 32 chunks or 8 MiB) so the server can seal one pack and fsync
+   once. An older server that does not know the batch route still accepts one
+   chunk at a time. A token bucket enforces the upload speed limit, and a
+   separate read limit can pace disk reads. The server admits uploads against a
+   byte budget so many agents cannot pin unbounded memory. An interrupted upload
+   resumes: chunks already stored are simply not missing next time.
 8. **Record the snapshot.** Entries — path, type, size, mode, mtime, digest list —
    are sent in batches of 500, then the snapshot is completed. A snapshot that is
    never completed is cleaned up by the server after six hours rather than left to
@@ -76,12 +85,15 @@ Two consequences worth knowing:
 
 ## The block store
 
-Blocks live in a content-addressed store: the digest is the path, sharded by its
-first bytes so no directory holds millions of entries. Writes go to a temporary
-file and are renamed into place, so a crash mid-write cannot leave a partial block
-under a name that claims to be complete. Reads verify nothing at the store level —
-the agent verifies every chunk against its digest as it restores, which catches
-corruption wherever it happened.
+Blocks live in a content-addressed store. A blob of 512 KiB or more is one file,
+sharded by the first bytes of its digest, which is the layout every existing
+repository already uses. Smaller blobs are appended to a pack file (`OBPK`) with
+a companion index (`OIDX`). The bytes inside the pack are the same codec blobs
+as before, so a restore does not learn a new format. If the index is missing
+after a crash, it is rebuilt by scanning the pack. S3 storage stays one object
+per blob. Writes are still fsynced and renamed into place. Reads verify nothing
+at the store level — the agent verifies every chunk against its digest as it
+restores, which catches corruption wherever it happened.
 
 The default backend is the local filesystem. An S3-compatible backend exists behind
 the same interface, and the database stays local either way.

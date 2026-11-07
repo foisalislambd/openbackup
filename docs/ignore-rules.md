@@ -25,19 +25,24 @@ The dashboard shows the same list under **Settings → What is not backed up**.
 Beyond the categories, files larger than 8 GiB are skipped by default, and the
 agent never follows a symbolic link out of a backed-up folder.
 
-## Why `node_modules` is not simply banned
+## Why some names are global and some are scoped
 
 A pattern like `build` or `bin` is right inside a software project and wrong
 everywhere else. Someone with `Pictures/Portraits/build/` — a folder they named
 for a photo series — would lose it silently, which is exactly the kind of quiet
 failure that makes backup software untrustworthy.
 
-So developer rules are *scoped*. The agent looks for a marker file that identifies
-a project — `package.json`, `go.mod`, `Cargo.toml`, `pom.xml`, `composer.json`,
-`Gemfile`, `pubspec.yaml`, `*.csproj`, `*.xcodeproj` and 23 others, 32 in total —
-and only applies that ecosystem's exclusions beneath the directory holding it. A
-`node_modules` next to a `package.json` is dependency output; a folder with the
-same name anywhere else is your data and gets backed up.
+Names that are unambiguous (`node_modules`, `.git`, `__pycache__`, `.next` and
+the other dependency and cache directories in the global list) are skipped
+everywhere. A directory with one of those names is not user data.
+
+Names that are ambiguous (`dist`, `build`, `vendor`, `bin`, `target`, `out`)
+are *scoped*. The agent looks for a marker file that identifies a project —
+`package.json`, `go.mod`, `Cargo.toml`, `pom.xml`, `composer.json`, `Gemfile`,
+`pubspec.yaml`, `*.csproj`, `*.xcodeproj` and others — and only applies that
+ecosystem's exclusions beneath the directory holding it. The scanner, the
+watcher and a delta backup share that project list, so editing a file does not
+cause `dist/` to be watched or uploaded when a full scan would have skipped it.
 
 Source code always gets backed up. Lockfiles too, since they are what make the
 dependencies reproducible.
@@ -45,6 +50,27 @@ dependencies reproducible.
 The rules are per ecosystem rather than one big list, which is why a Rust project
 loses `target/` but keeps `build/`, and a Unity project loses `Library/` — a name
 that would be dangerous to exclude globally.
+
+## `.openbackupignore`
+
+Any backed-up directory may contain a `.openbackupignore` file. The syntax is
+the same gitignore-style language as `ignore.exclude`: `*`, `?`, `**`, a
+trailing `/` for directories, a leading `/` anchored at that file's directory,
+and `!` to negate an earlier pattern in an ignore file.
+
+Precedence, first match that decides:
+
+1. `ignore.include` always keeps the path.
+2. `ignore.exclude` always skips it. A file in the tree cannot undo an
+   administrator's exclude.
+3. `.openbackupignore`, from the backup root down to the file. The last matching
+   pattern wins. A negation only cancels an earlier ignore-file pattern.
+4. Hidden files, when that option is on, then the built-in global and
+   project rules. An ignore file cannot re-include `node_modules` or a `*.tmp`
+   that those rules skip.
+
+The file is read only when it is a regular file of at most 256 KiB. Symbolic
+links are not followed. `.gitignore` is not read.
 
 ## Overriding
 

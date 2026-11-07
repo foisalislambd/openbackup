@@ -43,6 +43,7 @@ help:
 	@echo "make release      Cross-compile release binaries for all platforms"
 	@echo "make docker       Build the container image"
 	@echo "make version      Print the version from VERSION.md"
+	@echo "make bench        Run the engine benchmark"
 	@echo "make clean        Remove build output"
 
 # ---------------------------------------------------------------------------
@@ -169,6 +170,12 @@ run-server:
 .PHONY: version
 version:
 	@echo $(VERSION)
+
+.PHONY: bench
+bench:
+	go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN)/openbackup ./cmd/openbackup
+	go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN)/openbackup-server ./cmd/openbackup-server
+	python3 scripts/bench --agent $(BIN)/openbackup --server $(BIN)/openbackup-server
 
 # ---------------------------------------------------------------------------
 # Release

@@ -59,8 +59,16 @@ type Report struct {
 // on `openbackup-server check`; this is the ongoing spot check.
 const samplePerPass = 24
 
-// Run executes one maintenance pass.
+// Run executes one maintenance pass, including the integrity sample.
 func (r *Runner) Run(ctx context.Context) (Report, error) {
+	return r.run(ctx, true)
+}
+
+// vacuumMinFree is how many reclaimed bytes justify rewriting the database.
+// A handful of deleted rows is cheaper to leave for SQLite than to vacuum.
+const vacuumMinFree int64 = 64 << 20
+
+func (r *Runner) run(ctx context.Context, verify bool) (Report, error) {
 	start := time.Now()
 	var report Report
 
@@ -98,16 +106,18 @@ func (r *Runner) Run(ctx context.Context) (Report, error) {
 	} else {
 		r.log.Warn("delete expired join tokens", "error", err)
 	}
-	if run, err := r.VerifySample(ctx, samplePerPass); err == nil {
-		report.CheckedChunks = run.Checked
-		report.FailedChunks = run.Failed
-	} else if ctx.Err() == nil {
-		r.log.Warn("integrity sample", "error", err)
+	if verify {
+		if run, err := r.VerifySample(ctx, samplePerPass); err == nil {
+			report.CheckedChunks = run.Checked
+			report.FailedChunks = run.Failed
+		} else if ctx.Err() == nil {
+			r.log.Warn("integrity sample", "error", err)
+		}
 	}
 	if err := r.reconcileAlerts(ctx); err != nil && ctx.Err() == nil {
 		r.log.Warn("reconcile alerts", "error", err)
 	}
-	if report.DeletedChunks > 0 || report.ExpiredSnapshots > 0 {
+	if report.FreedBytes >= vacuumMinFree {
 		if err := r.db.Vacuum(ctx); err != nil {
 			r.log.Debug("vacuum", "error", err)
 		}
@@ -122,8 +132,8 @@ func (r *Runner) Start(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = time.Hour
 	}
-	run := func() {
-		report, err := r.Run(ctx)
+	run := func(verify bool) {
+		report, err := r.run(ctx, verify)
 		if err != nil {
 			if ctx.Err() == nil {
 				r.log.Error("maintenance pass failed", "error", err)
@@ -139,7 +149,9 @@ func (r *Runner) Start(ctx context.Context, interval time.Duration) {
 				"duration", report.Duration)
 		}
 	}
-	run()
+	// The process just started; reading sample blobs immediately competes with
+	// the first backup. The hourly pass still verifies.
+	run(false)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -148,7 +160,7 @@ func (r *Runner) Start(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			run()
+			run(true)
 		}
 	}
 }
@@ -220,6 +232,8 @@ func (r *Runner) collectGarbage(ctx context.Context) (deleted int, freed int64, 
 			return deleted, freed, nil
 		}
 		passDeleted := 0
+		removed := make([]string, 0, len(chunks))
+		freedInPass := make(map[string]int64, len(chunks))
 		for _, chunk := range chunks {
 			if ctx.Err() != nil {
 				return deleted, freed, ctx.Err()
@@ -228,13 +242,26 @@ func (r *Runner) collectGarbage(ctx context.Context) (deleted int, freed int64, 
 				r.log.Error("delete blob", "digest", chunk.Digest, "error", err)
 				continue
 			}
-			if err := r.db.DeleteChunkRow(ctx, chunk.Digest); err != nil {
-				r.log.Error("delete chunk row", "digest", chunk.Digest, "error", err)
-				continue
+			removed = append(removed, chunk.Digest)
+			freedInPass[chunk.Digest] = chunk.StoredBytes
+		}
+		if err := r.db.DeleteChunkRows(ctx, removed); err != nil {
+			r.log.Error("delete chunk rows", "error", err)
+			for _, digest := range removed {
+				if err := r.db.DeleteChunkRow(ctx, digest); err != nil {
+					r.log.Error("delete chunk row", "digest", digest, "error", err)
+					continue
+				}
+				passDeleted++
+				deleted++
+				freed += freedInPass[digest]
 			}
-			passDeleted++
-			deleted++
-			freed += chunk.StoredBytes
+		} else {
+			for _, digest := range removed {
+				passDeleted++
+				deleted++
+				freed += freedInPass[digest]
+			}
 		}
 		if passDeleted == 0 && len(chunks) >= gcBatchSize {
 			// A full batch that made zero progress would be refetched forever;

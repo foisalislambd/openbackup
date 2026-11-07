@@ -113,7 +113,11 @@ A complete file, with defaults shown:
 
   "limits": {
     "upload_bytes_per_sec": 0,
+    "read_bytes_per_sec": 0,
     "max_cpu_percent": 70,
+    "agent_cpu_percent": 0,
+    "memory_limit_bytes": 0,
+    "priority": "background",
     "pause_on_metered": true,
     "pause_on_battery": false,
     "min_battery_percent": 20,
@@ -151,7 +155,13 @@ A complete file, with defaults shown:
 - **`ignore`** is explained in [ignore-rules.md](ignore-rules.md).
   `max_file_size_bytes: 0` means the 8 GiB default; `-1` disables the limit.
 - **`limits`** is what keeps the agent something people keep installed. Zero means
-  unlimited for `upload_bytes_per_sec`. `pause_on_battery` is off by default
+  unlimited for `upload_bytes_per_sec` and `read_bytes_per_sec`.
+  `max_cpu_percent` pauses while the whole machine is busier than that.
+  `agent_cpu_percent` is this process's own budget as a percent of one core;
+  zero does not add extra sleeping. `memory_limit_bytes` is a soft heap target
+  (the same idea as `GOMEMLIMIT`); zero leaves the process default.
+  `priority` is `background` (the default: lower CPU and disk priority) or
+  `normal`. `pause_on_battery` is off by default
   because many laptops are never plugged in, and refusing to back one up would be
   a silent failure; `min_battery_percent` is the floor that applies regardless.
 - **`schedule.debounce`** is the wait after a file stops changing.

@@ -1,0 +1,449 @@
+#!/usr/bin/env python3
+"""Reproducible backup-engine benchmark.
+
+Point it at already-built binaries (it does not compile):
+
+    scripts/bench --agent bin/openbackup --server bin/openbackup-server
+
+The dataset is many small files plus medium, random and compressible files,
+a project tree, and a .openbackupignore file. The script runs a full backup,
+an incremental backup, and a restore, then checks every restored file with
+SHA-256. It prints peak RSS, CPU time, storage-layer IO and Go allocations.
+
+Overrides: BENCH_SMALL, BENCH_MEDIUM, BENCH_RANDOM_MB, BENCH_TEXT_MB, BENCH_DIR.
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+import urllib.request
+from pathlib import Path
+
+
+def env_int(name, default):
+    raw = os.environ.get(name)
+    return int(raw) if raw else default
+
+
+def read_proc(pid, name):
+    try:
+        return Path(f"/proc/{pid}/{name}").read_text()
+    except OSError:
+        return ""
+
+
+def kv_text(text):
+    out = {}
+    for line in text.splitlines():
+        if ":" not in line:
+            continue
+        key, val = line.split(":", 1)
+        out[key.strip()] = val.strip()
+    return out
+
+
+def cpu_ticks(pid):
+    stat = read_proc(pid, "stat")
+    end = stat.rfind(")")
+    if end < 0:
+        return 0
+    fields = stat[end + 2 :].split()
+    if len(fields) < 15:
+        return 0
+    return int(fields[11]) + int(fields[12])
+
+
+class Sampler:
+    def __init__(self):
+        self.rows = []
+        self.hz = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
+
+    def sample(self, pids):
+        row = {"t": time.time(), "procs": {}}
+        for name, pid in pids.items():
+            if not pid:
+                continue
+            status = kv_text(read_proc(pid, "status"))
+            io = {}
+            for key, val in kv_text(read_proc(pid, "io")).items():
+                try:
+                    io[key] = int(val)
+                except ValueError:
+                    pass
+            rss = int(status["VmRSS"].split()[0]) if "VmRSS" in status else 0
+            hwm = int(status["VmHWM"].split()[0]) if "VmHWM" in status else 0
+            row["procs"][name] = {
+                "rss": rss,
+                "hwm": hwm,
+                "ticks": cpu_ticks(pid),
+                "read": io.get("read_bytes", 0),
+                "write": io.get("write_bytes", 0),
+                "rchar": io.get("rchar", 0),
+                "wchar": io.get("wchar", 0),
+            }
+        self.rows.append(row)
+        return len(self.rows) - 1
+
+    def summarise(self, name, start, end):
+        a = self.rows[start]["procs"].get(name)
+        b = self.rows[end]["procs"].get(name)
+        if not a or not b:
+            return None
+        peak = 0
+        for row in self.rows[start : end + 1]:
+            proc = row["procs"].get(name)
+            if proc:
+                peak = max(peak, proc["rss"], proc["hwm"])
+        dt = max(self.rows[end]["t"] - self.rows[start]["t"], 1e-6)
+        cpu = (b["ticks"] - a["ticks"]) / self.hz
+        return {
+            "wall_s": round(dt, 3),
+            "cpu_s": round(cpu, 3),
+            "cpu_pct_one_core": round(100 * cpu / dt, 2),
+            "peak_rss_mib": round(peak / 1024, 2),
+            "read_bytes": b["read"] - a["read"],
+            "write_bytes": b["write"] - a["write"],
+            "rchar": b["rchar"] - a["rchar"],
+            "wchar": b["wchar"] - a["wchar"],
+        }
+
+
+def sha256_tree(root: Path):
+    out = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames.sort()
+        for name in sorted(filenames):
+            path = Path(dirpath) / name
+            if path.is_symlink():
+                continue
+            h = hashlib.sha256()
+            with path.open("rb") as fh:
+                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                    h.update(chunk)
+            out[path.relative_to(root).as_posix()] = h.hexdigest()
+    return out
+
+
+def write_dataset(root: Path, small, medium, random_mb, text_mb):
+    if root.exists():
+        shutil.rmtree(root)
+    root.mkdir(parents=True)
+    line = "openbackup bench {:05d} the quick brown fox jumps\n"
+    for i in range(small):
+        directory = root / "docs" / f"{i // 100:04d}"
+        directory.mkdir(parents=True, exist_ok=True)
+        text = (line.format(i) * 200)[: 8 * 1024]
+        (directory / f"file-{i:05d}.txt").write_text(text)
+    medium_dir = root / "medium"
+    medium_dir.mkdir()
+    for i in range(medium):
+        blob = os.urandom(512 * 1024) if i % 2 == 0 else b"ABCDEFGH" * (512 * 1024 // 8)
+        (medium_dir / f"med-{i:03d}.bin").write_bytes(blob)
+    (root / "large-random.bin").write_bytes(os.urandom(random_mb * 1024 * 1024))
+    pattern = b"compressible-openbackup-pattern-" * 32
+    reps = max((text_mb * 1024 * 1024) // len(pattern), 1)
+    (root / "large-text.bin").write_bytes(pattern * reps)
+    proj = root / "project"
+    (proj / "src").mkdir(parents=True)
+    (proj / "package.json").write_text('{"name":"bench"}\n')
+    (proj / "src" / "app.js").write_text("console.log('keep')\n")
+    (proj / "dist").mkdir()
+    (proj / "dist" / "generated.js").write_text("/* generated */\n" * 100)
+    (root / ".openbackupignore").write_text("# bench\n*.skip\n")
+    (root / "notes.skip").write_text("ignored\n")
+    files = [p for p in root.rglob("*") if p.is_file()]
+    return {
+        "small_files": small,
+        "medium_files": medium,
+        "random_mb": random_mb,
+        "text_mb": text_mb,
+        "files": len(files),
+        "bytes": sum(p.stat().st_size for p in files),
+    }
+
+
+def mutate(root: Path):
+    changed = []
+    for i in (0, 1, 2, 10, 100):
+        path = root / "docs" / f"{i // 100:04d}" / f"file-{i:05d}.txt"
+        if not path.exists():
+            continue
+        path.write_text(path.read_text()[:80] + f"\nedited {i}\n")
+        changed.append(path.relative_to(root).as_posix())
+    big = root / "large-random.bin"
+    data = bytearray(big.read_bytes())
+    data[len(data) // 2] ^= 0x5A
+    big.write_bytes(data)
+    changed.append("large-random.bin")
+    app = root / "project" / "src" / "app.js"
+    app.write_text("console.log('changed')\n")
+    changed.append(app.relative_to(root).as_posix())
+    (root / "project" / "dist" / "generated.js").write_text("/* regenerated */\n" * 120)
+    return changed
+
+
+def load_stats(path: Path):
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return None
+
+
+def wait_healthy(url, proc, timeout=30):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            raise SystemExit("server exited before it was healthy")
+        try:
+            urllib.request.urlopen(url, timeout=1).read()
+            return
+        except Exception:
+            time.sleep(0.2)
+    raise SystemExit("server did not become healthy")
+
+
+def parse_invite(text):
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or " " in line:
+            continue
+        if line.startswith("openbackup") or line.startswith("Enrol") or line.startswith("Run"):
+            continue
+        if len(line) >= 4:
+            return line
+    raise SystemExit(f"could not parse invite code:\n{text}")
+
+
+def measure(sampler, pids, fn):
+    start = sampler.sample(pids)
+    stop = {"v": False}
+
+    def loop():
+        while not stop["v"]:
+            sampler.sample(pids)
+            time.sleep(0.25)
+
+    thread = threading.Thread(target=loop, daemon=True)
+    t0 = time.perf_counter()
+    thread.start()
+    try:
+        value = fn()
+    finally:
+        stop["v"] = True
+        thread.join(timeout=1)
+    end = sampler.sample(pids)
+    return {
+        "wall_s": round(time.perf_counter() - t0, 3),
+        "server": sampler.summarise("server", start, end),
+        "agent": value,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description="OpenBackup engine benchmark")
+    parser.add_argument("--agent", required=True)
+    parser.add_argument("--server", required=True)
+    parser.add_argument("--out", default="")
+    args = parser.parse_args()
+
+    small = env_int("BENCH_SMALL", 4000)
+    medium = env_int("BENCH_MEDIUM", 20)
+    random_mb = env_int("BENCH_RANDOM_MB", 64)
+    text_mb = env_int("BENCH_TEXT_MB", 32)
+    base = Path(os.environ.get("BENCH_DIR", "/tmp/openbackup-bench")).resolve()
+    if base.exists():
+        shutil.rmtree(base)
+    src = base / "src"
+    data = base / "data"
+    state = base / "state"
+    cfg_path = base / "config.json"
+    restore = base / "restore"
+    base.mkdir(parents=True)
+    data.mkdir()
+    state.mkdir()
+
+    print("generating dataset", flush=True)
+    dataset = write_dataset(src, small, medium, random_mb, text_mb)
+    source_hashes = sha256_tree(src)
+    print(json.dumps({"dataset": dataset}), flush=True)
+
+    server_stats = base / "server-stats.json"
+    agent_stats = base / "agent-stats.json"
+    server_env = os.environ.copy()
+    server_env.update(
+        {
+            "OPENBACKUP_DATA_DIR": str(data),
+            "OPENBACKUP_ADDR": "127.0.0.1:18221",
+            "OPENBACKUP_RUNTIME_STATS": str(server_stats),
+            "OPENBACKUP_ADMIN_EMAIL": "bench@example.com",
+            "OPENBACKUP_ADMIN_PASSWORD": "a-long-enough-password",
+            "OPENBACKUP_GC_INTERVAL": "24h",
+        }
+    )
+    log_path = base / "server.log"
+    log_fh = log_path.open("w")
+    server = subprocess.Popen(
+        [args.server],
+        env=server_env,
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
+    )
+    report = {"dataset": dataset, "phases": {}}
+    try:
+        wait_healthy("http://127.0.0.1:18221/api/v1/health", server)
+        agent_env = server_env.copy()
+        agent_env["OPENBACKUP_CONFIG"] = str(cfg_path)
+        agent_env["OPENBACKUP_STATE_DIR"] = str(state)
+        agent_env.pop("OPENBACKUP_RUNTIME_STATS", None)
+        invite = subprocess.run(
+            [args.server, "invite", "--email", "bench@example.com"],
+            env=server_env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        code = parse_invite(invite.stdout)
+        subprocess.run(
+            [
+                args.agent,
+                "connect",
+                "--server",
+                "http://127.0.0.1:18221",
+                "--code",
+                code,
+                "--name",
+                "bench",
+            ],
+            env=agent_env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        cfg = json.loads(cfg_path.read_text())
+        cfg["roots_chosen"] = True
+        cfg["roots"] = [{"name": "bench", "path": str(src), "enabled": True}]
+        limits = cfg.get("limits") or {}
+        limits.update(
+            {
+                "max_cpu_percent": 100,
+                "pause_on_metered": False,
+                "pause_while_fullscreen": False,
+                "pause_on_battery": False,
+                "upload_concurrency": 3,
+                "upload_bytes_per_sec": 0,
+                "priority": "normal",
+                "agent_cpu_percent": 0,
+                "read_bytes_per_sec": 0,
+            }
+        )
+        cfg["limits"] = limits
+        ignore = cfg.get("ignore") or {}
+        ignore["max_file_size_bytes"] = -1
+        cfg["ignore"] = ignore
+        cfg_path.write_text(json.dumps(cfg))
+
+        sampler = Sampler()
+        pids = {"server": server.pid}
+
+        def backup_once():
+            if agent_stats.exists():
+                agent_stats.unlink()
+            run_env = agent_env.copy()
+            run_env["OPENBACKUP_RUNTIME_STATS"] = str(agent_stats)
+            proc = subprocess.run(
+                [args.agent, "run", "--once"],
+                env=run_env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            stats = load_stats(agent_stats) or {}
+            # rusage of the agent is in the subprocess; Go stats cover allocations.
+            stats["agent_stderr_tail"] = (proc.stderr or "")[-500:]
+            return stats
+
+        print("full backup", flush=True)
+        report["phases"]["full"] = measure(sampler, pids, backup_once)
+
+        print("incremental backup", flush=True)
+        report["changed"] = mutate(src)
+        # Hash the source after the edit so restore is compared to that tree.
+        source_hashes = sha256_tree(src)
+        report["phases"]["incremental"] = measure(sampler, pids, backup_once)
+
+        print("restore", flush=True)
+
+        def do_restore():
+            if restore.exists():
+                shutil.rmtree(restore)
+            if agent_stats.exists():
+                agent_stats.unlink()
+            run_env = agent_env.copy()
+            run_env["OPENBACKUP_RUNTIME_STATS"] = str(agent_stats)
+            subprocess.run(
+                [args.agent, "restore", "--snapshot", "latest", "--to", str(restore), "--overwrite"],
+                env=run_env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return load_stats(agent_stats)
+
+        report["phases"]["restore"] = measure(sampler, pids, do_restore)
+        restored = sha256_tree(restore)
+        # Restored paths are "<root name>/<rel>".
+        missing = []
+        mismatched = []
+        for rel, digest in source_hashes.items():
+            if rel.endswith(".skip") or "/dist/" in rel or rel.startswith("project/dist/"):
+                # Ignored content is not in the backup. notes.skip and dist/.
+                continue
+            key = "bench/" + rel
+            got = restored.get(key)
+            if got is None:
+                missing.append(rel)
+            elif got != digest:
+                mismatched.append(rel)
+        report["restore_check"] = {
+            "missing": missing[:20],
+            "mismatched": mismatched[:20],
+            "missing_count": len(missing),
+            "mismatched_count": len(mismatched),
+            "ok": not missing and not mismatched,
+        }
+    finally:
+        if server.poll() is None:
+            server.send_signal(signal.SIGTERM)
+            try:
+                server.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                server.kill()
+        log_fh.close()
+        server_snap = load_stats(server_stats)
+        report["server_lifetime"] = server_snap
+
+    text = json.dumps(report, indent=2)
+    if args.out:
+        Path(args.out).write_text(text + "\n")
+    print(text)
+    if not report.get("restore_check", {}).get("ok", False):
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except subprocess.CalledProcessError as err:
+        sys.stderr.write(err.stderr or "")
+        sys.stderr.write(err.stdout or "")
+        raise

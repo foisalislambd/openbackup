@@ -24,9 +24,11 @@ restart, so a folder you just added starts being watched at once. Add
 
 Inside those folders, system files, caches and build output are skipped.
 `openbackup rules` prints every rule with the reason attached, and
-[ignore-rules.md](ignore-rules.md) explains the design — including why
-`node_modules` is skipped inside a project and kept in a folder that merely has
-that name.
+[ignore-rules.md](ignore-rules.md) explains the design. Unambiguous dependency
+directories such as `node_modules` are skipped everywhere. Ambiguous names such
+as `dist` and `build` are skipped only inside a detected project. A
+`.openbackupignore` file uses the same pattern language for anything else you
+want left out.
 
 ## When it runs
 
