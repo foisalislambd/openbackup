@@ -1,0 +1,679 @@
+#!/usr/bin/env python3
+"""Large-tree backup, watcher delta, restore, and a 60-second idle soak.
+
+The dataset is the profile from the 0.4 audit: 20,000 × 8 KiB documents,
+100 × 2 MiB mixed files, one 1 GiB random file, one 512 MiB compressible file
+and one 512 MiB mixed file. A project tree and a .openbackupignore file are
+added on top so the restore check can prove they were skipped.
+
+    scripts/soak --agent bin/openbackup --server bin/openbackup-server --phase large-default
+
+Phases:
+  large-default     default 128 MiB memory target, full + watcher delta + restore + 60s idle
+  large-unlimited   GOMEMLIMIT=off and memory_limit_bytes=-1, full + delta + 60s idle
+  encrypted         encrypted backup and restore of a smaller tree
+  multi             two agents uploading at once
+
+Source reads on a later phase are cache-warm. The script does not drop the
+page cache. Peak RSS is VmHWM while the phase is running. Idle RSS is sampled
+once a second for 60 seconds with both daemons still up and no backup running.
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+import urllib.request
+from pathlib import Path
+
+
+def env_int(name, default):
+    raw = os.environ.get(name)
+    return int(raw) if raw else default
+
+
+def read_proc(pid, name):
+    try:
+        return Path(f"/proc/{pid}/{name}").read_text()
+    except OSError:
+        return ""
+
+
+def kv_text(text):
+    out = {}
+    for line in text.splitlines():
+        if ":" not in line:
+            continue
+        key, val = line.split(":", 1)
+        out[key.strip()] = val.strip()
+    return out
+
+
+def cpu_ticks(pid):
+    stat = read_proc(pid, "stat")
+    end = stat.rfind(")")
+    if end < 0:
+        return 0
+    fields = stat[end + 2 :].split()
+    if len(fields) < 15:
+        return 0
+    return int(fields[11]) + int(fields[12])
+
+
+def proc_sample(pid):
+    status = kv_text(read_proc(pid, "status"))
+    io = {}
+    for key, val in kv_text(read_proc(pid, "io")).items():
+        try:
+            io[key] = int(val)
+        except ValueError:
+            pass
+    rss = int(status["VmRSS"].split()[0]) if "VmRSS" in status else 0
+    hwm = int(status["VmHWM"].split()[0]) if "VmHWM" in status else 0
+    return {
+        "t": time.time(),
+        "rss": rss,
+        "hwm": hwm,
+        "ticks": cpu_ticks(pid),
+        "read": io.get("read_bytes", 0),
+        "write": io.get("write_bytes", 0),
+        "rchar": io.get("rchar", 0),
+        "wchar": io.get("wchar", 0),
+    }
+
+
+def summarise(rows):
+    if len(rows) < 2:
+        return None
+    a, b = rows[0], rows[-1]
+    peak = max(max(r["rss"], r["hwm"]) for r in rows)
+    dt = max(b["t"] - a["t"], 1e-6)
+    hz = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
+    cpu = (b["ticks"] - a["ticks"]) / hz
+    return {
+        "wall_s": round(dt, 3),
+        "cpu_s": round(cpu, 3),
+        "peak_rss_mib": round(peak / 1024, 2),
+        "end_rss_mib": round(b["rss"] / 1024, 2),
+        "read_bytes": b["read"] - a["read"],
+        "write_bytes": b["write"] - a["write"],
+        "logical_read_bytes": b["rchar"] - a["rchar"],
+        "logical_write_bytes": b["wchar"] - a["wchar"],
+    }
+
+
+def idle_summary(rows):
+    if not rows:
+        return None
+    rss = [r["rss"] for r in rows]
+    return {
+        "samples": len(rows),
+        "seconds": round(rows[-1]["t"] - rows[0]["t"], 1),
+        "min_rss_mib": round(min(rss) / 1024, 2),
+        "max_rss_mib": round(max(rss) / 1024, 2),
+        "mean_rss_mib": round((sum(rss) / len(rss)) / 1024, 2),
+    }
+
+
+class Sampler:
+    def __init__(self):
+        self.rows = []
+        self.stop = threading.Event()
+
+    def run(self, pids):
+        while not self.stop.is_set():
+            row = {"t": time.time(), "procs": {}}
+            for name, pid in list(pids.items()):
+                if pid and Path(f"/proc/{pid}").exists():
+                    row["procs"][name] = proc_sample(pid)
+            self.rows.append(row)
+            self.stop.wait(0.25)
+
+    def between(self, name, t0, t1):
+        rows = []
+        for row in self.rows:
+            if row["t"] < t0 or row["t"] > t1:
+                continue
+            proc = row["procs"].get(name)
+            if proc and proc.get("rss"):
+                rows.append(proc)
+        return summarise(rows)
+
+
+def sha256_tree(root: Path):
+    out = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames.sort()
+        for name in sorted(filenames):
+            path = Path(dirpath) / name
+            if path.is_symlink():
+                continue
+            h = hashlib.sha256()
+            with path.open("rb") as fh:
+                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                    h.update(chunk)
+            out[path.relative_to(root).as_posix()] = h.hexdigest()
+    return out
+
+
+def write_random(path: Path, nbytes):
+    left = nbytes
+    with path.open("wb") as fh:
+        while left:
+            n = min(left, 8 << 20)
+            fh.write(os.urandom(n))
+            left -= n
+
+
+def write_pattern(path: Path, nbytes, pattern):
+    left = nbytes
+    with path.open("wb") as fh:
+        while left:
+            n = min(left, len(pattern) * 1024)
+            reps = (n + len(pattern) - 1) // len(pattern)
+            fh.write((pattern * reps)[:n])
+            left -= n
+
+
+def write_large(root: Path):
+    if root.exists():
+        shutil.rmtree(root)
+    docs = env_int("SOAK_DOCS", 20000)
+    medium = env_int("SOAK_MEDIUM", 100)
+    root.mkdir(parents=True)
+    line = "openbackup soak document {:05d}\n"
+    for i in range(docs):
+        directory = root / "docs" / f"{i // 100:04d}"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / f"file-{i:05d}.txt").write_text((line.format(i) * 400)[: 8 * 1024])
+    med = root / "medium"
+    med.mkdir()
+    for i in range(medium):
+        path = med / f"med-{i:03d}.bin"
+        if i % 2 == 0:
+            write_random(path, 2 << 20)
+        else:
+            write_pattern(path, 2 << 20, b"mixed-medium-pattern-")
+    write_random(root / "large-random.bin", env_int("SOAK_RANDOM_MB", 1024) << 20)
+    write_pattern(root / "large-text.bin", env_int("SOAK_TEXT_MB", 512) << 20, b"compressible-openbackup-pattern-")
+    mixed = root / "large-mixed.bin"
+    half = (env_int("SOAK_MIXED_MB", 512) << 20) // 2
+    write_pattern(mixed, half, b"mixed-head-")
+    with mixed.open("ab") as fh:
+        left = half
+        while left:
+            n = min(left, 8 << 20)
+            fh.write(os.urandom(n))
+            left -= n
+    proj = root / "project"
+    (proj / "src").mkdir(parents=True)
+    (proj / "package.json").write_text('{"name":"soak"}\n')
+    (proj / "src" / "app.js").write_text("console.log('keep')\n")
+    (proj / "dist").mkdir()
+    (proj / "dist" / "generated.js").write_text("/* generated */\n")
+    (root / ".openbackupignore").write_text("*.skip\n")
+    (root / "notes.skip").write_text("ignored\n")
+    files = [p for p in root.rglob("*") if p.is_file()]
+    return {
+        "files": len(files),
+        "bytes": sum(p.stat().st_size for p in files),
+        "docs": docs,
+        "medium": medium,
+    }
+
+
+def wait_healthy(url, proc, timeout=60):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            raise SystemExit("server exited before it was healthy")
+        try:
+            urllib.request.urlopen(url, timeout=1).read()
+            return
+        except Exception:
+            time.sleep(0.2)
+    raise SystemExit("server did not become healthy")
+
+
+def parse_invite(text):
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or " " in line:
+            continue
+        if line.startswith("openbackup") or line.startswith("Enrol") or line.startswith("Run"):
+            continue
+        if len(line) >= 4:
+            return line
+    raise SystemExit(f"could not parse invite code:\n{text}")
+
+
+def finished_count(log: Path):
+    if not log.exists():
+        return 0
+    return log.read_text(errors="replace").count("backup finished")
+
+
+def wait_finished(log: Path, proc, before, timeout):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            raise SystemExit(f"agent exited while waiting for a backup\n{log.read_text(errors='replace')[-2000:]}")
+        if finished_count(log) > before:
+            return
+        time.sleep(0.5)
+    tail = log.read_text(errors="replace")[-2000:] if log.exists() else ""
+    raise SystemExit(f"backup did not finish within {timeout}s\n{tail}")
+
+
+def load_stats(path: Path):
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return None
+
+
+def tune(cfg_path: Path, src: Path, unlimited: bool, encrypt: tuple | None):
+    cfg = json.loads(cfg_path.read_text())
+    cfg["roots_chosen"] = True
+    cfg["roots"] = [{"name": "bench", "path": str(src), "enabled": True}]
+    limits = cfg.get("limits") or {}
+    limits.update(
+        {
+            "max_cpu_percent": 100,
+            "pause_on_metered": False,
+            "pause_while_fullscreen": False,
+            "pause_on_battery": False,
+            "upload_concurrency": 3,
+            "upload_bytes_per_sec": 0,
+            "priority": "normal",
+            "agent_cpu_percent": 0,
+            "read_bytes_per_sec": 0,
+        }
+    )
+    if unlimited:
+        limits["memory_limit_bytes"] = -1
+    else:
+        limits.pop("memory_limit_bytes", None)
+    cfg["limits"] = limits
+    schedule = cfg.get("schedule") or {}
+    schedule["debounce"] = 2_000_000_000
+    cfg["schedule"] = schedule
+    ignore = cfg.get("ignore") or {}
+    ignore["max_file_size_bytes"] = -1
+    cfg["ignore"] = ignore
+    if encrypt:
+        cfg["encryption"] = {"enabled": True, "key_id": encrypt[0], "recovery_code": encrypt[1]}
+    cfg_path.write_text(json.dumps(cfg))
+
+
+def enroll(agent, server, server_env, agent_env, name):
+    invite = subprocess.run(
+        [server, "invite", "--email", "bench@example.com"],
+        env=server_env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    code = parse_invite(invite.stdout)
+    subprocess.run(
+        [agent, "connect", "--server", server_env_url(server_env), "--code", code, "--name", name],
+        env=agent_env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def server_env_url(env):
+    return "http://" + env["OPENBACKUP_ADDR"]
+
+
+def start_server(server, env, log_path):
+    fh = log_path.open("w")
+    proc = subprocess.Popen([server], env=env, stdout=fh, stderr=subprocess.STDOUT)
+    wait_healthy(server_env_url(env) + "/api/v1/health", proc)
+    return proc, fh
+
+
+def large_phase(args, unlimited: bool):
+    base = Path(args.dir) / ("unlimited" if unlimited else "default")
+    if base.exists():
+        shutil.rmtree(base)
+    base.mkdir(parents=True)
+    src = base / "src"
+    print("copying dataset", "unlimited" if unlimited else "default", flush=True)
+    shutil.copytree(args.dataset, src)
+    data = base / "data"
+    state = base / "state"
+    cfg_path = base / "config.json"
+    restore = base / "restore"
+    data.mkdir()
+    state.mkdir()
+    port = "127.0.0.1:18231" if unlimited else "127.0.0.1:18230"
+    server_stats = base / "server-stats.json"
+    agent_stats = base / "agent-stats.json"
+    server_env = os.environ.copy()
+    server_env.update(
+        {
+            "OPENBACKUP_DATA_DIR": str(data),
+            "OPENBACKUP_ADDR": port,
+            "OPENBACKUP_RUNTIME_STATS": str(server_stats),
+            "OPENBACKUP_ADMIN_EMAIL": "bench@example.com",
+            "OPENBACKUP_ADMIN_PASSWORD": "a-long-enough-password",
+            "OPENBACKUP_GC_INTERVAL": "24h",
+        }
+    )
+    if unlimited:
+        server_env["GOMEMLIMIT"] = "off"
+    else:
+        server_env.pop("GOMEMLIMIT", None)
+    server, log_fh = start_server(args.server, server_env, base / "server.log")
+    agent_env = server_env.copy()
+    agent_env["OPENBACKUP_CONFIG"] = str(cfg_path)
+    agent_env["OPENBACKUP_STATE_DIR"] = str(state)
+    agent_env["OPENBACKUP_RUNTIME_STATS"] = str(agent_stats)
+    report = {"mode": "unlimited" if unlimited else "default-128MiB", "dataset": args.dataset_info}
+    sampler = Sampler()
+    pids = {"server": server.pid}
+    thread = threading.Thread(target=sampler.run, args=(pids,), daemon=True)
+    thread.start()
+    try:
+        enroll(args.agent, args.server, server_env, agent_env, "soak")
+        tune(cfg_path, src, unlimited, None)
+        agent_log = state / "agent.log"
+        before = finished_count(agent_log)
+        agent = subprocess.Popen([args.agent, "run"], env=agent_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        pids["agent"] = agent.pid
+        t_full = time.time()
+        print("full backup", "unlimited" if unlimited else "default", flush=True)
+        wait_finished(agent_log, agent, before, timeout=1800)
+        t_full_done = time.time()
+        report["full"] = {
+            "server": sampler.between("server", t_full, t_full_done),
+            "agent": sampler.between("agent", t_full, t_full_done),
+        }
+        big = src / "large-random.bin"
+        with big.open("r+b") as fh:
+            fh.seek(big.stat().st_size // 2)
+            fh.write(b"\x5a\x5a\x5a\x5a")
+        (src / "docs" / "0000" / "file-00000.txt").write_text("edited during watcher delta\n")
+        before = finished_count(agent_log)
+        t_delta = time.time()
+        print("watcher delta", flush=True)
+        wait_finished(agent_log, agent, before, timeout=1800)
+        t_delta_done = time.time()
+        source_hashes = sha256_tree(src)
+        report["delta"] = {
+            "server": sampler.between("server", t_delta, t_delta_done),
+            "agent": sampler.between("agent", t_delta, t_delta_done),
+            "note": "4 bytes changed in large-random.bin plus one small file; debounce 2s",
+        }
+        print("idle 60s", flush=True)
+        idle_rows = {"server": [], "agent": []}
+        finished_before_idle = finished_count(agent_log)
+        deadline = time.time() + 60
+        while True:
+            if server.poll() is not None or agent.poll() is not None:
+                raise SystemExit("daemon exited during the idle soak")
+            idle_rows["server"].append(proc_sample(server.pid))
+            idle_rows["agent"].append(proc_sample(agent.pid))
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            time.sleep(min(1, remaining))
+        if finished_count(agent_log) != finished_before_idle:
+            report["idle_unexpected_backup"] = True
+        report["idle_60s"] = {name: idle_summary(rows) for name, rows in idle_rows.items()}
+        agent.send_signal(signal.SIGTERM)
+        agent.wait(timeout=60)
+        report["agent_lifetime_stats"] = load_stats(agent_stats)
+        if not unlimited:
+            print("restore", flush=True)
+            if restore.exists():
+                shutil.rmtree(restore)
+            t_restore = time.time()
+            subprocess.run(
+                [args.agent, "restore", "--snapshot", "latest", "--to", str(restore), "--overwrite"],
+                env=agent_env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            report["restore_wall_s"] = round(time.time() - t_restore, 3)
+            restored = sha256_tree(restore)
+            missing = []
+            mismatched = []
+            for rel, digest in source_hashes.items():
+                if rel.endswith(".skip") or "/dist/" in rel or rel.startswith("project/dist"):
+                    continue
+                got = restored.get("bench/" + rel)
+                if got is None:
+                    missing.append(rel)
+                elif got != digest:
+                    mismatched.append(rel)
+            report["restore_check"] = {
+                "missing_count": len(missing),
+                "mismatched_count": len(mismatched),
+                "missing_sample": missing[:5],
+                "mismatched_sample": mismatched[:5],
+                "ok": not missing and not mismatched,
+            }
+    finally:
+        sampler.stop.set()
+        thread.join(timeout=2)
+        if server.poll() is None:
+            server.send_signal(signal.SIGTERM)
+            try:
+                server.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                server.kill()
+        log_fh.close()
+        report["server_lifetime_stats"] = load_stats(server_stats)
+    return report
+
+
+def encrypted_phase(args):
+    base = Path(args.dir) / "encrypted"
+    if base.exists():
+        shutil.rmtree(base)
+    src = base / "src"
+    src.mkdir(parents=True)
+    for i in range(env_int("SOAK_ENC_DOCS", 2000)):
+        directory = src / "docs" / f"{i // 100:04d}"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / f"file-{i:05d}.txt").write_text(f"encrypted {i}\n" * 40)
+    write_random(src / "random.bin", env_int("SOAK_ENC_MB", 64) << 20)
+    write_pattern(src / "text.bin", env_int("SOAK_ENC_MB", 64) << 20, b"encrypted-pattern-")
+    hashes = sha256_tree(src)
+    key = subprocess.run(["go", "run", "scripts/genkey.go"], check=True, capture_output=True, text=True, cwd=args.repo)
+    key_id, recovery = key.stdout.strip().splitlines()
+    data = base / "data"
+    state = base / "state"
+    data.mkdir()
+    state.mkdir()
+    cfg_path = base / "config.json"
+    port = "127.0.0.1:18232"
+    server_env = os.environ.copy()
+    server_env.update(
+        {
+            "OPENBACKUP_DATA_DIR": str(data),
+            "OPENBACKUP_ADDR": port,
+            "OPENBACKUP_ADMIN_EMAIL": "bench@example.com",
+            "OPENBACKUP_ADMIN_PASSWORD": "a-long-enough-password",
+            "OPENBACKUP_GC_INTERVAL": "24h",
+        }
+    )
+    server, log_fh = start_server(args.server, server_env, base / "server.log")
+    agent_env = server_env.copy()
+    agent_env["OPENBACKUP_CONFIG"] = str(cfg_path)
+    agent_env["OPENBACKUP_STATE_DIR"] = str(state)
+    agent_stats = base / "agent-stats.json"
+    agent_env["OPENBACKUP_RUNTIME_STATS"] = str(agent_stats)
+    try:
+        enroll(args.agent, args.server, server_env, agent_env, "encrypted")
+        tune(cfg_path, src, False, (key_id, recovery))
+        sampler = Sampler()
+        pids = {"server": server.pid}
+        thread = threading.Thread(target=sampler.run, args=(pids,), daemon=True)
+        thread.start()
+        t0 = time.time()
+        proc = subprocess.Popen([args.agent, "run", "--once"], env=agent_env)
+        pids["agent"] = proc.pid
+        code = proc.wait(timeout=1800)
+        if code != 0:
+            raise SystemExit(f"encrypted backup failed: {code}")
+        t1 = time.time()
+        wall = round(t1 - t0, 3)
+        peaks = {"server": sampler.between("server", t0, t1), "agent": sampler.between("agent", t0, t1)}
+        sampler.stop.set()
+        thread.join(timeout=2)
+        restore = base / "restore"
+        subprocess.run(
+            [args.agent, "restore", "--snapshot", "latest", "--to", str(restore), "--overwrite"],
+            env=agent_env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        restored = sha256_tree(restore)
+        bad = [rel for rel, digest in hashes.items() if restored.get("bench/" + rel) != digest]
+        return {
+            "files": len(hashes),
+            "bytes": sum(path.stat().st_size for path in src.rglob("*") if path.is_file()),
+            "memory": "default-128MiB",
+            "wall_s": wall,
+            "peaks": peaks,
+            "agent_stats": load_stats(agent_stats),
+            "restore_ok": not bad,
+            "mismatched": len(bad),
+        }
+    finally:
+        if server.poll() is None:
+            server.send_signal(signal.SIGTERM)
+            server.wait(timeout=30)
+        log_fh.close()
+
+
+def multi_phase(args):
+    base = Path(args.dir) / "multi"
+    if base.exists():
+        shutil.rmtree(base)
+    base.mkdir(parents=True)
+    data = base / "data"
+    data.mkdir()
+    port = "127.0.0.1:18233"
+    server_stats = base / "server-stats.json"
+    server_env = os.environ.copy()
+    server_env.update(
+        {
+            "OPENBACKUP_DATA_DIR": str(data),
+            "OPENBACKUP_ADDR": port,
+            "OPENBACKUP_RUNTIME_STATS": str(server_stats),
+            "OPENBACKUP_ADMIN_EMAIL": "bench@example.com",
+            "OPENBACKUP_ADMIN_PASSWORD": "a-long-enough-password",
+            "OPENBACKUP_GC_INTERVAL": "24h",
+        }
+    )
+    server, log_fh = start_server(args.server, server_env, base / "server.log")
+    sampler = Sampler()
+    pids = {"server": server.pid}
+    thread = threading.Thread(target=sampler.run, args=(pids,), daemon=True)
+    thread.start()
+    t0 = time.time()
+    procs = []
+    try:
+        for i in (1, 2):
+            src = base / f"src{i}"
+            src.mkdir()
+            for n in range(1000):
+                (src / f"f{n:04d}.txt").write_text(f"agent {i} file {n}\n" * 20)
+            write_pattern(src / "text.bin", 32 << 20, f"agent-{i}-".encode())
+            state = base / f"state{i}"
+            state.mkdir()
+            cfg_path = base / f"config{i}.json"
+            env = server_env.copy()
+            env["OPENBACKUP_CONFIG"] = str(cfg_path)
+            env["OPENBACKUP_STATE_DIR"] = str(state)
+            env.pop("OPENBACKUP_RUNTIME_STATS", None)
+            enroll(args.agent, args.server, server_env, env, f"agent-{i}")
+            tune(cfg_path, src, False, None)
+            procs.append(subprocess.Popen([args.agent, "run", "--once"], env=env))
+        codes = [p.wait(timeout=1800) for p in procs]
+        t1 = time.time()
+        report = {
+            "exit_codes": codes,
+            "server": sampler.between("server", t0, t1),
+            "server_lifetime_stats": None,
+            "note": "two agents, 1000 small files and 32 MiB each, default 128 MiB target, overlapping run --once",
+        }
+        return report
+    finally:
+        sampler.stop.set()
+        thread.join(timeout=2)
+        for p in procs:
+            if p.poll() is None:
+                p.kill()
+        if server.poll() is None:
+            server.send_signal(signal.SIGTERM)
+            try:
+                server.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                server.kill()
+        log_fh.close()
+        if "report" in locals():
+            report["server_lifetime_stats"] = load_stats(server_stats)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--agent", required=True)
+    parser.add_argument("--server", required=True)
+    parser.add_argument("--phase", required=True, choices=["dataset", "large-default", "large-unlimited", "encrypted", "multi"])
+    parser.add_argument("--dir", default="/tmp/openbackup-soak")
+    parser.add_argument("--repo", default=".")
+    args = parser.parse_args()
+    args.repo = str(Path(args.repo).resolve())
+    os.chdir(args.repo)
+    dataset = Path(args.dir) / "dataset"
+    info_path = Path(args.dir) / "dataset.json"
+    hash_path = Path(args.dir) / "hashes.json"
+    if args.phase == "dataset":
+        Path(args.dir).mkdir(parents=True, exist_ok=True)
+        print("generating dataset", flush=True)
+        info = write_large(dataset)
+        info_path.write_text(json.dumps(info))
+        print("hashing source", flush=True)
+        hashes = sha256_tree(dataset)
+        hash_path.write_text(json.dumps(hashes))
+        print(json.dumps(info), flush=True)
+        return
+    if args.phase.startswith("large"):
+        if not info_path.exists():
+            raise SystemExit("run --phase dataset first")
+        args.dataset = dataset
+        args.dataset_info = json.loads(info_path.read_text())
+        report = large_phase(args, unlimited=args.phase.endswith("unlimited"))
+    elif args.phase == "encrypted":
+        report = encrypted_phase(args)
+    else:
+        report = multi_phase(args)
+    out = Path(args.dir) / f"{args.phase}.json"
+    out.write_text(json.dumps(report, indent=2))
+    print(json.dumps(report, indent=2), flush=True)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except subprocess.CalledProcessError as err:
+        sys.stderr.write(err.stderr or "")
+        sys.stderr.write(err.stdout or "")
+        raise

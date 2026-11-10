@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/foisalislambd/openbackup/internal/api"
@@ -44,8 +45,8 @@ type Server struct {
 
 	loginLimiter *attemptLimiter
 
-	// uploadBudget bounds the plaintext and wire bytes of chunk uploads that
-	// are being decoded at once, across every device.
+	// uploadBudget bounds the sum, across every device, of each upload's
+	// max(wire bytes, declared plaintext). It is not a process heap cap.
 	uploadBudget *semaphore.Weighted
 }
 
@@ -247,6 +248,8 @@ func writeStoreError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "", "invalid path")
 	case errors.Is(err, context.Canceled):
 		// The client hung up; no response will be read anyway.
+	case errors.Is(err, store.ErrDiskFull), errors.Is(err, syscall.ENOSPC):
+		writeError(w, http.StatusInsufficientStorage, "", "not enough free disk space")
 	default:
 		writeError(w, http.StatusInternalServerError, "", "internal error")
 	}

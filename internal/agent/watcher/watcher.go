@@ -286,6 +286,30 @@ func readRulesFile(p string) ([]byte, error) {
 	return os.ReadFile(p)
 }
 
+// refreshIgnoreFile re-reads one directory's .openbackupignore and drops
+// watches that the new rules exclude. The file itself can still be backed up.
+func (w *Watcher) refreshIgnoreFile(matcher *ignore.Matcher, absRoot, dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	names := make([]string, len(entries))
+	for i, entry := range entries {
+		names[i] = entry.Name()
+	}
+	rel, ok := ignore.RelPath(absRoot, dir)
+	if !ok {
+		return
+	}
+	if rel == "." {
+		rel = ""
+	}
+	matcher.ObserveDirectory(rel, names, func() ([]byte, error) {
+		return readRulesFile(filepath.Join(dir, ignore.IgnoreFileName))
+	})
+	w.dropIgnoredWatches()
+}
+
 // dropIgnoredWatches releases kernel watches whose directory is now excluded.
 // SetRoots only drops watches that left the configured roots; an exclusion
 // added inside a root has to be reconciled here.
@@ -454,6 +478,12 @@ func (w *Watcher) handleEvent(ctx context.Context, event fsnotify.Event) bool {
 	rel, ok := ignore.RelPath(absRoot, event.Name)
 	if !ok {
 		return false
+	}
+	// A rules file changes what the rest of the tree is allowed to back up.
+	// Re-read it before deciding whether this event, or the watches under it,
+	// should still be live.
+	if filepath.Base(event.Name) == ignore.IgnoreFileName {
+		w.refreshIgnoreFile(matcher, absRoot, filepath.Dir(event.Name))
 	}
 
 	// A name rule can be decided before the stat. Directory-only patterns and

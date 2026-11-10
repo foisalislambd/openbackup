@@ -35,7 +35,7 @@ nobody needs.
 | `OPENBACKUP_GC_INTERVAL` | `1h` | How often retention, garbage collection and integrity checks run |
 | `OPENBACKUP_MAX_CHUNK_BYTES` | `16MiB` | Largest single chunk upload accepted |
 | `OPENBACKUP_MAX_BODY_BYTES` | `32MiB` | Largest JSON request body accepted |
-| `OPENBACKUP_UPLOAD_BUDGET` | `64MiB` | In-flight upload wire bytes. Not a heap cap |
+| `OPENBACKUP_UPLOAD_BUDGET` | `64MiB` | Sum of each upload's max(wire bytes, blob-header plaintext). A smaller caller-supplied length does not reduce the charge. Not a heap cap. A request that cannot fit is rejected |
 | `OPENBACKUP_SQLITE_SYNC` | `NORMAL` | Set to `FULL` so metadata commits survive power loss |
 
 ### Sessions and enrolment

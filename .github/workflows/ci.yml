@@ -367,4 +367,60 @@ jobs:
           # The dashboard must be embedded in the published image.
           curl -fsS http://127.0.0.1:18200/ | grep -q OpenBackup
           docker logs ob
-          docker rm -f ob
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+          cache: true
+
+      # The image has no shell and no agent. The agent runs on the runner and
+      # the server under test is the image just built.
+      - name: Backup and restore through the image
+        run: |
+          go build -o bin/openbackup ./cmd/openbackup
+          sh scripts/docker-roundtrip.sh ob http://127.0.0.1:18200
+
+      - name: Stop the container
+        if: always()
+        run: docker rm -f ob
+
+  s3:
+    name: S3-compatible storage
+    runs-on: ubuntu-latest
+    services:
+      # Adobe S3 mock, not AWS and not MinIO. The digest is the image the
+      # local round trip passed against. MinIO's registry was not reachable
+      # from the development environment.
+      s3mock:
+        image: adobe/s3mock@sha256:ab01a6946750f451ca215a47e91030695b260e4003b8a5a6201d25029b8fca92
+        env:
+          initialBuckets: openbackup-test
+        ports:
+          - 9090:9090
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Wait for the local S3 server
+        run: |
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:9090/ >/dev/null; then
+              exit 0
+            fi
+            echo "waiting for s3 mock ($i)..."
+            sleep 1
+          done
+          exit 1
+
+      - name: Round trip
+        env:
+          OB_S3_ENDPOINT: 127.0.0.1:9090
+          OB_S3_REQUIRED: "1"
+          OB_S3_ACCESS_KEY: any
+          OB_S3_SECRET_KEY: any
+          OB_S3_BUCKET: openbackup-test
+          OB_S3_USE_SSL: "false"
+        run: go test -count=1 -run TestS3CompatibleRoundTrip ./internal/server/store/

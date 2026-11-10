@@ -205,3 +205,24 @@ func packPayloadBytes(t *testing.T, root string) int64 {
 	}
 	return n
 }
+
+func writeV1Pack(dir, digest string, payload []byte) error {
+	id := "0123456789abcdef0123456789abcdef"
+	packDir := filepath.Join(dir, "packs", id[:2])
+	if err := os.MkdirAll(packDir, 0o750); err != nil {
+		return err
+	}
+	rawDig, err := hex.DecodeString(digest)
+	if err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	buf.WriteString(packMagic)
+	buf.Write([]byte{packVersion, 0, 0, 0})
+	buf.Write(rawDig)
+	var tmp [binary.MaxVarintLen64]byte
+	n := binary.PutUvarint(tmp[:], uint64(len(payload)))
+	buf.Write(tmp[:n])
+	buf.Write(payload)
+	return os.WriteFile(filepath.Join(packDir, id), buf.Bytes(), 0o640)
+}

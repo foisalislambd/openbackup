@@ -13,7 +13,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/foisalislambd/openbackup/internal/hash"
 )
@@ -149,12 +151,20 @@ func (b *FSBlobs) sealSmall(parts []BlobPart, indexes []int, written []int64) er
 	}
 	tmpDir := filepath.Join(b.root, "tmp")
 	packPath := filepath.Join(dir, id)
+	if err := fault("pack-publish"); err != nil {
+		return err
+	}
 	if err := writeDurable(tmpDir, packPath, raw); err != nil {
 		return err
 	}
 	idxBytes, err := encodeIdx(recs)
 	if err != nil {
 		_ = os.Remove(packPath)
+		return err
+	}
+	if err := fault("idx-publish"); err != nil {
+		// The pack bytes are durable. Leaving them in place is the crash
+		// between the pack rename and the index rename; the next open scans.
 		return err
 	}
 	if err := writeDurable(tmpDir, packPath+".idx", idxBytes); err != nil {
@@ -171,7 +181,7 @@ func (b *FSBlobs) sealSmall(parts []BlobPart, indexes []int, written []int64) er
 	for _, i := range freshIdx {
 		written[i] = int64(len(parts[i].Data))
 	}
-	return nil
+	return notePackFormat(b.root)
 }
 
 func newPackID() (string, error) {
@@ -180,6 +190,27 @@ func newPackID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(raw[:]), nil
+}
+
+// Fault, when set, fails a named stage of a pack write. Production leaves it
+// nil. Tests use it to simulate a crash or a full disk before the matching
+// durable publish. The store must not update its in-memory index, and a later
+// open must not resurrect a deletion that was already made durable.
+//
+// Stages: "pack-publish", "idx-publish", "tombstone-publish", "after-tombstone",
+// "compact-publish".
+var Fault func(stage string) error
+
+func fault(stage string) error {
+	// A real process kill, used by the crash tests. Production leaves both
+	// variables unset. This is not a power-loss test: the kernel can still
+	// hold bytes that a power cut would drop, and the kill happens at the
+	// named stage rather than at a random instruction.
+	crashWait(stage)
+	if Fault == nil {
+		return nil
+	}
+	return Fault(stage)
 }
 
 func writeDurable(tmpDir, final string, data []byte) error {
@@ -216,7 +247,25 @@ func syncDir(dir string) error {
 	}
 	err = f.Sync()
 	_ = f.Close()
+	// Windows rejects FlushFileBuffers on a directory opened for read
+	// (ERROR_ACCESS_DENIED or ERROR_INVALID_FUNCTION). The file itself was
+	// already synced before rename. There is no stronger directory flush
+	// available, so this is not a failed fsync of file bytes.
+	if err != nil && dirSyncUnsupported(err) {
+		return nil
+	}
 	return err
+}
+
+func dirSyncUnsupported(err error) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return false
+	}
+	return errno == 5 || errno == 1
 }
 
 func encodeIdx(recs []packRecord) ([]byte, error) {
@@ -355,6 +404,9 @@ func (b *FSBlobs) installCompacted(oldID string, payloads []BlobPart) error {
 	_ = syncDir(filepath.Join(b.root, "packs"))
 	tmpDir := filepath.Join(b.root, "tmp")
 	packPath := filepath.Join(dir, id)
+	if err := fault("compact-publish"); err != nil {
+		return err
+	}
 	if err := writeDurable(tmpDir, packPath, raw); err != nil {
 		return err
 	}
@@ -385,7 +437,7 @@ func (b *FSBlobs) installCompacted(oldID string, payloads []BlobPart) error {
 		return err
 	}
 	_ = syncDir(filepath.Dir(oldPath))
-	return nil
+	return notePackFormat(b.root)
 }
 
 func (b *FSBlobs) packPath(id string) string {
@@ -711,13 +763,19 @@ func (b *FSBlobs) appendDeletion(digest string) error {
 	} else if _, err := f.Seek(0, io.SeekEnd); err != nil {
 		return err
 	}
+	if err := fault("tombstone-publish"); err != nil {
+		return err
+	}
 	if _, err := f.Write(rec[:]); err != nil {
 		return err
 	}
 	if err := f.Sync(); err != nil {
 		return err
 	}
-	return syncDir(filepath.Dir(path))
+	if err := syncDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+	return fault("after-tombstone")
 }
 
 func loadDeletionLog(path string) (map[string]struct{}, error) {

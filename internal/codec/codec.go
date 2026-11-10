@@ -390,3 +390,23 @@ func (c *Codec) Decode(blob []byte) ([]byte, error) {
 func IsEncrypted(blob []byte) bool {
 	return len(blob) >= 2 && blob[1]&flagEncrypted != 0
 }
+
+// DeclaredPlainLen reads the plaintext size a blob header claims. Decode
+// allocates from this value, so callers that bound memory must charge it
+// before calling Decode. It does not decompress or decrypt.
+func DeclaredPlainLen(blob []byte) (uint64, error) {
+	if len(blob) < 3 {
+		return 0, ErrMalformed
+	}
+	if blob[0] != formatVersion {
+		return 0, fmt.Errorf("%w: %d", ErrUnknownVersion, blob[0])
+	}
+	plainLen, n := binary.Uvarint(blob[2:])
+	if n <= 0 {
+		return 0, ErrMalformed
+	}
+	if plainLen > maxPlaintextLen {
+		return 0, fmt.Errorf("%w: plaintext length %d exceeds the %d byte limit", ErrMalformed, plainLen, maxPlaintextLen)
+	}
+	return plainLen, nil
+}

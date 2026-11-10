@@ -104,9 +104,57 @@ The default backend is the local filesystem. An S3-compatible backend exists beh
 the same interface, and the database stays local either way.
 
 Reference counting is per snapshot: a row per (snapshot, chunk). A chunk is
-deletable when no snapshot references it, which the garbage collector determines
-with a join rather than by scanning the disk. Cleanup runs in batches of 5000 so a
-large deletion never blocks uploads for long.
+deletable when no snapshot references it, it is older than 15 minutes, and no
+snapshot that is still running could have uploaded it. The collector rechecks
+that inside the write transaction and deletes the blob before the transaction
+commits. A blob delete that fails puts the row back. Cleanup runs in batches so
+a large deletion does not hold the writer for the whole set.
+
+## Upgrade, downgrade, and resource limits
+
+Upgrade the server before the agents. An older agent still uploads one chunk at
+a time; the server packs those small blobs. An older server does not read
+version-2 packs. Do not downgrade a server that has written a version-2 pack.
+Version-1 packs (the first cut of pack files, no per-frame checksum) and loose
+blobs (the original one-file-per-digest layout, and every blob of 512 KiB or
+more) still restore on this server. A repository can hold all three at once.
+
+`OPENBACKUP_UPLOAD_BUDGET` (default 64 MiB) is the sum, across every device, of
+each upload's larger of wire size and the plaintext length stored in the blob
+header. A caller-supplied length that is smaller does not reduce the charge,
+and the reservation is taken before the blob is decoded. A request that cannot
+fit is rejected. It is not a cap on the process heap. `memory_limit_bytes` on
+the agent defaults to 128 MiB (`-1` disables it). The server applies the same
+128 MiB target when `GOMEMLIMIT` is unset. Uploads are also refused when the
+blob volume has less than 8 MiB free. Pack and index files are fsynced before
+rename on every OS. Linux and macOS also fsync the directory. Windows rejects
+that directory flush (`FlushFileBuffers` returns access denied on a directory
+handle); the file fsync still happens, and a crash in the moment after the
+rename can drop the new directory entry until the volume flushes it.
+`OPENBACKUP_SQLITE_SYNC=FULL` makes
+metadata commits durable across power loss; the default remains
+`synchronous=NORMAL`.
+
+`pack-format` is written next to the blobs when this server creates a
+version-2 pack. A repository written by an older build of this series has v2
+packs and no marker until the next pack write; a missing marker is not proof
+that the directory is safe to open with an older binary. This server refuses
+to open a repository whose `pack-format` is newer than 2. An older binary
+does not read that file. Do not point an older server at a directory that
+contains version-2 packs; it will not refuse, and it cannot read them. Loose
+blobs and version-1 packs still open on this server.
+
+Process-kill tests stop the server at a named stage and reopen the directory.
+That is not a power-loss test. The kill happens after the fsync for stages
+that claim the bytes are durable, but the kernel can still hold data a power
+cut would drop, and SQLite's default `synchronous=NORMAL` can lose the last
+committed metadata transaction on power loss.
+
+Completing a snapshot reads every referenced blob. Unencrypted blobs must hash
+to their digest. Encrypted blobs must be present; the server has no key, and
+the agent checks the AEAD tag while restoring. A failure marks the snapshot
+failed. A deletion that returns an error has not been acknowledged: the blob
+stays visible until a later open applies a tombstone that did get written.
 
 ## The agent's parts
 
