@@ -1,4 +1,4 @@
-0.4.0
+0.5.0
 
 The first non-empty, non-comment line is the OpenBackup release version (SemVer, no leading v).
 Lines after it are notes for humans. Comment lines start with #.
