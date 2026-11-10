@@ -47,19 +47,23 @@ func newHarness(t *testing.T) *harness {
 
 func newHarnessCfg(t *testing.T, cfg config.Config) *harness {
 	t.Helper()
-	ctx := context.Background()
 	dir := t.TempDir()
-
-	db, err := store.OpenDB(ctx, dir+"/test.db")
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
 
 	blobs, err := store.NewFSBlobs(dir + "/blobs")
 	if err != nil {
 		t.Fatalf("NewFSBlobs: %v", err)
 	}
+	return newHarnessDir(t, cfg, dir, blobs)
+}
+
+func newHarnessDir(t *testing.T, cfg config.Config, dir string, blobs store.Blobs) *harness {
+	t.Helper()
+	ctx := context.Background()
+	db, err := store.OpenDB(ctx, dir+"/test.db")
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
 
 	cfg.DataDir = dir
 	srv, err := httpapi.New(httpapi.Options{

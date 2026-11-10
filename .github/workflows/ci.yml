@@ -423,4 +423,4 @@ jobs:
           OB_S3_SECRET_KEY: any
           OB_S3_BUCKET: openbackup-test
           OB_S3_USE_SSL: "false"
-        run: go test -count=1 -run TestS3CompatibleRoundTrip ./internal/server/store/
+        run: go test -count=1 -run 'TestS3' ./internal/server/store/ ./internal/server/httpapi/

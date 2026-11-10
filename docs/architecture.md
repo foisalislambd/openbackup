@@ -101,7 +101,8 @@ at the store level — the agent verifies every chunk against its digest as it
 restores, which catches corruption wherever it happened.
 
 The default backend is the local filesystem. An S3-compatible backend exists behind
-the same interface, and the database stays local either way.
+the same interface, and the database stays local either way. Retention, restore,
+and deletion were exercised against a local S3 mock, not against AWS.
 
 Reference counting is per snapshot: a row per (snapshot, chunk). A chunk is
 deletable when no snapshot references it, it is older than 15 minutes, and no

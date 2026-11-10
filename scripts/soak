@@ -80,6 +80,7 @@ def proc_sample(pid):
         "t": time.time(),
         "rss": rss,
         "hwm": hwm,
+        "start": proc_start(pid),
         "ticks": cpu_ticks(pid),
         "read": io.get("read_bytes", 0),
         "write": io.get("write_bytes", 0),
@@ -121,17 +122,44 @@ def idle_summary(rows):
     }
 
 
+def proc_start(pid):
+    """Clock-tick start time. A reused pid has a different value, so a sample
+    taken after the process exits is not reported as that process's memory."""
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return 0
+    rest = raw.rsplit(")", 1)[-1].split()
+    if len(rest) < 20:
+        return 0
+    try:
+        return int(rest[19])
+    except ValueError:
+        return 0
+
+
 class Sampler:
     def __init__(self):
         self.rows = []
         self.stop = threading.Event()
+        self.born = {}
 
     def run(self, pids):
         while not self.stop.is_set():
             row = {"t": time.time(), "procs": {}}
             for name, pid in list(pids.items()):
-                if pid and Path(f"/proc/{pid}").exists():
-                    row["procs"][name] = proc_sample(pid)
+                if not pid or not Path(f"/proc/{pid}").exists():
+                    continue
+                sample = proc_sample(pid)
+                born = sample.get("start") or 0
+                if born == 0:
+                    continue
+                seen = self.born.get(name)
+                if seen is None:
+                    self.born[name] = born
+                elif seen != born:
+                    continue
+                row["procs"][name] = sample
             self.rows.append(row)
             self.stop.wait(0.25)
 
@@ -536,9 +564,13 @@ def encrypted_phase(args):
         sampler.stop.set()
         thread.join(timeout=2)
         restore = base / "restore"
+        restore_env = agent_env.copy()
+        # Restore is a second process. Leaving the stats path set would
+        # overwrite the backup process's exit snapshot.
+        restore_env.pop("OPENBACKUP_RUNTIME_STATS", None)
         subprocess.run(
             [args.agent, "restore", "--snapshot", "latest", "--to", str(restore), "--overwrite"],
-            env=agent_env,
+            env=restore_env,
             check=True,
             capture_output=True,
             text=True,
@@ -595,7 +627,8 @@ def multi_phase(args):
             src.mkdir()
             for n in range(1000):
                 (src / f"f{n:04d}.txt").write_text(f"agent {i} file {n}\n" * 20)
-            write_pattern(src / "text.bin", 32 << 20, f"agent-{i}-".encode())
+            multi_mb = env_int("SOAK_MULTI_MB", 32)
+            write_pattern(src / "text.bin", multi_mb << 20, f"agent-{i}-".encode())
             state = base / f"state{i}"
             state.mkdir()
             cfg_path = base / f"config{i}.json"
@@ -612,7 +645,7 @@ def multi_phase(args):
             "exit_codes": codes,
             "server": sampler.between("server", t0, t1),
             "server_lifetime_stats": None,
-            "note": "two agents, 1000 small files and 32 MiB each, default 128 MiB target, overlapping run --once",
+            "note": f"two agents, 1000 small files and {env_int('SOAK_MULTI_MB', 32)} MiB each, default 128 MiB target, overlapping run --once",
         }
         return report
     finally:
