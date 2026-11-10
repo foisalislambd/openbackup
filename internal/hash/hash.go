@@ -37,6 +37,9 @@ func NewHasher() *Hasher { return &Hasher{h: blake3.New()} }
 // Write feeds data into the hasher.
 func (h *Hasher) Write(p []byte) (int, error) { return h.h.Write(p) }
 
+// Reset clears the hasher so it can hash another buffer.
+func (h *Hasher) Reset() { h.h.Reset() }
+
 // Hex returns the current digest as hex without resetting.
 func (h *Hasher) Hex() string {
 	var out [Size]byte

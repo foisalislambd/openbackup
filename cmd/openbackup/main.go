@@ -31,10 +31,12 @@ import (
 	"github.com/foisalislambd/openbackup/internal/codec"
 	"github.com/foisalislambd/openbackup/internal/ignore"
 	"github.com/foisalislambd/openbackup/internal/logx"
+	"github.com/foisalislambd/openbackup/internal/runtimestats"
 	"github.com/foisalislambd/openbackup/internal/version"
 )
 
 func main() {
+	defer runtimestats.Dump(os.Getenv("OPENBACKUP_RUNTIME_STATS"))
 	if err := run(os.Args[1:]); err != nil {
 		if errors.Is(err, context.Canceled) {
 			return

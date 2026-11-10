@@ -12,12 +12,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/foisalislambd/openbackup/internal/idgen"
 	"github.com/foisalislambd/openbackup/internal/logx"
+	"github.com/foisalislambd/openbackup/internal/runtimestats"
 	"github.com/foisalislambd/openbackup/internal/server/auth"
 	"github.com/foisalislambd/openbackup/internal/server/config"
 	"github.com/foisalislambd/openbackup/internal/server/httpapi"
@@ -28,6 +30,7 @@ import (
 )
 
 func main() {
+	defer runtimestats.Dump(os.Getenv("OPENBACKUP_RUNTIME_STATS"))
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
@@ -105,6 +108,12 @@ func setup(ctx context.Context) (*deps, error) {
 		return nil, err
 	}
 	log := logx.New(logx.Options{Level: cfg.LogLevel, JSON: cfg.LogJSON})
+	// The upload budget limits in-flight wire bytes, not the process heap.
+	// When the operator has not set GOMEMLIMIT, keep the idle server from
+	// holding an unbounded heap.
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(128 << 20)
+	}
 
 	db, err := store.OpenDB(ctx, cfg.DBPath())
 	if err != nil {

@@ -395,6 +395,28 @@ func (c *Client) PutChunk(ctx context.Context, digest string, blob []byte, plain
 	return nil
 }
 
+// PutChunks uploads many encoded blobs in one request. On a server that does
+// not implement the batch path the caller falls back to PutChunk.
+func (c *Client) PutChunks(ctx context.Context, blobs []ChunkBlob) error {
+	if len(blobs) == 0 {
+		return nil
+	}
+	var body bytes.Buffer
+	body.Grow(ChunkBatchSize(blobs))
+	if err := WriteChunkBatch(&body, blobs); err != nil {
+		return err
+	}
+	resp, err := c.do(ctx, http.MethodPut, PathChunkBatch, body.Bytes(), map[string]string{
+		"Content-Type": "application/octet-stream",
+	})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	return nil
+}
+
 // GetChunk downloads one encoded blob, used during restore.
 func (c *Client) GetChunk(ctx context.Context, digest string) ([]byte, error) {
 	if err := hash.Validate(digest); err != nil {

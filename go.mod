@@ -10,7 +10,9 @@ require (
 	github.com/shirou/gopsutil/v4 v4.26.6
 	github.com/zeebo/blake3 v0.2.4
 	golang.org/x/crypto v0.54.0
+	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.47.0
+	golang.org/x/time v0.15.0
 	modernc.org/sqlite v1.54.0
 )
 

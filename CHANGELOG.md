@@ -12,6 +12,34 @@ older agent keeps working against a newer server, so upgrade the server first.
 
 ### Added
 
+- `.openbackupignore` files, gitignore-style, shared by the scanner, the watcher and delta backups. JSON include and exclude still outrank them, and a negation cannot undo a built-in rule.
+- Pack files for blobs under 512 KiB, with a sidecar index that is rebuilt if it is missing. Larger blobs and S3 objects stay one file per digest. Existing loose files still restore.
+- Agents upload several chunks in one request. Servers that do not know the route still receive one chunk at a time.
+- Source-read pacing (`read_bytes_per_sec`), a process CPU budget (`agent_cpu_percent`), a soft memory target (`memory_limit_bytes`) and a background scheduling priority. The default priority is background.
+- `make bench` / `scripts/bench` measures a full backup, an incremental backup and a restore.
+
+### Changed
+
+- The chunker reuses a bounded set of size-class buffers and releases them after a backup. Buffers of 8 MiB and larger are not kept. Chunk boundaries are unchanged.
+- Zstandard encoders are reused per worker and idle encoders are closed after a backup. The blob format is unchanged.
+- The local index records an inode when the filesystem has one, batches its writes, and is refilled from the newest full snapshot when the file is empty so unchanged files are not read again. File metadata is published in batches after the corresponding chunks are durable.
+- Unambiguous dependency directories such as `node_modules` are skipped everywhere. Ambiguous names such as `dist` and `build` stay limited to detected projects, and that decision is the same one the watcher uses. The watcher does not list an excluded directory.
+- The server admits uploads against a byte budget (`OPENBACKUP_UPLOAD_BUDGET`, default 64 MiB). That budget counts request bytes, not the process heap.
+- `OPENBACKUP_SQLITE_SYNC=FULL` makes metadata commits durable across power loss. The default remains WAL with `synchronous=NORMAL`.
+- Pack files now checksum each frame. A missing or truncated index is rebuilt from the pack, and a truncated pack keeps only complete frames. Deleting a packed blob records a checksummed tombstone and rewrites the pack so the bytes are reclaimed. Version 1 packs still restore.
+- The desktop window polls every 15 seconds while idle and every 2 seconds while a backup is running, and re-reads configuration only when the file changes. Dashboard polls do not overlap. Maintenance skips the integrity sample on the startup pass and vacuums only after a large reclaim.
+- `memory_limit_bytes` defaults to 128 MiB (`-1` disables it). The server sets the same target when `GOMEMLIMIT` is unset.
+
+### Fixed
+
+- Garbage collection rechecks snapshot references, including a backup that is still running, and deletes a blob only while that check is locked. A completed snapshot can no longer lose a chunk to a concurrent collection.
+- A failed chunk flush returns each pooled buffer once.
+- Editing a file inside a project no longer backs up that project's build directory.
+- A file larger than the size limit no longer schedules an empty snapshot.
+- A replaced file with the same size and timestamp is read again when its inode changed.
+
+### Added
+
 - `VERSION.md` is the release version for the server, agent, desktop app, dashboard, and container image. A push to `main` publishes a GitHub Release only when that version is a strictly higher semver than the latest tag and GitHub Release.
 - Dashboard overview shows backup health, per-device progress, storage, open alerts, and recent activity. The file browser searches a whole backup, and a backup can be pinned so retention will not remove it.
 - Retention can thin history to a chosen number of daily, weekly, and monthly copies inside the existing window. Leaving the counts at zero keeps every snapshot in the window, as before.

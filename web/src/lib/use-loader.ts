@@ -44,6 +44,8 @@ export function useLoader<T>(fetcher: () => Promise<T>, options: Options = {}): 
 
   const reload = useCallback(() => setNonce((n) => n + 1), [])
 
+  const inflight = useRef(false)
+
   useEffect(() => {
     let active = true
     const seq = ++seqRef.current
@@ -56,6 +58,9 @@ export function useLoader<T>(fetcher: () => Promise<T>, options: Options = {}): 
     }
 
     const run = () => {
+      if (inflight.current) return
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      inflight.current = true
       // A slow poll must never overwrite a newer answer: only the most recent
       // request is allowed to set state.
       fetcherRef.current().then(
@@ -67,7 +72,9 @@ export function useLoader<T>(fetcher: () => Promise<T>, options: Options = {}): 
             setResult((prev) => ({ data: prev.data, error: message(err) }))
           }
         },
-      )
+      ).finally(() => {
+        inflight.current = false
+      })
     }
 
     run()
@@ -81,10 +88,15 @@ export function useLoader<T>(fetcher: () => Promise<T>, options: Options = {}): 
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') run()
     }, pollMs)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') run()
+    }
+    document.addEventListener('visibilitychange', onVisible)
 
     return () => {
       active = false
       clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [nonce, pollMs, depsKey])
 

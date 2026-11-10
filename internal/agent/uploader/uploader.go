@@ -18,10 +18,12 @@ import (
 	"sync/atomic"
 
 	"github.com/foisalislambd/openbackup/internal/api"
+	"github.com/foisalislambd/openbackup/internal/bufpool"
 	"github.com/foisalislambd/openbackup/internal/chunk"
 	"github.com/foisalislambd/openbackup/internal/codec"
 	"github.com/foisalislambd/openbackup/internal/hash"
 	"github.com/foisalislambd/openbackup/internal/throttle"
+	"golang.org/x/time/rate"
 )
 
 // batch limits bound how much unwritten data is held in memory at once.
@@ -47,6 +49,20 @@ type Uploader struct {
 	Progress func(Progress)
 
 	stats Stats
+
+	mu        sync.Mutex
+	pending   *batch
+	chunker   *chunk.Chunker
+	fileHash  *hash.Hasher
+	chunkHash *hash.Hasher
+	// gate is checked between chunk batches so a large file still yields to
+	// the governor. Nil means always proceed.
+	gate func(context.Context) error
+	// readLim paces source reads. Nil means unlimited.
+	readLim *rate.Limiter
+	// batchUnsupported remembers a server that does not accept packed uploads,
+	// so the agent does not pay a failed request on every batch.
+	batchUnsupported atomic.Bool
 }
 
 // Progress reports upload movement.
@@ -95,13 +111,83 @@ func New(opts Options) (*Uploader, error) {
 	if concurrency <= 0 {
 		concurrency = 3
 	}
+	chunker, err := chunk.NewChunker(nil, cfg)
+	if err != nil {
+		return nil, err
+	}
 	return &Uploader{
 		client:      opts.Client,
 		codec:       opts.Codec,
 		bucket:      opts.Bucket,
 		cfg:         cfg,
 		concurrency: concurrency,
+		pending:     newBatch(),
+		chunker:     chunker,
+		fileHash:    hash.NewHasher(),
+		chunkHash:   hash.NewHasher(),
 	}, nil
+}
+
+// SetGate installs a callback invoked before each chunk batch is uploaded.
+// The engine uses it to apply CPU and pause policy in the middle of a large file.
+func (u *Uploader) SetGate(fn func(context.Context) error) { u.gate = fn }
+
+// SetReadLimit paces how fast file contents are read. Zero disables the limit.
+func (u *Uploader) SetReadLimit(bytesPerSec int64) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if bytesPerSec <= 0 {
+		u.readLim = nil
+		return
+	}
+	burst := int(bytesPerSec)
+	if burst < 64<<10 {
+		burst = 64 << 10
+	}
+	u.readLim = rate.NewLimiter(rate.Limit(bytesPerSec), burst)
+}
+
+// Buffered reports how many plaintext bytes are waiting for the next upload.
+func (u *Uploader) Buffered() int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.pending == nil {
+		return 0
+	}
+	return u.pending.bytes
+}
+
+// Flush uploads any chunks still held across files. The engine calls it before
+// recording those files in the local index, so a crash cannot remember a file
+// whose chunks never reached the server.
+func (u *Uploader) Flush(ctx context.Context) error {
+	u.mu.Lock()
+	b := u.pending
+	u.pending = newBatch()
+	u.mu.Unlock()
+	if b == nil || len(b.chunks) == 0 {
+		return nil
+	}
+	_, _, err := u.flushBatch(ctx, b)
+	b.release()
+	return err
+}
+
+// ReleaseMemory drops buffers kept warm between files. Called after a backup
+// so an idle agent does not retain the last run's windows.
+func (u *Uploader) ReleaseMemory() {
+	u.mu.Lock()
+	if u.chunker != nil {
+		u.chunker.SetBuffer(nil)
+	}
+	if u.pending != nil {
+		u.pending.release()
+	}
+	u.mu.Unlock()
+	if u.codec != nil {
+		u.codec.Trim()
+	}
+	bufpool.Release()
 }
 
 // SetChunkConfig swaps the chunking parameters, which is how a server-side
@@ -145,7 +231,10 @@ type FileResult struct {
 	Size   int64
 }
 
-// UploadFile chunks and uploads one file.
+// UploadFile chunks one file and queues its chunks. Small files share a batch
+// with their neighbours; Flush sends whatever is still queued. Chunk boundaries
+// are unchanged from a per-file chunker: only the buffer and the upload
+// grouping differ.
 //
 // A file being written while it is read is the normal case on a live system:
 // whatever bytes were read are hashed and stored consistently, and a file that
@@ -157,72 +246,124 @@ func (u *Uploader) UploadFile(ctx context.Context, path string, expectedSize int
 	}
 	defer f.Close()
 
-	whole := hash.NewHasher()
-	chunker, err := chunk.NewChunker(io.TeeReader(f, whole), u.chunkConfig())
-	if err != nil {
-		return nil, err
+	cfg := u.chunkConfig()
+	window := bufpool.Get(chunk.BufferSize(cfg, expectedSize))
+	u.chunker.SetBuffer(window)
+	defer func() {
+		// Drop the chunker's reference before the buffer goes back into the
+		// pool. Otherwise the next Get can alias a window the chunker still
+		// believes it owns.
+		u.chunker.SetBuffer(nil)
+		bufpool.Put(window[:0])
+	}()
+
+	u.fileHash.Reset()
+	var src io.Reader = f
+	u.mu.Lock()
+	lim := u.readLim
+	u.mu.Unlock()
+	if lim != nil {
+		src = &pacedReader{ctx: ctx, r: f, lim: lim}
 	}
+	u.chunker.Reset(io.TeeReader(src, u.fileHash))
 
 	result := &FileResult{}
 	var progress Progress
 	progress.Path = path
 	progress.FileSize = expectedSize
 
-	batch := newBatch()
-	flush := func() error {
-		if len(batch.chunks) == 0 {
-			return nil
-		}
-		uploaded, skipped, err := u.flushBatch(ctx, batch)
-		if err != nil {
-			return err
-		}
-		progress.UploadedBytes += uploaded
-		progress.SkippedBytes += skipped
-		u.report(progress)
-		batch.reset()
-		return nil
-	}
-
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		c, err := chunker.Next()
+		c, err := u.chunker.Next()
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
 			return nil, fmt.Errorf("uploader: read %s: %w", path, err)
 		}
-
-		digest := hash.Sum(c.Data)
+		u.chunkHash.Reset()
+		if _, err := u.chunkHash.Write(c.Data); err != nil {
+			return nil, err
+		}
+		digest := u.chunkHash.Hex()
 		result.Chunks = append(result.Chunks, digest)
 		result.Size += int64(len(c.Data))
 		progress.FileBytesRead = result.Size
 		u.stats.BytesRead.Add(int64(len(c.Data)))
 
-		// The chunker reuses its buffer, so the data must be copied before it is
-		// handed to a worker goroutine.
-		batch.add(digest, append([]byte(nil), c.Data...))
-		if batch.full() {
-			if err := flush(); err != nil {
-				return nil, err
-			}
+		// The chunker reuses its window on the next Next call, so the bytes
+		// have to be copied before the batch is handed to an encoder.
+		copied := bufpool.Get(len(c.Data))
+		copy(copied, c.Data)
+		// enqueue takes ownership of copied. A failed flush returns it; putting
+		// it here as well would place the same storage in the pool twice.
+		if err := u.enqueue(ctx, digest, copied, &progress); err != nil {
+			return nil, err
 		}
 	}
-	if err := flush(); err != nil {
-		return nil, err
-	}
-
-	result.Digest = whole.Hex()
+	result.Digest = u.fileHash.Hex()
 	u.stats.FilesUploaded.Add(1)
 	return result, nil
 }
 
+func (u *Uploader) enqueue(ctx context.Context, digest string, data []byte, progress *Progress) error {
+	u.mu.Lock()
+	if u.pending.ready() {
+		flush := u.pending
+		u.pending = newBatch()
+		u.mu.Unlock()
+		if err := u.finishFlush(ctx, flush, progress); err != nil {
+			// data was not adopted by the flushed batch.
+			bufpool.Put(data[:0])
+			return err
+		}
+		u.mu.Lock()
+	}
+	u.pending.add(digest, data)
+	u.mu.Unlock()
+	return nil
+}
+
+func (u *Uploader) finishFlush(ctx context.Context, flush *batch, progress *Progress) error {
+	uploaded, skipped, err := u.flushBatch(ctx, flush)
+	flush.release()
+	if err != nil {
+		return err
+	}
+	progress.UploadedBytes += uploaded
+	progress.SkippedBytes += skipped
+	u.report(*progress)
+	return nil
+}
+
+type pacedReader struct {
+	ctx context.Context
+	r   io.Reader
+	lim *rate.Limiter
+}
+
+func (p *pacedReader) Read(buf []byte) (int, error) {
+	if len(buf) > 64<<10 {
+		buf = buf[:64<<10]
+	}
+	if len(buf) == 0 {
+		return 0, nil
+	}
+	if err := p.lim.WaitN(p.ctx, len(buf)); err != nil {
+		return 0, err
+	}
+	return p.r.Read(buf)
+}
+
 // flushBatch uploads the chunks in a batch that the server does not already have.
 func (u *Uploader) flushBatch(ctx context.Context, b *batch) (uploaded, skipped int64, err error) {
-	// One question for the whole batch: "which of these do you not have?".
+	if u.gate != nil {
+		if err := u.gate(ctx); err != nil {
+			return 0, 0, err
+		}
+	}
 	missing, err := u.client.MissingChunks(ctx, b.digests())
 	if err != nil {
 		return 0, 0, err
@@ -234,16 +375,45 @@ func (u *Uploader) flushBatch(ctx context.Context, b *batch) (uploaded, skipped 
 	sent := make(map[string]struct{}, len(missing))
 
 	type job struct {
+		index  int
 		digest string
 		data   []byte
 	}
-	jobs := make(chan job)
+	var jobs []job
+	var skippedBytes atomic.Int64
+	for i, digest := range b.digests() {
+		size := int64(len(b.chunks[i].data))
+		if _, ok := needed[digest]; !ok {
+			skippedBytes.Add(size)
+			u.stats.BytesDeduplicated.Add(size)
+			u.stats.ChunksSkipped.Add(1)
+			continue
+		}
+		if _, dup := sent[digest]; dup {
+			skippedBytes.Add(size)
+			u.stats.BytesDeduplicated.Add(size)
+			u.stats.ChunksSkipped.Add(1)
+			continue
+		}
+		sent[digest] = struct{}{}
+		jobs = append(jobs, job{index: i, digest: digest, data: b.chunks[i].data})
+	}
+	if len(jobs) == 0 {
+		return 0, skippedBytes.Load(), nil
+	}
+
+	type encoded struct {
+		blob     api.ChunkBlob
+		wire     []byte
+		slot     *codec.EncodeSlot
+		plainLen int
+	}
+	encodedCh := make(chan encoded, len(jobs))
+	jobCh := make(chan job, len(jobs))
 	var (
-		wg           sync.WaitGroup
-		uploadedBy   atomic.Int64
-		skippedBytes atomic.Int64
-		firstErr     error
-		errMu        sync.Mutex
+		wg       sync.WaitGroup
+		firstErr error
+		errMu    sync.Mutex
 	)
 	fail := func(e error) {
 		errMu.Lock()
@@ -252,83 +422,88 @@ func (u *Uploader) flushBatch(ctx context.Context, b *batch) (uploaded, skipped 
 		}
 		errMu.Unlock()
 	}
-
-	workers := min(u.concurrency, len(needed))
-	if workers == 0 {
+	workers := min(u.concurrency, len(jobs))
+	if workers < 1 {
 		workers = 1
 	}
-	uploadCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for j := range jobs {
-				blob, err := u.codec.Encode(j.data, j.digest)
+			slot := u.codec.Acquire()
+			defer u.codec.Release(slot)
+			for j := range jobCh {
+				blob, err := u.codec.EncodeReuse(slot, j.data, j.digest)
 				if err != nil {
 					fail(err)
-					cancel()
 					return
 				}
-				// Throttling applies to what actually crosses the network, which
-				// is the compressed size, not the original.
-				if u.bucket != nil {
-					if err := u.bucket.Wait(uploadCtx, len(blob)); err != nil {
-						fail(err)
-						return
-					}
+				// EncodeReuse aliases the slot buffer, which the next chunk
+				// overwrites, so the wire bytes are copied once here.
+				wire := append([]byte(nil), blob...)
+				encodedCh <- encoded{
+					blob: api.ChunkBlob{Digest: j.digest, PlainLen: len(j.data), Blob: wire},
+					wire: wire, plainLen: len(j.data),
 				}
-				if err := u.client.PutChunk(uploadCtx, j.digest, blob, len(j.data)); err != nil {
-					fail(err)
-					cancel()
-					return
-				}
-				uploadedBy.Add(int64(len(blob)))
-				u.stats.BytesUploaded.Add(int64(len(blob)))
-				u.stats.ChunksUploaded.Add(1)
 			}
 		}()
 	}
+	for _, j := range jobs {
+		jobCh <- j
+	}
+	close(jobCh)
+	wg.Wait()
+	close(encodedCh)
+	errMu.Lock()
+	err = firstErr
+	errMu.Unlock()
+	if err != nil {
+		return 0, skippedBytes.Load(), err
+	}
 
-	for i, digest := range b.digests() {
-		if _, ok := needed[digest]; !ok {
-			// The server already has this content: nothing to send.
-			size := int64(len(b.chunks[i].data))
-			skippedBytes.Add(size)
-			u.stats.BytesDeduplicated.Add(size)
-			u.stats.ChunksSkipped.Add(1)
-			continue
-		}
-		if _, dup := sent[digest]; dup {
-			// The same content appears twice in one file; the first upload of
-			// this batch already covers it.
-			size := int64(len(b.chunks[i].data))
-			skippedBytes.Add(size)
-			u.stats.BytesDeduplicated.Add(size)
-			u.stats.ChunksSkipped.Add(1)
-			continue
-		}
-		sent[digest] = struct{}{}
-		select {
-		case jobs <- job{digest: digest, data: b.chunks[i].data}:
-		case <-uploadCtx.Done():
-			close(jobs)
-			wg.Wait()
-			errMu.Lock()
-			defer errMu.Unlock()
-			if firstErr != nil {
-				return uploadedBy.Load(), skippedBytes.Load(), firstErr
-			}
-			return uploadedBy.Load(), skippedBytes.Load(), uploadCtx.Err()
+	blobs := make([]api.ChunkBlob, 0, len(jobs))
+	var wireBytes int64
+	for item := range encodedCh {
+		blobs = append(blobs, item.blob)
+		wireBytes += int64(len(item.wire))
+	}
+	if u.bucket != nil {
+		if err := u.bucket.Wait(ctx, int(wireBytes)); err != nil {
+			return 0, skippedBytes.Load(), err
 		}
 	}
-	close(jobs)
-	wg.Wait()
+	if err := u.putEncoded(ctx, blobs); err != nil {
+		return 0, skippedBytes.Load(), err
+	}
+	u.stats.BytesUploaded.Add(wireBytes)
+	u.stats.ChunksUploaded.Add(int64(len(blobs)))
+	return wireBytes, skippedBytes.Load(), nil
+}
 
-	errMu.Lock()
-	defer errMu.Unlock()
-	return uploadedBy.Load(), skippedBytes.Load(), firstErr
+func (u *Uploader) putEncoded(ctx context.Context, blobs []api.ChunkBlob) error {
+	if len(blobs) == 1 || u.batchUnsupported.Load() {
+		for _, blob := range blobs {
+			if err := u.client.PutChunk(ctx, blob.Digest, blob.Blob, blob.PlainLen); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	err := u.client.PutChunks(ctx, blobs)
+	if err == nil {
+		return nil
+	}
+	var apiErr *api.APIError
+	if errors.As(err, &apiErr) && (apiErr.StatusCode == 404 || apiErr.StatusCode == 405) {
+		u.batchUnsupported.Store(true)
+		for _, blob := range blobs {
+			if err := u.client.PutChunk(ctx, blob.Digest, blob.Blob, blob.PlainLen); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return err
 }
 
 func (u *Uploader) report(p Progress) {
@@ -356,7 +531,7 @@ func (b *batch) add(digest string, data []byte) {
 	b.bytes += len(data)
 }
 
-func (b *batch) full() bool {
+func (b *batch) ready() bool {
 	return len(b.chunks) >= maxBatchChunks || b.bytes >= maxBatchBytes
 }
 
@@ -368,7 +543,13 @@ func (b *batch) digests() []string {
 	return out
 }
 
-func (b *batch) reset() {
+func (b *batch) release() {
+	for i := range b.chunks {
+		if b.chunks[i].data != nil {
+			bufpool.Put(b.chunks[i].data[:0])
+			b.chunks[i].data = nil
+		}
+	}
 	b.chunks = b.chunks[:0]
 	b.bytes = 0
 }

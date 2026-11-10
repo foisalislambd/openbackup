@@ -532,6 +532,13 @@ func TestDeletingSnapshotFreesStorage(t *testing.T) {
 	if _, ok := h.blobs.Has(ctx, digest); !ok {
 		t.Fatal("expected the chunk to be stored")
 	}
+	// A chunk uploaded during a backup is kept for the grace period so a
+	// collection running beside that backup cannot delete it. Age the rows
+	// so this test exercises collection of chunks that are actually old.
+	aged := time.Now().Add(-time.Hour).UnixMilli()
+	if _, err := h.db.SQL().ExecContext(ctx, `UPDATE chunks SET created_at = ?`, aged); err != nil {
+		t.Fatal(err)
+	}
 
 	resp := h.do(http.MethodDelete, "/api/v1/ui/snapshots/"+first, nil, nil)
 	resp.Body.Close()

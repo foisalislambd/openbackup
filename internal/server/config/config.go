@@ -45,6 +45,10 @@ type Config struct {
 	GCInterval time.Duration
 	// QuotaBytes is the default per-account quota; 0 means unlimited.
 	QuotaBytes int64
+	// UploadBudgetBytes caps how many chunk-upload wire bytes may be buffered
+	// at once across all devices. It is not a cap on the process heap: decoded
+	// chunks and pack rewriting use additional memory. Zero uses 64 MiB.
+	UploadBudgetBytes int64
 	// RequireEncryption refuses plaintext chunks server-wide. Accounts can also
 	// require it individually from the dashboard; this is the harder switch, for
 	// an operator who never wants readable data on the disk they administer.
@@ -124,6 +128,9 @@ func Load() (Config, error) {
 		return cfg, err
 	}
 	if cfg.QuotaBytes, err = envBytes("OPENBACKUP_QUOTA_BYTES", cfg.QuotaBytes); err != nil {
+		return cfg, err
+	}
+	if cfg.UploadBudgetBytes, err = envBytes("OPENBACKUP_UPLOAD_BUDGET", cfg.UploadBudgetBytes); err != nil {
 		return cfg, err
 	}
 	return cfg, cfg.Validate()

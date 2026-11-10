@@ -37,6 +37,10 @@ type FileState struct {
 	Chunks  []string
 	// Mode holds POSIX permission bits.
 	Mode uint32
+	// Inode is the filesystem identity. Zero means it was not recorded (an
+	// older index, or a parent snapshot that has no inode). A zero value does
+	// not by itself force a re-read.
+	Inode uint64
 }
 
 // Open opens or creates the index at path.
@@ -68,7 +72,7 @@ func Open(ctx context.Context, path string) (*Index, error) {
 func (i *Index) Close() error { return i.db.Close() }
 
 func (i *Index) migrate(ctx context.Context) error {
-	_, err := i.db.ExecContext(ctx, `
+	if _, err := i.db.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS files (
     path       TEXT PRIMARY KEY,
     size       INTEGER NOT NULL,
@@ -76,14 +80,29 @@ CREATE TABLE IF NOT EXISTS files (
     digest     TEXT NOT NULL,
     chunks     TEXT NOT NULL,
     mode       INTEGER NOT NULL DEFAULT 0,
-    generation INTEGER NOT NULL DEFAULT 0
+    generation INTEGER NOT NULL DEFAULT 0,
+    inode      INTEGER NOT NULL DEFAULT 0
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
-);`)
-	return err
+);`); err != nil {
+		return err
+	}
+	// Indexes created before the inode column existed keep working. The column
+	// is additive: a zero inode means "not recorded" and does not force a re-read.
+	var hasInode int
+	if err := i.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pragma_table_info('files') WHERE name = 'inode'`).Scan(&hasInode); err != nil {
+		return err
+	}
+	if hasInode == 0 {
+		if _, err := i.db.ExecContext(ctx, `ALTER TABLE files ADD COLUMN inode INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Lookup returns the remembered state of a path.
@@ -95,8 +114,8 @@ func (i *Index) Lookup(ctx context.Context, path string) (*FileState, bool) {
 	)
 	state.Path = path
 	err := i.db.QueryRowContext(ctx,
-		`SELECT size, mtime, digest, chunks, mode FROM files WHERE path = ?`, path).
-		Scan(&state.Size, &mtime, &state.Digest, &chunkJSON, &state.Mode)
+		`SELECT size, mtime, digest, chunks, mode, inode FROM files WHERE path = ?`, path).
+		Scan(&state.Size, &mtime, &state.Digest, &chunkJSON, &state.Mode, &state.Inode)
 	if err != nil {
 		return nil, false
 	}
@@ -113,7 +132,7 @@ func (i *Index) Lookup(ctx context.Context, path string) (*FileState, bool) {
 // disk on every pass. Size plus second-precision mtime is the trade-off every
 // backup tool makes; the periodic full scan and the server-side verification
 // catch the rare case where a file is edited in place without touching either.
-func (i *Index) Unchanged(ctx context.Context, path string, size int64, modTime time.Time) (*FileState, bool) {
+func (i *Index) Unchanged(ctx context.Context, path string, size int64, modTime time.Time, inode uint64) (*FileState, bool) {
 	state, ok := i.Lookup(ctx, path)
 	if !ok {
 		return nil, false
@@ -122,6 +141,9 @@ func (i *Index) Unchanged(ctx context.Context, path string, size int64, modTime 
 		return state, false
 	}
 	if !state.ModTime.Equal(modTime.UTC().Truncate(time.Second)) {
+		return state, false
+	}
+	if state.Inode != 0 && inode != 0 && state.Inode != inode {
 		return state, false
 	}
 	if len(state.Chunks) == 0 && size > 0 {
@@ -143,13 +165,92 @@ func (i *Index) Put(ctx context.Context, state FileState, generation int64) erro
 		chunkJSON = string(raw)
 	}
 	_, err := i.db.ExecContext(ctx, `
-		INSERT INTO files (path, size, mtime, digest, chunks, mode, generation)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO files (path, size, mtime, digest, chunks, mode, generation, inode)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET size = excluded.size, mtime = excluded.mtime,
 			digest = excluded.digest, chunks = excluded.chunks, mode = excluded.mode,
-			generation = excluded.generation`,
-		state.Path, state.Size, state.ModTime.UTC().Unix(), state.Digest, chunkJSON, state.Mode, generation)
+			generation = excluded.generation, inode = excluded.inode`,
+		state.Path, state.Size, state.ModTime.UTC().Unix(), state.Digest, chunkJSON, state.Mode, generation, state.Inode)
 	return err
+}
+
+// Change is one index update applied with a group of others.
+type Change struct {
+	// Put replaces the row. When false, the path is only marked seen.
+	Put        bool
+	State      FileState
+	Path       string
+	Generation int64
+	Inode      uint64
+}
+
+// Apply writes many updates in one transaction. The index is a cache, so a
+// crash loses at most this batch and the next scan re-reads those files.
+func (i *Index) Apply(ctx context.Context, changes []Change) error {
+	if len(changes) == 0 {
+		return nil
+	}
+	tx, err := i.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	putStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO files (path, size, mtime, digest, chunks, mode, generation, inode)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(path) DO UPDATE SET size = excluded.size, mtime = excluded.mtime,
+			digest = excluded.digest, chunks = excluded.chunks, mode = excluded.mode,
+			generation = excluded.generation, inode = excluded.inode`)
+	if err != nil {
+		return err
+	}
+	defer putStmt.Close()
+	touchStmt, err := tx.PrepareContext(ctx, `
+		UPDATE files SET generation = ?,
+			inode = CASE WHEN ? != 0 THEN ? ELSE inode END
+		WHERE path = ?`)
+	if err != nil {
+		return err
+	}
+	defer touchStmt.Close()
+	for _, ch := range changes {
+		if ch.Put {
+			chunkJSON := "[]"
+			if len(ch.State.Chunks) > 0 {
+				raw, err := json.Marshal(ch.State.Chunks)
+				if err != nil {
+					return err
+				}
+				chunkJSON = string(raw)
+			}
+			if _, err := putStmt.ExecContext(ctx, ch.State.Path, ch.State.Size, ch.State.ModTime.UTC().Unix(),
+				ch.State.Digest, chunkJSON, ch.State.Mode, ch.Generation, ch.State.Inode); err != nil {
+				return err
+			}
+			continue
+		}
+		path := ch.Path
+		if path == "" {
+			path = ch.State.Path
+		}
+		if _, err := touchStmt.ExecContext(ctx, ch.Generation, ch.Inode, ch.Inode, path); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// HasFiles reports whether the cache remembers any path.
+func (i *Index) HasFiles(ctx context.Context) (bool, error) {
+	var n int
+	err := i.db.QueryRowContext(ctx, `SELECT 1 FROM files LIMIT 1`).Scan(&n)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Touch marks a path as seen in the current scan without rewriting its content,

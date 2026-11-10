@@ -35,6 +35,8 @@ nobody needs.
 | `OPENBACKUP_GC_INTERVAL` | `1h` | How often retention, garbage collection and integrity checks run |
 | `OPENBACKUP_MAX_CHUNK_BYTES` | `16MiB` | Largest single chunk upload accepted |
 | `OPENBACKUP_MAX_BODY_BYTES` | `32MiB` | Largest JSON request body accepted |
+| `OPENBACKUP_UPLOAD_BUDGET` | `64MiB` | In-flight upload wire bytes. Not a heap cap |
+| `OPENBACKUP_SQLITE_SYNC` | `NORMAL` | Set to `FULL` so metadata commits survive power loss |
 
 ### Sessions and enrolment
 
@@ -113,7 +115,11 @@ A complete file, with defaults shown:
 
   "limits": {
     "upload_bytes_per_sec": 0,
+    "read_bytes_per_sec": 0,
     "max_cpu_percent": 70,
+    "agent_cpu_percent": 0,
+    "memory_limit_bytes": 0,
+    "priority": "background",
     "pause_on_metered": true,
     "pause_on_battery": false,
     "min_battery_percent": 20,
@@ -151,7 +157,14 @@ A complete file, with defaults shown:
 - **`ignore`** is explained in [ignore-rules.md](ignore-rules.md).
   `max_file_size_bytes: 0` means the 8 GiB default; `-1` disables the limit.
 - **`limits`** is what keeps the agent something people keep installed. Zero means
-  unlimited for `upload_bytes_per_sec`. `pause_on_battery` is off by default
+  unlimited for `upload_bytes_per_sec` and `read_bytes_per_sec`.
+  `max_cpu_percent` pauses while the whole machine is busier than that.
+  `agent_cpu_percent` is this process's own budget as a percent of one core;
+  zero does not add extra sleeping. `memory_limit_bytes` is a soft heap target
+  (the same idea as `GOMEMLIMIT`). Zero uses 128 MiB. `-1` leaves the process
+  unlimited. The server applies the same 128 MiB target when `GOMEMLIMIT` is
+  unset. `priority` is `background` (the default: lower CPU and disk priority) or
+  `normal`. `pause_on_battery` is off by default
   because many laptops are never plugged in, and refusing to back one up would be
   a silent failure; `min_battery_percent` is the floor that applies regardless.
 - **`schedule.debounce`** is the wait after a file stops changing.

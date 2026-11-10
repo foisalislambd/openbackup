@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	// Pure Go SQLite driver: the server must cross-compile and run in a
@@ -41,11 +42,16 @@ func OpenDB(ctx context.Context, path string) (*DB, error) {
 		}
 	}
 	// WAL keeps readers (the dashboard) from blocking writers (agent uploads).
-	// synchronous=NORMAL is the right trade-off with WAL: a crash can lose the
-	// last transaction, but blobs are content-addressed so the agent simply
-	// re-sends. busy_timeout absorbs the brief contention of many agents.
+	// synchronous=NORMAL can lose the last committed transaction on power
+	// loss; blobs are content-addressed, so the agent re-sends. Set
+	// OPENBACKUP_SQLITE_SYNC=FULL when the metadata commit itself must
+	// survive power loss. The value is restricted to those two modes.
+	syncMode := "NORMAL"
+	if strings.EqualFold(os.Getenv("OPENBACKUP_SQLITE_SYNC"), "FULL") {
+		syncMode = "FULL"
+	}
 	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(10000)" +
-		"&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)&_txlock=immediate"
+		"&_pragma=synchronous(" + syncMode + ")&_pragma=foreign_keys(ON)&_txlock=immediate"
 	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err

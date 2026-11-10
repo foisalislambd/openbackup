@@ -12,11 +12,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/foisalislambd/openbackup/internal/agent/config"
@@ -34,6 +32,9 @@ type Item struct {
 	Size     int64
 	ModTime  time.Time
 	Mode     uint32
+	// Inode is the file identity on this machine. Zero means unknown.
+	// Together with size and mtime it lets a later scan skip the read.
+	Inode uint64
 	// LinkTarget is set for symlinks.
 	LinkTarget string
 }
@@ -81,7 +82,17 @@ type Scanner struct {
 // configuration keeps one walk consistent: the rules cannot change halfway
 // through a scan and leave part of a folder judged by different criteria.
 func New(set config.Settings) *Scanner {
-	return &Scanner{matcher: ignore.New(set.IgnoreConfig())}
+	return NewWithMatcher(ignore.New(set.IgnoreConfig()))
+}
+
+// NewWithMatcher walks with an existing matcher so the watcher, the full scan
+// and a delta all share one project registry and one set of .openbackupignore
+// rules. A nil matcher gets an empty policy.
+func NewWithMatcher(m *ignore.Matcher) *Scanner {
+	if m == nil {
+		m = ignore.New(ignore.Config{})
+	}
+	return &Scanner{matcher: m}
 }
 
 // Matcher exposes the compiled rules so the watcher can apply the same policy.
@@ -119,151 +130,152 @@ func (s *Scanner) walkRoot(ctx context.Context, root config.Root, result *Result
 		return fmt.Errorf("refusing to back up a protected system location (%s)", d.Reason)
 	}
 
-	return filepath.WalkDir(absRoot, func(abs string, entry fs.DirEntry, walkErr error) error {
+	return s.walkDir(ctx, root, absRoot, absRoot, "", result)
+}
+
+// walkDir lists dir once. That listing both feeds project detection and the
+// walk, so an accepted directory is not enumerated twice, and a name-based
+// exclusion does not stat the file.
+func (s *Scanner) walkDir(ctx context.Context, root config.Root, absRoot, dir, rel string, result *Result) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		result.addError(fmt.Sprintf("%s: %v", dir, err))
+		return nil
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	s.matcher.ObserveDirectory(rel, names, func() ([]byte, error) {
+		return readIgnoreFile(filepath.Join(dir, ignore.IgnoreFileName))
+	})
+
+	for _, entry := range entries {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if walkErr != nil {
-			// Unreadable directories are common (locked system folders, files
-			// held open by another process). Report and continue.
-			result.addError(fmt.Sprintf("%s: %v", abs, walkErr))
-			if entry != nil && entry.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
+		name := entry.Name()
+		abs := filepath.Join(dir, name)
+		childRel := name
+		if rel != "" {
+			childRel = rel + "/" + name
 		}
-		if abs == absRoot {
-			if entry.IsDir() {
-				s.detectProject(root, absRoot, abs)
-			}
-			return nil
-		}
+		snapPath := path.Join(root.Name, childRel)
 
-		snapPath, ok := snapshotPath(root, absRoot, abs)
-		if !ok {
-			return nil
-		}
-		relPath := strings.TrimPrefix(snapPath, root.Name+"/")
-
-		// Protected locations win over everything, including user includes: a
-		// junction or symlink pointing into C:\Windows must not drag the OS in.
-		// Paths that stay inside an accepted root under a soft prefix (/tmp) are
-		// allowed — otherwise every TempDir-based backup would be empty.
 		if d := s.matcher.SystemPathOutside(abs, absRoot); d.Skip {
 			result.recordSkip(Skip{SnapPath: snapPath, Reason: d.Reason, Rule: d.Rule,
 				Category: string(d.Category), IsDir: entry.IsDir()})
-			if entry.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
+			continue
+		}
+
+		// Name rules do not need a stat. Size rules do, and they are applied
+		// after Info below. Directory-only patterns are tested with isDir from
+		// the directory entry, which on most filesystems does not stat either.
+		if d := s.matcher.Match(childRel, entry.IsDir()); d.Skip {
+			result.recordSkip(Skip{SnapPath: snapPath, Reason: d.Reason, Rule: d.Rule,
+				Category: string(d.Category), IsDir: entry.IsDir()})
+			continue
 		}
 
 		if entry.IsDir() {
-			if d := s.matcher.Match(relPath, true); d.Skip {
-				result.recordSkip(Skip{SnapPath: snapPath, Reason: d.Reason, Rule: d.Rule,
-					Category: string(d.Category), IsDir: true})
-				return fs.SkipDir
-			}
-			// Register a project before descending, so its build directories are
-			// excluded on the way down rather than after they are walked.
-			s.detectProject(root, absRoot, abs)
 			info, err := entry.Info()
 			if err != nil {
 				result.addError(fmt.Sprintf("%s: %v", abs, err))
-				return nil
+				continue
 			}
 			result.Dirs++
-			return s.emit(Item{
+			if err := s.emit(Item{
 				AbsPath:  abs,
 				SnapPath: snapPath,
 				Type:     api.EntryDir,
 				ModTime:  info.ModTime().UTC().Truncate(time.Second),
 				Mode:     uint32(info.Mode().Perm()),
-			})
+			}); err != nil {
+				return err
+			}
+			if err := s.walkDir(ctx, root, absRoot, abs, childRel, result); err != nil {
+				return err
+			}
+			continue
 		}
 
 		info, err := entry.Info()
 		if err != nil {
 			result.addError(fmt.Sprintf("%s: %v", abs, err))
-			return nil
+			continue
 		}
-
-		// Symlinks are recorded, never followed. Following them would duplicate
-		// data, risk infinite loops, and can reach outside the backup root.
 		if info.Mode()&os.ModeSymlink != 0 {
+			// The name was already accepted. Readlink only happens for links
+			// we are going to record.
 			target, err := os.Readlink(abs)
 			if err != nil {
 				result.addError(fmt.Sprintf("%s: %v", abs, err))
-				return nil
+				continue
 			}
-			if d := s.matcher.Match(relPath, false); d.Skip {
-				result.recordSkip(Skip{SnapPath: snapPath, Reason: d.Reason, Rule: d.Rule,
-					Category: string(d.Category)})
-				return nil
-			}
-			return s.emit(Item{
+			if err := s.emit(Item{
 				AbsPath:    abs,
 				SnapPath:   snapPath,
 				Type:       api.EntrySymlink,
 				ModTime:    info.ModTime().UTC().Truncate(time.Second),
 				LinkTarget: target,
-			})
+			}); err != nil {
+				return err
+			}
+			continue
 		}
-
-		// Sockets, devices, pipes and other special files have no meaning once
-		// restored elsewhere.
 		if !info.Mode().IsRegular() {
 			result.recordSkip(Skip{SnapPath: snapPath, Reason: "not a regular file", Rule: "special-file"})
-			return nil
+			continue
 		}
-
-		if d := s.matcher.MatchFile(relPath, info.Size()); d.Skip {
+		if d := s.matcher.MatchFile(childRel, info.Size()); d.Skip {
 			result.recordSkip(Skip{SnapPath: snapPath, Reason: d.Reason, Rule: d.Rule,
 				Category: string(d.Category), Bytes: info.Size()})
-			return nil
+			continue
 		}
-
 		result.Files++
 		result.Bytes += info.Size()
-		return s.emit(Item{
+		if err := s.emit(Item{
 			AbsPath:  abs,
 			SnapPath: snapPath,
 			Type:     api.EntryFile,
 			Size:     info.Size(),
 			ModTime:  info.ModTime().UTC().Truncate(time.Second),
 			Mode:     uint32(info.Mode().Perm()),
-		})
-	})
+			Inode:    fileID(info),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
+
+func readIgnoreFile(p string) ([]byte, error) {
+	info, err := os.Lstat(p)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > ignoreMaxFile {
+		return nil, errors.New("ignore file is not a small regular file")
+	}
+	return os.ReadFile(p)
+}
+
+const ignoreMaxFile = 256 << 10
+
+func fileID(info os.FileInfo) uint64 { return fileIdent(info) }
+
+// FileIdent is the filesystem identity used to notice a replaced file that
+// kept the same size and timestamp. Zero means the platform did not report one.
+func FileIdent(info os.FileInfo) uint64 { return fileIdent(info) }
 
 func (s *Scanner) emit(item Item) error {
 	if s.Emit == nil {
 		return nil
 	}
 	return s.Emit(item)
-}
-
-// detectProject looks for project markers in a directory and registers the
-// resulting exclusions.
-func (s *Scanner) detectProject(root config.Root, absRoot, dir string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		names = append(names, e.Name())
-	}
-	rel, ok := ignore.RelPath(absRoot, dir)
-	if !ok {
-		return
-	}
-	if rel == "." {
-		rel = ""
-	}
-	if project := ignore.DetectProject(rel, names); project != nil {
-		s.matcher.RegisterProject(project)
-	}
 }
 
 // snapshotPath maps an absolute path to its path inside the snapshot.
