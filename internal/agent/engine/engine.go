@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -630,6 +631,7 @@ func (e *Engine) runBackup(ctx context.Context, t trigger) {
 
 // backup runs a single snapshot.
 func (e *Engine) backup(ctx context.Context, t trigger) error {
+	defer e.reclaim()
 	// One snapshot of the settings for the whole run: a folder added midway
 	// through would otherwise appear in the walk but not in the snapshot's roots.
 	set := e.settings()
@@ -974,7 +976,7 @@ func (e *Engine) processItem(ctx context.Context, item scanner.Item, kind api.Sn
 				Mode: state.Mode, Chunks: state.Chunks, Digest: state.Digest,
 			})
 		}
-		return nil
+		return e.maybeFlushStaged(ctx, sender)
 	}
 
 	e.setCurrentPath(item.SnapPath)
@@ -1006,7 +1008,7 @@ func (e *Engine) processItem(ctx context.Context, item scanner.Item, kind api.Sn
 		e.flushEvents(ctx)
 	}
 
-	if err := e.stageUploaded(generation, item, *result); err != nil {
+	if err := e.stageUploaded(ctx, generation, item, *result, sender); err != nil {
 		return err
 	}
 	return nil
@@ -1015,7 +1017,7 @@ func (e *Engine) processItem(ctx context.Context, item scanner.Item, kind api.Sn
 // stageUploaded remembers a file only after its chunks are queued. The index
 // row and the snapshot entry are written together in flushPipeline, which
 // uploads the queue first.
-func (e *Engine) stageUploaded(generation int64, item scanner.Item, result uploader.FileResult) error {
+func (e *Engine) stageUploaded(ctx context.Context, generation int64, item scanner.Item, result uploader.FileResult, sender *entrySender) error {
 	e.staged = append(e.staged, index.Change{
 		Put:        true,
 		Generation: generation,
@@ -1028,7 +1030,28 @@ func (e *Engine) stageUploaded(generation int64, item scanner.Item, result uploa
 		Path: item.SnapPath, Type: api.EntryFile, Size: result.Size, ModTime: item.ModTime,
 		Mode: item.Mode, Chunks: result.Chunks, Digest: result.Digest,
 	})
-	return nil
+	return e.maybeFlushStaged(ctx, sender)
+}
+
+// stageBatch publishes file metadata before the whole tree is known. The
+// uploaded chunks then have snapshot references, and the agent does not hold
+// every file's entry until the walk finishes.
+const stageBatch = 256
+
+func (e *Engine) maybeFlushStaged(ctx context.Context, sender *entrySender) error {
+	if len(e.staged) < stageBatch && len(e.stagedEntries) < stageBatch {
+		return nil
+	}
+	return e.flushPipeline(ctx, sender)
+}
+
+// reclaim returns pipeline memory after a backup. It is safe to call when no
+// upload is in progress.
+func (e *Engine) reclaim() {
+	if e.up != nil {
+		e.up.ReleaseMemory()
+	}
+	debug.FreeOSMemory()
 }
 
 // flushPipeline uploads any chunks still held by the uploader, then commits
@@ -1037,15 +1060,18 @@ func (e *Engine) flushPipeline(ctx context.Context, sender *entrySender) error {
 	if err := e.up.Flush(ctx); err != nil {
 		return err
 	}
-	if err := e.idx.Apply(ctx, e.staged); err != nil {
-		return err
-	}
-	e.staged = nil
+	// Publish the snapshot entries before the local index. A crash then makes
+	// the next backup read the files again (the upload is deduplicated) instead
+	// of trusting an index for files the snapshot never recorded.
 	for _, ent := range e.stagedEntries {
 		if err := sender.add(ctx, ent); err != nil {
 			return err
 		}
 	}
+	if err := e.idx.Apply(ctx, e.staged); err != nil {
+		return err
+	}
+	e.staged = nil
 	e.stagedEntries = nil
 	return nil
 }

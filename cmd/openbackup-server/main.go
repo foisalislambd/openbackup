@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -107,6 +108,12 @@ func setup(ctx context.Context) (*deps, error) {
 		return nil, err
 	}
 	log := logx.New(logx.Options{Level: cfg.LogLevel, JSON: cfg.LogJSON})
+	// The upload budget limits in-flight wire bytes, not the process heap.
+	// When the operator has not set GOMEMLIMIT, keep the idle server from
+	// holding an unbounded heap.
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(128 << 20)
+	}
 
 	db, err := store.OpenDB(ctx, cfg.DBPath())
 	if err != nil {

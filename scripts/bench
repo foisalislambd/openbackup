@@ -287,6 +287,7 @@ def main():
             "OPENBACKUP_ADMIN_EMAIL": "bench@example.com",
             "OPENBACKUP_ADMIN_PASSWORD": "a-long-enough-password",
             "OPENBACKUP_GC_INTERVAL": "24h",
+            "GOMEMLIMIT": "off",
         }
     )
     log_path = base / "server.log"
@@ -343,6 +344,7 @@ def main():
                 "priority": "normal",
                 "agent_cpu_percent": 0,
                 "read_bytes_per_sec": 0,
+                "memory_limit_bytes": -1,
             }
         )
         cfg["limits"] = limits

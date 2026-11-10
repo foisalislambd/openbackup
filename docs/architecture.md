@@ -88,10 +88,15 @@ Two consequences worth knowing:
 Blocks live in a content-addressed store. A blob of 512 KiB or more is one file,
 sharded by the first bytes of its digest, which is the layout every existing
 repository already uses. Smaller blobs are appended to a pack file (`OBPK`) with
-a companion index (`OIDX`). The bytes inside the pack are the same codec blobs
-as before, so a restore does not learn a new format. If the index is missing
-after a crash, it is rebuilt by scanning the pack. S3 storage stays one object
-per blob. Writes are still fsynced and renamed into place. Reads verify nothing
+a companion index (`OIDX`). New packs checksum every frame. The index speeds
+startup; membership of a deleted blob is a checksummed tombstone in
+`packs/deleted`, so a missing index cannot bring a deleted blob back. A short
+read keeps only complete frames. Deleting a member rewrites the surviving
+frames into a new pack, which is what returns the disk space. Version 1 packs
+still restore. The bytes inside the pack are the same codec blobs
+as before, so a restore does not learn a new format. S3 storage stays one object
+per blob. Writes are still fsynced and renamed into place, and the new pack
+directory is synced into `packs/`. Reads verify nothing
 at the store level — the agent verifies every chunk against its digest as it
 restores, which catches corruption wherever it happened.
 

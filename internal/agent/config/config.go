@@ -73,8 +73,9 @@ type Limits struct {
 	UploadConcurrency int `json:"upload_concurrency"`
 	// ReadBytesPerSec paces reading source files. 0 means unlimited.
 	ReadBytesPerSec int64 `json:"read_bytes_per_sec"`
-	// MemoryLimitBytes is a soft heap target (GOMEMLIMIT). 0 leaves the
-	// process default, which is also what the GOMEMLIMIT environment sets.
+	// MemoryLimitBytes is a soft heap target (GOMEMLIMIT). 0 becomes the
+	// default (128 MiB) when the config is loaded. -1 leaves the process
+	// unlimited. This is not a hard cap on allocations.
 	MemoryLimitBytes int64 `json:"memory_limit_bytes"`
 	// Priority is "background" or "normal". Empty means background.
 	Priority string `json:"priority,omitempty"`
@@ -154,6 +155,7 @@ func Default() *Config {
 			PauseWhileFullscreen: true,
 			UploadConcurrency:    3,
 			Priority:             "background",
+			MemoryLimitBytes:     128 << 20,
 		},
 		Schedule: Schedule{
 			FullScanInterval:    12 * time.Hour,
@@ -242,6 +244,9 @@ func (c *Config) normalize() {
 	}
 	if c.Limits.Priority == "" {
 		c.Limits.Priority = "background"
+	}
+	if c.Limits.MemoryLimitBytes == 0 {
+		c.Limits.MemoryLimitBytes = def.Limits.MemoryLimitBytes
 	}
 	if c.LogLevel == "" {
 		c.LogLevel = def.LogLevel

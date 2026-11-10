@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/foisalislambd/openbackup/internal/hash"
 )
@@ -176,17 +177,28 @@ type ChunkInfo struct {
 	Encrypted   bool
 }
 
-// UnreferencedChunks lists stored chunks that no snapshot references any more.
-// Garbage collection deletes the blob first and the row second, so a crash in
-// between leaves a row whose blob is gone; the next pass notices and cleans up.
+// gcGrace keeps a freshly stored chunk even when no snapshot references it
+// yet. Agents upload chunks before they publish the file list.
+const gcGrace = 15 * time.Minute
+
+// UnreferencedChunks lists chunks that no snapshot references, that are older
+// than the grace period, and that are not covered by a backup still running.
+// The list can go stale; ClaimUnreferencedChunk must confirm each digest
+// before its blob is deleted.
 func (db *DB) UnreferencedChunks(ctx context.Context, limit int) ([]ChunkInfo, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
+	cutoff := nowMillis() - gcGrace.Milliseconds()
 	rows, err := db.sql.QueryContext(ctx, `
 		SELECT c.digest, c.stored_bytes, c.plain_bytes FROM chunks c
 		WHERE NOT EXISTS (SELECT 1 FROM snapshot_chunks sc WHERE sc.digest = c.digest)
-		LIMIT ?`, limit)
+		  AND NOT EXISTS (
+		    SELECT 1 FROM snapshots s
+		    WHERE s.status = 'running' AND c.created_at >= s.started_at - ?
+		  )
+		  AND c.created_at < ?
+		LIMIT ?`, gcGrace.Milliseconds(), cutoff, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -251,4 +263,48 @@ func (db *DB) IsChunkKnown(ctx context.Context, digest string) (bool, error) {
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// ClaimUnreferencedChunk deletes the metadata row only when digest is still
+// unreferenced under the same rules as UnreferencedChunks, then runs deleteBlob
+// before the transaction commits. AddEntries takes the same write lock, so it
+// cannot publish a reference between the check and the blob delete. deleteBlob
+// failure rolls the row back; the next pass tries again.
+func (db *DB) ClaimUnreferencedChunk(ctx context.Context, digest string, deleteBlob func() error) (bool, error) {
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	cutoff := nowMillis() - gcGrace.Milliseconds()
+	res, err := tx.ExecContext(ctx, `
+		DELETE FROM chunks WHERE digest = ?
+		  AND NOT EXISTS (SELECT 1 FROM snapshot_chunks sc WHERE sc.digest = chunks.digest)
+		  AND NOT EXISTS (
+		    SELECT 1 FROM snapshots s
+		    WHERE s.status = 'running' AND chunks.created_at >= s.started_at - ?
+		  )
+		  AND created_at < ?`, digest, gcGrace.Milliseconds(), cutoff)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if n == 0 {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM account_chunks WHERE digest = ?`, digest); err != nil {
+		return false, err
+	}
+	if deleteBlob != nil {
+		if err := deleteBlob(); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }

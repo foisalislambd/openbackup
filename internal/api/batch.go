@@ -72,6 +72,16 @@ func WriteChunkBatch(w io.Writer, blobs []ChunkBlob) error {
 	return nil
 }
 
+// ChunkBatchSize is the exact encoded size of blobs, so callers can allocate
+// the buffer once.
+func ChunkBatchSize(blobs []ChunkBlob) int {
+	n := len(chunkBatchMagic) + binary.MaxVarintLen64
+	for _, blob := range blobs {
+		n += 32 + binary.MaxVarintLen64 + binary.MaxVarintLen64 + len(blob.Blob)
+	}
+	return n
+}
+
 // ReadChunkBatch parses a batch. limit is the maximum accepted blob size.
 func ReadChunkBatch(r io.Reader, limit int) ([]ChunkBlob, error) {
 	magic := make([]byte, 4)

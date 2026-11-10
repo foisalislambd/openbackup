@@ -5,8 +5,10 @@ package maintenance
 import (
 	"context"
 	"log/slog"
+	"runtime/debug"
 	"time"
 
+	"github.com/foisalislambd/openbackup/internal/bufpool"
 	"github.com/foisalislambd/openbackup/internal/server/store"
 )
 
@@ -124,6 +126,10 @@ func (r *Runner) run(ctx context.Context, verify bool) (Report, error) {
 	}
 
 	report.Duration = time.Since(start)
+	// One release per pass, not per blob. Pools and the heap can otherwise
+	// stay at the high-water mark of the last backup until the process exits.
+	bufpool.Release()
+	debug.FreeOSMemory()
 	return report, nil
 }
 
@@ -218,10 +224,11 @@ func (r *Runner) applyRetention(ctx context.Context) (int, error) {
 
 // collectGarbage deletes blobs that no snapshot references any more.
 //
-// Order matters: the blob goes first, then the metadata row. A crash in between
-// leaves a row whose blob is missing, which the next pass sees as unreferenced
-// and cleans up. The reverse order would leave an unreachable blob on disk
-// forever, since nothing would remember it exists.
+// Each digest is claimed inside a write transaction that rechecks references
+// and deletes the blob before committing. A snapshot that gains the chunk
+// after the candidate list was built keeps both the row and the blob. A crash
+// after the blob delete but before commit restores the row; the next pass
+// deletes the already-missing blob (Delete is idempotent) and commits.
 func (r *Runner) collectGarbage(ctx context.Context) (deleted int, freed int64, err error) {
 	for {
 		chunks, err := r.db.UnreferencedChunks(ctx, gcBatchSize)
@@ -232,40 +239,25 @@ func (r *Runner) collectGarbage(ctx context.Context) (deleted int, freed int64, 
 			return deleted, freed, nil
 		}
 		passDeleted := 0
-		removed := make([]string, 0, len(chunks))
-		freedInPass := make(map[string]int64, len(chunks))
 		for _, chunk := range chunks {
 			if ctx.Err() != nil {
 				return deleted, freed, ctx.Err()
 			}
-			if err := r.blobs.Delete(ctx, chunk.Digest); err != nil {
-				r.log.Error("delete blob", "digest", chunk.Digest, "error", err)
+			claimed, err := r.db.ClaimUnreferencedChunk(ctx, chunk.Digest, func() error {
+				return r.blobs.Delete(ctx, chunk.Digest)
+			})
+			if err != nil {
+				r.log.Error("delete unreferenced chunk", "digest", chunk.Digest, "error", err)
 				continue
 			}
-			removed = append(removed, chunk.Digest)
-			freedInPass[chunk.Digest] = chunk.StoredBytes
-		}
-		if err := r.db.DeleteChunkRows(ctx, removed); err != nil {
-			r.log.Error("delete chunk rows", "error", err)
-			for _, digest := range removed {
-				if err := r.db.DeleteChunkRow(ctx, digest); err != nil {
-					r.log.Error("delete chunk row", "digest", digest, "error", err)
-					continue
-				}
-				passDeleted++
-				deleted++
-				freed += freedInPass[digest]
+			if !claimed {
+				continue
 			}
-		} else {
-			for _, digest := range removed {
-				passDeleted++
-				deleted++
-				freed += freedInPass[digest]
-			}
+			passDeleted++
+			deleted++
+			freed += chunk.StoredBytes
 		}
 		if passDeleted == 0 && len(chunks) >= gcBatchSize {
-			// A full batch that made zero progress would be refetched forever;
-			// stop and let the operator fix the underlying storage problem.
 			r.log.Warn("garbage collection made no progress; stopping this pass",
 				"blocked_chunks", len(chunks))
 			return deleted, freed, nil

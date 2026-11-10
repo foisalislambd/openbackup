@@ -185,8 +185,50 @@ func (c *Codec) release(slot *EncodeSlot) {
 		return
 	}
 	c.mu.Lock()
-	c.spare = append(c.spare, slot)
+	if len(c.spare) < 2 {
+		c.spare = append(c.spare, slot)
+		c.mu.Unlock()
+		return
+	}
 	c.mu.Unlock()
+	c.discard(slot)
+}
+
+func (c *Codec) discard(slot *EncodeSlot) {
+	if slot == nil {
+		return
+	}
+	if slot.buf != nil {
+		bufpool.Put(slot.buf[:0])
+		slot.buf = nil
+	}
+	if slot.scratch != nil {
+		bufpool.Put(slot.scratch[:0])
+		slot.scratch = nil
+	}
+	if slot.enc != nil && slot.enc != c.enc {
+		_ = slot.enc.Close()
+		c.mu.Lock()
+		for i, enc := range c.live {
+			if enc == slot.enc {
+				c.live = append(c.live[:i], c.live[i+1:]...)
+				break
+			}
+		}
+		c.mu.Unlock()
+	}
+}
+
+// Trim closes idle encoders and drops their buffers. Slots the caller still
+// holds stay valid; their encoders remain in live.
+func (c *Codec) Trim() {
+	c.mu.Lock()
+	spare := c.spare
+	c.spare = nil
+	c.mu.Unlock()
+	for _, slot := range spare {
+		c.discard(slot)
+	}
 }
 
 func (c *Codec) encode(slot *EncodeSlot, plain []byte, plainDigest string) ([]byte, error) {

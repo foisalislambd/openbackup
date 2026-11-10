@@ -21,6 +21,10 @@ type Snapshot struct {
 	HeapAlloc  uint64 `json:"heap_alloc"`
 	HeapInuse  uint64 `json:"heap_inuse"`
 	Sys        uint64 `json:"sys"`
+	// RSSKiB and HWMKiB are process resident memory at exit. HWM is the peak
+	// since the process started. Both are zero when /proc is unavailable.
+	RSSKiB uint64 `json:"rss_kib"`
+	HWMKiB uint64 `json:"hwm_kib"`
 }
 
 // Dump writes MemStats as JSON to path. An empty path does nothing.
@@ -31,6 +35,7 @@ func Dump(path string) {
 	}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
+	rss, hwm := readRSS()
 	snap := Snapshot{
 		TotalAlloc: m.TotalAlloc,
 		Mallocs:    m.Mallocs,
@@ -40,6 +45,8 @@ func Dump(path string) {
 		HeapAlloc:  m.HeapAlloc,
 		HeapInuse:  m.HeapInuse,
 		Sys:        m.Sys,
+		RSSKiB:     rss,
+		HWMKiB:     hwm,
 	}
 	raw, err := json.Marshal(snap)
 	if err != nil {

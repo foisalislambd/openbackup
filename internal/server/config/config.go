@@ -45,8 +45,9 @@ type Config struct {
 	GCInterval time.Duration
 	// QuotaBytes is the default per-account quota; 0 means unlimited.
 	QuotaBytes int64
-	// UploadBudgetBytes caps how many chunk-upload bytes may be buffered at
-	// once across all devices. Zero uses 64 MiB.
+	// UploadBudgetBytes caps how many chunk-upload wire bytes may be buffered
+	// at once across all devices. It is not a cap on the process heap: decoded
+	// chunks and pack rewriting use additional memory. Zero uses 64 MiB.
 	UploadBudgetBytes int64
 	// RequireEncryption refuses plaintext chunks server-wide. Accounts can also
 	// require it individually from the dashboard; this is the harder switch, for

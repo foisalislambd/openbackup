@@ -1,15 +1,13 @@
 // Package bufpool reuses byte slices across the backup pipeline.
 //
-// FastCDC, compression and chunk uploads used to allocate a fresh buffer for
-// every file and every chunk. A small set of size classes keeps a few buffers
-// of each size warm so a backup of thousands of tiny files does not allocate
-// an 8 MiB window per file.
+// The pool is small on purpose. An idle agent may not garbage-collect for a
+// long time, and an unbounded cache of multi-megabyte windows is what kept
+// the process large after a backup finished. Large classes are not retained.
+// Release drops the rest when a run ends.
 package bufpool
 
 import "sync"
 
-// classes are capacities, smallest to largest. A request is rounded up to the
-// next class so a buffer can be reused for a later request of a similar size.
 var classes = [...]int{
 	4 << 10,
 	16 << 10,
@@ -21,20 +19,24 @@ var classes = [...]int{
 	16 << 20,
 }
 
-var pools [len(classes)]sync.Pool
+// retained caps how many idle buffers each class may hold. Zero means the
+// buffer is never cached.
+var retained = [...]int{8, 4, 4, 2, 2, 1, 0, 0}
+
+type bucket struct {
+	mu    sync.Mutex
+	bufs  [][]byte
+	limit int
+}
+
+var pools [len(classes)]bucket
 
 func init() {
-	for i, n := range classes {
-		size := n
-		pools[i].New = func() any {
-			b := make([]byte, size)
-			return &b
-		}
+	for i := range pools {
+		pools[i].limit = retained[i]
 	}
 }
 
-// classIndex returns the pool bucket that can hold n bytes, or -1 when n is
-// larger than every class (the caller allocates directly).
 func classIndex(n int) int {
 	if n < 0 {
 		n = 0
@@ -47,8 +49,7 @@ func classIndex(n int) int {
 	return -1
 }
 
-// Get returns a buffer whose length and capacity are at least n.
-// The contents are undefined. Pair every Get with Put.
+// Get returns a buffer of length n. Pair it with Put exactly once.
 func Get(n int) []byte {
 	if n < 0 {
 		n = 0
@@ -57,28 +58,47 @@ func Get(n int) []byte {
 	if idx < 0 {
 		return make([]byte, n)
 	}
-	b := pools[idx].Get().(*[]byte)
-	buf := *b
-	if cap(buf) < classes[idx] {
-		buf = make([]byte, classes[idx])
+	b := &pools[idx]
+	b.mu.Lock()
+	if nbuf := len(b.bufs); nbuf > 0 {
+		buf := b.bufs[nbuf-1]
+		b.bufs[nbuf-1] = nil
+		b.bufs = b.bufs[:nbuf-1]
+		b.mu.Unlock()
+		if cap(buf) < classes[idx] {
+			buf = make([]byte, classes[idx])
+		}
+		return buf[:n]
 	}
-	return buf[:n]
+	b.mu.Unlock()
+	return make([]byte, classes[idx])[:n]
 }
 
-// Put returns a buffer acquired from Get. Buffers that did not come from a
-// class, or that have been grown past their class, are left for the garbage
-// collector.
+// Put returns a buffer from Get. Putting the same slice twice aliases later
+// Gets. Oversized or non-class buffers are dropped.
 func Put(b []byte) {
 	if b == nil {
 		return
 	}
 	idx := classIndex(cap(b))
-	if idx < 0 || cap(b) != classes[idx] {
+	if idx < 0 || cap(b) != classes[idx] || pools[idx].limit == 0 {
 		return
 	}
-	// Drop the caller's view of the bytes so a retained slice cannot pin the
-	// buffer, then hand the storage back. The pointer indirection is what
-	// sync.Pool requires to avoid allocating on Put.
-	full := b[:cap(b)]
-	pools[idx].Put(&full)
+	p := &pools[idx]
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.bufs) >= p.limit {
+		return
+	}
+	p.bufs = append(p.bufs, b[:cap(b)])
+}
+
+// Release drops every cached buffer.
+func Release() {
+	for i := range pools {
+		p := &pools[i]
+		p.mu.Lock()
+		p.bufs = nil
+		p.mu.Unlock()
+	}
 }

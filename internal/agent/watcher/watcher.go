@@ -218,6 +218,16 @@ func (w *Watcher) watchTree(ctx context.Context, matcher *ignore.Matcher, root c
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+	// The parent already observed its own rules. An excluded directory is not
+	// listed and its .openbackupignore is not read.
+	if rel != "" {
+		if d := matcher.SystemPathOutside(dir, absRoot); d.Skip {
+			return nil
+		}
+		if d := matcher.Match(rel, true); d.Skip {
+			return nil
+		}
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -229,14 +239,6 @@ func (w *Watcher) watchTree(ctx context.Context, matcher *ignore.Matcher, root c
 	matcher.ObserveDirectory(rel, names, func() ([]byte, error) {
 		return readRulesFile(filepath.Join(dir, ignore.IgnoreFileName))
 	})
-	if d := matcher.SystemPathOutside(dir, absRoot); d.Skip && dir != absRoot {
-		return nil
-	}
-	if rel != "" {
-		if d := matcher.Match(rel, true); d.Skip {
-			return nil
-		}
-	}
 	if err := w.addDir(dir); err != nil {
 		return err
 	}
@@ -254,6 +256,9 @@ func (w *Watcher) watchTree(ctx context.Context, matcher *ignore.Matcher, root c
 			continue
 		}
 		if !queueFiles {
+			continue
+		}
+		if matcher.Match(childRel, false).Skip {
 			continue
 		}
 		info, err := entry.Info()

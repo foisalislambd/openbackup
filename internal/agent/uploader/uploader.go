@@ -173,6 +173,23 @@ func (u *Uploader) Flush(ctx context.Context) error {
 	return err
 }
 
+// ReleaseMemory drops buffers kept warm between files. Called after a backup
+// so an idle agent does not retain the last run's windows.
+func (u *Uploader) ReleaseMemory() {
+	u.mu.Lock()
+	if u.chunker != nil {
+		u.chunker.SetBuffer(nil)
+	}
+	if u.pending != nil {
+		u.pending.release()
+	}
+	u.mu.Unlock()
+	if u.codec != nil {
+		u.codec.Trim()
+	}
+	bufpool.Release()
+}
+
 // SetChunkConfig swaps the chunking parameters, which is how a server-side
 // policy change reaches running uploads. The next file picks it up; the file
 // currently being chunked keeps the settings it started with.
@@ -232,7 +249,13 @@ func (u *Uploader) UploadFile(ctx context.Context, path string, expectedSize int
 	cfg := u.chunkConfig()
 	window := bufpool.Get(chunk.BufferSize(cfg, expectedSize))
 	u.chunker.SetBuffer(window)
-	defer bufpool.Put(window[:0])
+	defer func() {
+		// Drop the chunker's reference before the buffer goes back into the
+		// pool. Otherwise the next Get can alias a window the chunker still
+		// believes it owns.
+		u.chunker.SetBuffer(nil)
+		bufpool.Put(window[:0])
+	}()
 
 	u.fileHash.Reset()
 	var src io.Reader = f
@@ -274,8 +297,9 @@ func (u *Uploader) UploadFile(ctx context.Context, path string, expectedSize int
 		// have to be copied before the batch is handed to an encoder.
 		copied := bufpool.Get(len(c.Data))
 		copy(copied, c.Data)
+		// enqueue takes ownership of copied. A failed flush returns it; putting
+		// it here as well would place the same storage in the pool twice.
 		if err := u.enqueue(ctx, digest, copied, &progress); err != nil {
-			bufpool.Put(copied[:0])
 			return nil, err
 		}
 	}
@@ -286,17 +310,23 @@ func (u *Uploader) UploadFile(ctx context.Context, path string, expectedSize int
 
 func (u *Uploader) enqueue(ctx context.Context, digest string, data []byte, progress *Progress) error {
 	u.mu.Lock()
-	b := u.pending
-	b.add(digest, data)
-	var flush *batch
-	if b.full() {
-		flush = b
+	if u.pending.ready() {
+		flush := u.pending
 		u.pending = newBatch()
+		u.mu.Unlock()
+		if err := u.finishFlush(ctx, flush, progress); err != nil {
+			// data was not adopted by the flushed batch.
+			bufpool.Put(data[:0])
+			return err
+		}
+		u.mu.Lock()
 	}
+	u.pending.add(digest, data)
 	u.mu.Unlock()
-	if flush == nil {
-		return nil
-	}
+	return nil
+}
+
+func (u *Uploader) finishFlush(ctx context.Context, flush *batch, progress *Progress) error {
 	uploaded, skipped, err := u.flushBatch(ctx, flush)
 	flush.release()
 	if err != nil {
@@ -501,7 +531,7 @@ func (b *batch) add(digest string, data []byte) {
 	b.bytes += len(data)
 }
 
-func (b *batch) full() bool {
+func (b *batch) ready() bool {
 	return len(b.chunks) >= maxBatchChunks || b.bytes >= maxBatchBytes
 }
 

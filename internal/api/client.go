@@ -402,6 +402,7 @@ func (c *Client) PutChunks(ctx context.Context, blobs []ChunkBlob) error {
 		return nil
 	}
 	var body bytes.Buffer
+	body.Grow(ChunkBatchSize(blobs))
 	if err := WriteChunkBatch(&body, blobs); err != nil {
 		return err
 	}
