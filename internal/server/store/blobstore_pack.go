@@ -181,7 +181,7 @@ func (b *FSBlobs) sealSmall(parts []BlobPart, indexes []int, written []int64) er
 	for _, i := range freshIdx {
 		written[i] = int64(len(parts[i].Data))
 	}
-	return nil
+	return notePackFormat(b.root)
 }
 
 func newPackID() (string, error) {
@@ -202,6 +202,11 @@ func newPackID() (string, error) {
 var Fault func(stage string) error
 
 func fault(stage string) error {
+	// A real process kill, used by the crash tests. Production leaves both
+	// variables unset. This is not a power-loss test: the kernel can still
+	// hold bytes that a power cut would drop, and the kill happens at the
+	// named stage rather than at a random instruction.
+	crashWait(stage)
 	if Fault == nil {
 		return nil
 	}
@@ -432,7 +437,7 @@ func (b *FSBlobs) installCompacted(oldID string, payloads []BlobPart) error {
 		return err
 	}
 	_ = syncDir(filepath.Dir(oldPath))
-	return nil
+	return notePackFormat(b.root)
 }
 
 func (b *FSBlobs) packPath(id string) string {

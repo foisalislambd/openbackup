@@ -31,6 +31,7 @@ older agent keeps working against a newer server, so upgrade the server first.
 - `memory_limit_bytes` defaults to 128 MiB (`-1` disables it). The server sets the same target when `GOMEMLIMIT` is unset.
 - The upload budget charges the larger of the wire size and the plaintext length in the blob header, across every device at once, before the blob is decoded. A caller-supplied length that understates the header does not reduce the charge. A request that cannot fit is rejected. Uploads stop when the blob volume has less than 8 MiB free.
 - Windows no longer fails a pack write when the OS refuses to flush a directory handle. The pack file is still fsynced before it is renamed. Linux and macOS still fsync the directory as well.
+- A `pack-format` file is written when a version-2 pack is created. This server refuses to open a repository whose file names a newer format. An older server does not read the file; do not point one at a directory that already contains version-2 packs.
 - Completing a snapshot reads each referenced blob. A missing blob, or an unencrypted blob that does not match its digest, marks the snapshot failed.
 - Changing `.openbackupignore` updates the watcher before the next event is queued.
 

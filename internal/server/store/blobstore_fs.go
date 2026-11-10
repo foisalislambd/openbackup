@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -58,6 +59,9 @@ func NewFSBlobs(root string) (*FSBlobs, error) {
 	// A crash mid-upload leaves temp files behind; clean them at startup so a
 	// long-running server does not slowly fill the disk with orphans.
 	b.cleanTemp()
+	if err := checkPackFormat(abs); err != nil {
+		return nil, err
+	}
 	if err := b.loadPacks(); err != nil {
 		return nil, err
 	}
@@ -66,6 +70,39 @@ func NewFSBlobs(root string) (*FSBlobs, error) {
 
 // Location returns the base directory.
 func (b *FSBlobs) Location() string { return b.root }
+
+// supportedPackFormat is the newest pack layout this binary will open.
+// pack-format is written when a version-2 pack is created. A higher number
+// means a newer server wrote the repository; opening it here could hide or
+// corrupt data, so startup refuses. An older binary does not read this file.
+// Do not point an older server at a directory whose pack-format is 2.
+const supportedPackFormat = 2
+
+func packFormatPath(root string) string {
+	return filepath.Join(root, "pack-format")
+}
+
+func checkPackFormat(root string) error {
+	data, err := os.ReadFile(packFormatPath(root))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return fmt.Errorf("store: pack-format: %w", err)
+	}
+	if n > supportedPackFormat {
+		return fmt.Errorf("store: repository pack format %d is newer than this server (%d); refusing to open", n, supportedPackFormat)
+	}
+	return nil
+}
+
+func notePackFormat(root string) error {
+	return os.WriteFile(packFormatPath(root), []byte(strconv.Itoa(supportedPackFormat)+"\n"), 0o640)
+}
 
 // FreeBytesOverride replaces the filesystem reading. It is nil outside tests.
 var FreeBytesOverride func() int64

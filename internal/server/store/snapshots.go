@@ -205,6 +205,8 @@ func (db *DB) CompleteSnapshot(ctx context.Context, snapshotID string, req api.C
 	if completed.IsZero() {
 		completed = time.Now().UTC()
 	}
+	// Before the status update. A kill here leaves the snapshot running.
+	crashWait("snapshot-complete")
 	res, err := db.sql.ExecContext(ctx,
 		`UPDATE snapshots SET status = ?, completed_at = ?, file_count = ?, dir_count = ?, total_bytes = ?,
 		 uploaded_bytes = ?, skipped_count = ?, error = ? WHERE id = ? AND status = ?`,

@@ -135,6 +135,21 @@ rename can drop the new directory entry until the volume flushes it.
 metadata commits durable across power loss; the default remains
 `synchronous=NORMAL`.
 
+`pack-format` is written next to the blobs when this server creates a
+version-2 pack. A repository written by an older build of this series has v2
+packs and no marker until the next pack write; a missing marker is not proof
+that the directory is safe to open with an older binary. This server refuses
+to open a repository whose `pack-format` is newer than 2. An older binary
+does not read that file. Do not point an older server at a directory that
+contains version-2 packs; it will not refuse, and it cannot read them. Loose
+blobs and version-1 packs still open on this server.
+
+Process-kill tests stop the server at a named stage and reopen the directory.
+That is not a power-loss test. The kill happens after the fsync for stages
+that claim the bytes are durable, but the kernel can still hold data a power
+cut would drop, and SQLite's default `synchronous=NORMAL` can lose the last
+committed metadata transaction on power loss.
+
 Completing a snapshot reads every referenced blob. Unencrypted blobs must hash
 to their digest. Encrypted blobs must be present; the server has no key, and
 the agent checks the AEAD tag while restoring. A failure marks the snapshot

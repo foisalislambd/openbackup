@@ -204,4 +204,18 @@ func TestMixedLooseV1AndV2PacksRestore(t *testing.T) {
 			t.Fatalf("digest %s: %v", tc.digest, err)
 		}
 	}
+	marker, err := os.ReadFile(packFormatPath(dir))
+	if err != nil || string(marker) != "2\n" {
+		t.Fatalf("pack-format after a v2 write: %q %v", marker, err)
+	}
+}
+
+func TestNewerPackFormatIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(packFormatPath(dir), []byte("99\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewFSBlobs(dir); err == nil {
+		t.Fatal("opened a repository newer than this server")
+	}
 }

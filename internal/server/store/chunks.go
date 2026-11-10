@@ -303,6 +303,10 @@ func (db *DB) ClaimUnreferencedChunk(ctx context.Context, digest string, deleteB
 			return false, err
 		}
 	}
+	// The blob delete is already done. A kill here rolls the row back, so the
+	// deletion was not acknowledged. Nothing that committed a snapshot
+	// reference can be in this branch: the DELETE matched zero rows otherwise.
+	crashWait("gc-before-commit")
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
