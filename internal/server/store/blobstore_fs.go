@@ -67,8 +67,16 @@ func NewFSBlobs(root string) (*FSBlobs, error) {
 // Location returns the base directory.
 func (b *FSBlobs) Location() string { return b.root }
 
+// FreeBytesOverride replaces the filesystem reading. It is nil outside tests.
+var FreeBytesOverride func() int64
+
 // FreeBytes reports free space on the volume holding the blobs.
-func (b *FSBlobs) FreeBytes() int64 { return freeDiskBytes(b.root) }
+func (b *FSBlobs) FreeBytes() int64 {
+	if FreeBytesOverride != nil {
+		return FreeBytesOverride()
+	}
+	return freeDiskBytes(b.root)
+}
 
 // path maps a digest to its file, sharded two levels deep. Two levels of 256
 // keeps directories under a few thousand entries for repositories into the

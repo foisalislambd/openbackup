@@ -149,12 +149,20 @@ func (b *FSBlobs) sealSmall(parts []BlobPart, indexes []int, written []int64) er
 	}
 	tmpDir := filepath.Join(b.root, "tmp")
 	packPath := filepath.Join(dir, id)
+	if err := fault("pack-publish"); err != nil {
+		return err
+	}
 	if err := writeDurable(tmpDir, packPath, raw); err != nil {
 		return err
 	}
 	idxBytes, err := encodeIdx(recs)
 	if err != nil {
 		_ = os.Remove(packPath)
+		return err
+	}
+	if err := fault("idx-publish"); err != nil {
+		// The pack bytes are durable. Leaving them in place is the crash
+		// between the pack rename and the index rename; the next open scans.
 		return err
 	}
 	if err := writeDurable(tmpDir, packPath+".idx", idxBytes); err != nil {
@@ -180,6 +188,22 @@ func newPackID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(raw[:]), nil
+}
+
+// Fault, when set, fails a named stage of a pack write. Production leaves it
+// nil. Tests use it to simulate a crash or a full disk before the matching
+// durable publish. The store must not update its in-memory index, and a later
+// open must not resurrect a deletion that was already made durable.
+//
+// Stages: "pack-publish", "idx-publish", "tombstone-publish", "after-tombstone",
+// "compact-publish".
+var Fault func(stage string) error
+
+func fault(stage string) error {
+	if Fault == nil {
+		return nil
+	}
+	return Fault(stage)
 }
 
 func writeDurable(tmpDir, final string, data []byte) error {
@@ -355,6 +379,9 @@ func (b *FSBlobs) installCompacted(oldID string, payloads []BlobPart) error {
 	_ = syncDir(filepath.Join(b.root, "packs"))
 	tmpDir := filepath.Join(b.root, "tmp")
 	packPath := filepath.Join(dir, id)
+	if err := fault("compact-publish"); err != nil {
+		return err
+	}
 	if err := writeDurable(tmpDir, packPath, raw); err != nil {
 		return err
 	}
@@ -711,13 +738,19 @@ func (b *FSBlobs) appendDeletion(digest string) error {
 	} else if _, err := f.Seek(0, io.SeekEnd); err != nil {
 		return err
 	}
+	if err := fault("tombstone-publish"); err != nil {
+		return err
+	}
 	if _, err := f.Write(rec[:]); err != nil {
 		return err
 	}
 	if err := f.Sync(); err != nil {
 		return err
 	}
-	return syncDir(filepath.Dir(path))
+	if err := syncDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+	return fault("after-tombstone")
 }
 
 func loadDeletionLog(path string) (map[string]struct{}, error) {

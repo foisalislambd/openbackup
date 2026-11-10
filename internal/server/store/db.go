@@ -25,6 +25,9 @@ var ErrConflict = errors.New("store: conflict")
 // ErrInvalidPath is returned when a stored path is rejected (traversal, empty).
 var ErrInvalidPath = errors.New("store: invalid path")
 
+// ErrDiskFull is returned when the blob volume cannot accept another upload.
+var ErrDiskFull = errors.New("store: not enough free disk space")
+
 // DB wraps the metadata database.
 type DB struct {
 	sql *sql.DB

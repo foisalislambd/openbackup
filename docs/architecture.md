@@ -104,9 +104,37 @@ The default backend is the local filesystem. An S3-compatible backend exists beh
 the same interface, and the database stays local either way.
 
 Reference counting is per snapshot: a row per (snapshot, chunk). A chunk is
-deletable when no snapshot references it, which the garbage collector determines
-with a join rather than by scanning the disk. Cleanup runs in batches of 5000 so a
-large deletion never blocks uploads for long.
+deletable when no snapshot references it, it is older than 15 minutes, and no
+snapshot that is still running could have uploaded it. The collector rechecks
+that inside the write transaction and deletes the blob before the transaction
+commits. A blob delete that fails puts the row back. Cleanup runs in batches so
+a large deletion does not hold the writer for the whole set.
+
+## Upgrade, downgrade, and resource limits
+
+Upgrade the server before the agents. An older agent still uploads one chunk at
+a time; the server packs those small blobs. An older server does not read
+version-2 packs. Do not downgrade a server that has written a version-2 pack.
+Version-1 packs (the first cut of pack files, no per-frame checksum) and loose
+blobs (the original one-file-per-digest layout, and every blob of 512 KiB or
+more) still restore on this server. A repository can hold all three at once.
+
+`OPENBACKUP_UPLOAD_BUDGET` (default 64 MiB) is the sum, across every device, of
+each upload's larger of wire size and the plaintext length stored in the blob
+header. A caller-supplied length that is smaller does not reduce the charge,
+and the reservation is taken before the blob is decoded. A request that cannot
+fit is rejected. It is not a cap on the process heap. `memory_limit_bytes` on
+the agent defaults to 128 MiB (`-1` disables it). The server applies the same
+128 MiB target when `GOMEMLIMIT` is unset. Uploads are also refused when the
+blob volume has less than 8 MiB free. `OPENBACKUP_SQLITE_SYNC=FULL` makes
+metadata commits durable across power loss; the default remains
+`synchronous=NORMAL`.
+
+Completing a snapshot reads every referenced blob. Unencrypted blobs must hash
+to their digest. Encrypted blobs must be present; the server has no key, and
+the agent checks the AEAD tag while restoring. A failure marks the snapshot
+failed. A deletion that returns an error has not been acknowledged: the blob
+stays visible until a later open applies a tombstone that did get written.
 
 ## The agent's parts
 

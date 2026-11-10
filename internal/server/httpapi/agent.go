@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -270,16 +271,16 @@ func (s *Server) handlePutChunk(w http.ResponseWriter, r *http.Request, device *
 	}
 
 	if err := s.checkQuota(r, device.UserID); err != nil {
-		writeError(w, http.StatusInsufficientStorage, api.CodeQuotaExceeded, err.Error())
+		writeQuota(w, err)
 		return
 	}
 
-	release, err := s.admitUpload(r, s.cfg.MaxChunkBytes)
+	release, held, err := s.admitUpload(r, s.cfg.MaxChunkBytes)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "", "server is busy")
 		return
 	}
-	defer release()
+	defer func() { release() }()
 
 	blob, cleanup, err := readUpload(r.Body, r.ContentLength, s.cfg.MaxChunkBytes)
 	defer cleanup()
@@ -292,15 +293,29 @@ func (s *Server) handlePutChunk(w http.ResponseWriter, r *http.Request, device *
 		return
 	}
 
+	// Charge the blob header's plaintext claim before Decode. Decode allocates
+	// from that claim, and a small compressed body must not pass admission
+	// just because the caller under-reports X-OpenBackup-Plain-Length.
+	claimed, err := codec.DeclaredPlainLen(blob)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "", "chunk header is not a valid blob")
+		return
+	}
+	plainCharge := int64(claimed)
+	if hint, hintErr := strconv.ParseInt(r.Header.Get(api.HeaderChunkPlainLen), 10, 64); hintErr == nil && hint > plainCharge {
+		plainCharge = hint
+	}
+	release, held, err = s.widenAdmission(r.Context(), release, held, int64(len(blob)), plainCharge)
+	if err != nil {
+		writeUploadAdmission(w, err)
+		return
+	}
+
 	// Verify content addressing whenever possible. For unencrypted blobs the
 	// server can decode and re-hash, which catches a broken agent or a corrupt
 	// proxy before the data is committed. Encrypted blobs carry their own AEAD
 	// tag and are verified by the client on restore, since the server has no key.
 	if !codec.IsEncrypted(blob) {
-		// A plaintext chunk can be verified against its digest, which catches a
-		// corrupted upload before it is stored under the wrong name. Encrypted
-		// chunks are opaque by design, so integrity there rests on the AEAD tag
-		// the agent checks when restoring.
 		plain, err := s.codec.Decode(blob)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "", "chunk could not be decoded: "+err.Error())
@@ -309,6 +324,13 @@ func (s *Server) handlePutChunk(w http.ResponseWriter, r *http.Request, device *
 		if !store.VerifyDigest(digest, plain) {
 			writeError(w, http.StatusBadRequest, "", "chunk content does not match its digest")
 			return
+		}
+		if int64(len(plain)) > plainCharge {
+			release, held, err = s.widenAdmission(r.Context(), release, held, int64(len(blob)), int64(len(plain)))
+			if err != nil {
+				writeUploadAdmission(w, err)
+				return
+			}
 		}
 		if s.requiresEncryption(r, device) {
 			writeError(w, http.StatusBadRequest, api.CodeEncryptionRequired,
@@ -349,12 +371,12 @@ func (s *Server) handlePutChunkBatch(w http.ResponseWriter, r *http.Request, dev
 	if bodyLimit < limit {
 		bodyLimit = limit
 	}
-	release, err := s.admitUpload(r, bodyLimit)
+	release, held, err := s.admitUpload(r, bodyLimit)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "", "server is busy")
 		return
 	}
-	defer release()
+	defer func() { release() }()
 
 	body, cleanup, err := readUpload(r.Body, r.ContentLength, bodyLimit)
 	defer cleanup()
@@ -367,8 +389,33 @@ func (s *Server) handlePutChunkBatch(w http.ResponseWriter, r *http.Request, dev
 		writeError(w, http.StatusBadRequest, "", err.Error())
 		return
 	}
+	var plainSum int64
+	for _, blob := range blobs {
+		claimed, err := codec.DeclaredPlainLen(blob.Blob)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "", "chunk header is not a valid blob")
+			return
+		}
+		n := int64(claimed)
+		if int64(blob.PlainLen) > n {
+			n = int64(blob.PlainLen)
+		}
+		if n < 0 || plainSum > math.MaxInt64-n {
+			writeUploadAdmission(w, errUploadTooLarge)
+			return
+		}
+		plainSum += n
+	}
+	// Charge the header's plaintext claim before decoding. A batch field that
+	// under-reports the size must not let several agents expand small bodies
+	// into concurrent decoded chunks.
+	release, held, err = s.widenAdmission(r.Context(), release, held, int64(len(body)), plainSum)
+	if err != nil {
+		writeUploadAdmission(w, err)
+		return
+	}
 	if err := s.checkQuota(r, device.UserID); err != nil {
-		writeError(w, http.StatusInsufficientStorage, api.CodeQuotaExceeded, err.Error())
+		writeQuota(w, err)
 		return
 	}
 
@@ -429,6 +476,50 @@ func (s *Server) handlePutChunkBatch(w http.ResponseWriter, r *http.Request, dev
 	}
 	s.addUsage(device.UserID, total)
 	w.WriteHeader(http.StatusCreated)
+}
+
+func writeUploadAdmission(w http.ResponseWriter, err error) {
+	if errors.Is(err, errUploadTooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, "", "upload exceeds the server's in-flight memory budget")
+		return
+	}
+	writeError(w, http.StatusServiceUnavailable, "", "server is busy")
+}
+
+func writeQuota(w http.ResponseWriter, err error) {
+	if errors.Is(err, store.ErrDiskFull) {
+		writeError(w, http.StatusInsufficientStorage, "", err.Error())
+		return
+	}
+	writeError(w, http.StatusInsufficientStorage, api.CodeQuotaExceeded, err.Error())
+}
+
+// auditSnapshotBlobs reads every blob a snapshot references. A completed
+// snapshot must not point at a missing file or, for an unencrypted blob, at
+// bytes that do not hash to the digest. Encrypted blobs are checked for
+// presence; the server has no key, and the agent checks the AEAD tag on restore.
+func (s *Server) auditSnapshotBlobs(ctx context.Context, snapshotID string) (string, error) {
+	var problem string
+	err := s.db.IterateSnapshotChunks(ctx, snapshotID, func(digest string) error {
+		blob, err := s.blobs.Get(ctx, digest)
+		if errors.Is(err, store.ErrBlobNotFound) {
+			problem = "snapshot references missing blob " + digest
+			return store.ErrStopIteration
+		}
+		if err != nil {
+			return err
+		}
+		if codec.IsEncrypted(blob) {
+			return nil
+		}
+		plain, err := s.codec.Decode(blob)
+		if err != nil || !store.VerifyDigest(digest, plain) {
+			problem = "snapshot references corrupt blob " + digest
+			return store.ErrStopIteration
+		}
+		return nil
+	})
+	return problem, err
 }
 
 func (s *Server) putMany(r *http.Request, parts []store.BlobPart) ([]int64, error) {
@@ -574,6 +665,16 @@ func (s *Server) handleCompleteSnapshot(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadRequest, "", "invalid request body")
 		return
 	}
+	if req.Error == "" {
+		problem, err := s.auditSnapshotBlobs(r.Context(), snapshotID)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		if problem != "" {
+			req.Error = problem
+		}
+	}
 	if err := s.db.CompleteSnapshot(r.Context(), snapshotID, req); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusConflict, "", "snapshot is not open")
@@ -698,7 +799,14 @@ func (s *Server) assertSnapshotOwner(r *http.Request, device *store.Device, snap
 
 // checkQuota enforces the account storage limit, with a short cache so a backup
 // of ten thousand chunks does not run ten thousand aggregate queries.
+// minFreeDisk refuses uploads when the volume is this close to full. The
+// check is racy with other writers; the store still cleans up a failed write.
+const minFreeDisk int64 = 8 << 20
+
 func (s *Server) checkQuota(r *http.Request, userID string) error {
+	if free := s.blobs.FreeBytes(); free >= 0 && free < minFreeDisk {
+		return store.ErrDiskFull
+	}
 	user, err := s.db.UserByID(r.Context(), userID)
 	if err != nil {
 		return err

@@ -308,3 +308,29 @@ func (db *DB) ClaimUnreferencedChunk(ctx context.Context, digest string, deleteB
 	}
 	return true, nil
 }
+
+// IterateSnapshotChunks calls fn for every digest referenced by a snapshot.
+// fn returning errStopIteration ends the walk without an error.
+func (db *DB) IterateSnapshotChunks(ctx context.Context, snapshotID string, fn func(digest string) error) error {
+	rows, err := db.sql.QueryContext(ctx, `SELECT digest FROM snapshot_chunks WHERE snapshot_id = ?`, snapshotID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var digest string
+		if err := rows.Scan(&digest); err != nil {
+			return err
+		}
+		if err := fn(digest); err != nil {
+			if errors.Is(err, ErrStopIteration) {
+				return nil
+			}
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+// ErrStopIteration ends IterateSnapshotChunks early.
+var ErrStopIteration = errors.New("store: stop iteration")

@@ -29,6 +29,9 @@ older agent keeps working against a newer server, so upgrade the server first.
 - Pack files now checksum each frame. A missing or truncated index is rebuilt from the pack, and a truncated pack keeps only complete frames. Deleting a packed blob records a checksummed tombstone and rewrites the pack so the bytes are reclaimed. Version 1 packs still restore.
 - The desktop window polls every 15 seconds while idle and every 2 seconds while a backup is running, and re-reads configuration only when the file changes. Dashboard polls do not overlap. Maintenance skips the integrity sample on the startup pass and vacuums only after a large reclaim.
 - `memory_limit_bytes` defaults to 128 MiB (`-1` disables it). The server sets the same target when `GOMEMLIMIT` is unset.
+- The upload budget charges the larger of the wire size and the plaintext length in the blob header, across every device at once, before the blob is decoded. A caller-supplied length that understates the header does not reduce the charge. A request that cannot fit is rejected. Uploads stop when the blob volume has less than 8 MiB free.
+- Completing a snapshot reads each referenced blob. A missing blob, or an unencrypted blob that does not match its digest, marks the snapshot failed.
+- Changing `.openbackupignore` updates the watcher before the next event is queued.
 
 ### Fixed
 

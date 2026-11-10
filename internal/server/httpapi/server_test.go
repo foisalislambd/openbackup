@@ -40,6 +40,13 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	cfg := config.Default()
+	cfg.RetentionDays = 30
+	return newHarnessCfg(t, cfg)
+}
+
+func newHarnessCfg(t *testing.T, cfg config.Config) *harness {
+	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
 
@@ -54,9 +61,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("NewFSBlobs: %v", err)
 	}
 
-	cfg := config.Default()
 	cfg.DataDir = dir
-	cfg.RetentionDays = 30
 	srv, err := httpapi.New(httpapi.Options{
 		Config: cfg,
 		DB:     db,
