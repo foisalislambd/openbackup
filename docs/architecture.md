@@ -126,7 +126,12 @@ and the reservation is taken before the blob is decoded. A request that cannot
 fit is rejected. It is not a cap on the process heap. `memory_limit_bytes` on
 the agent defaults to 128 MiB (`-1` disables it). The server applies the same
 128 MiB target when `GOMEMLIMIT` is unset. Uploads are also refused when the
-blob volume has less than 8 MiB free. `OPENBACKUP_SQLITE_SYNC=FULL` makes
+blob volume has less than 8 MiB free. Pack and index files are fsynced before
+rename on every OS. Linux and macOS also fsync the directory. Windows rejects
+that directory flush (`FlushFileBuffers` returns access denied on a directory
+handle); the file fsync still happens, and a crash in the moment after the
+rename can drop the new directory entry until the volume flushes it.
+`OPENBACKUP_SQLITE_SYNC=FULL` makes
 metadata commits durable across power loss; the default remains
 `synchronous=NORMAL`.
 

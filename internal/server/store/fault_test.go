@@ -10,6 +10,12 @@ import (
 	"github.com/foisalislambd/openbackup/internal/hash"
 )
 
+func TestSyncDirOnARealDirectory(t *testing.T) {
+	if err := syncDir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPackPublishFaultLeavesNothingBehind(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

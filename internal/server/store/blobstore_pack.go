@@ -13,7 +13,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/foisalislambd/openbackup/internal/hash"
 )
@@ -240,7 +242,25 @@ func syncDir(dir string) error {
 	}
 	err = f.Sync()
 	_ = f.Close()
+	// Windows rejects FlushFileBuffers on a directory opened for read
+	// (ERROR_ACCESS_DENIED or ERROR_INVALID_FUNCTION). The file itself was
+	// already synced before rename. There is no stronger directory flush
+	// available, so this is not a failed fsync of file bytes.
+	if err != nil && dirSyncUnsupported(err) {
+		return nil
+	}
 	return err
+}
+
+func dirSyncUnsupported(err error) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return false
+	}
+	return errno == 5 || errno == 1
 }
 
 func encodeIdx(recs []packRecord) ([]byte, error) {
